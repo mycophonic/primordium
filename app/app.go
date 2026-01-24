@@ -9,16 +9,11 @@ import (
 	"github.com/farcloser/primordium/network"
 )
 
-// Application is the requirement for app lifecycle to start .
-type Application interface {
-	Name() string
-}
-
 // New does configure application lifecycle.
-func New(ctx context.Context, definition Application) {
+func New(ctx context.Context, name string) {
 	logger.SetDefaultsForLogger(ctx)
 	network.SetDefaults()
 	shutdown.SetDefaults(ctx)
 
-	filesystem.Inititalize(definition.Name())
+	filesystem.Inititalize(name)
 }
