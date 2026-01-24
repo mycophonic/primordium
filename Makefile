@@ -111,8 +111,6 @@ lint-licenses:
 	@cd $(MAKEFILE_DIR) \
 		&& go-licenses check --include_tests --allowed_licenses=Apache-2.0,BSD-2-Clause,BSD-3-Clause,MIT,MPL-2.0 \
 		  --ignore gotest.tools \
-		  --ignore github.com/in-toto \
-		  --ignore github.com/cyberphone/json-canonicalization \
 		  ./...
 	$(call footer, $@)
 
