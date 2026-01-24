@@ -1,6 +1,6 @@
-NAME := "NAME"
+NAME := NAME
 ICON := "🧿"
-ORG := "github.com/farcloser"
+ORG := github.com/farcloser
 
 MAKEFILE_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 VERSION ?= $(shell git -C $(MAKEFILE_DIR) describe --match 'v[0-9]*' --dirty='.m' --always --tags 2>/dev/null \
@@ -64,10 +64,10 @@ lint-go:
 lint-go-all:
 	$(call title, $@)
 	@cd $(MAKEFILE_DIR) \
-		&& GOOS=darwin make lint-go \
-		&& GOOS=linux make lint-go \
-		&& GOOS=freebsd make lint-go \
-		&& GOOS=windows make lint-go
+		&& GOOS=darwin $(MAKE) lint-go \
+		&& GOOS=linux $(MAKE) lint-go \
+		&& GOOS=freebsd $(MAKE) lint-go \
+		&& GOOS=windows $(MAKE) lint-go
 	$(call footer, $@)
 
 lint-yaml:
@@ -119,10 +119,10 @@ lint-licenses:
 lint-licenses-all:
 	$(call title, $@)
 	@cd $(MAKEFILE_DIR) \
-		&& GOOS=darwin make lint-licenses \
-		&& GOOS=linux make lint-licenses \
-		&& GOOS=freebsd make lint-licenses \
-		&& GOOS=windows make lint-licenses
+		&& GOOS=darwin $(MAKE) lint-licenses \
+		&& GOOS=linux $(MAKE) lint-licenses \
+		&& GOOS=freebsd $(MAKE) lint-licenses \
+		&& GOOS=windows $(MAKE) lint-licenses
 	$(call footer, $@)
 
 ##########################
@@ -137,10 +137,10 @@ fix-go:
 fix-go-all:
 	$(call title, $@)
 	@cd $(MAKEFILE_DIR) \
-		&& GOOS=darwin make fix-go \
-		&& GOOS=linux make fix-go \
-		&& GOOS=freebsd make fix-go \
-		&& GOOS=windows make fix-go
+		&& GOOS=darwin $(MAKE) fix-go \
+		&& GOOS=linux $(MAKE) fix-go \
+		&& GOOS=freebsd $(MAKE) fix-go \
+		&& GOOS=windows $(MAKE) fix-go
 	$(call footer, $@)
 
 fix-mod:
