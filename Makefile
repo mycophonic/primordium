@@ -1,13 +1,15 @@
-ORG_PREFIXES := "github.com/farcloser"
+NAME := "NAME"
 ICON := "🧿"
+ORG := "github.com/farcloser"
 
 MAKEFILE_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 VERSION ?= $(shell git -C $(MAKEFILE_DIR) describe --match 'v[0-9]*' --dirty='.m' --always --tags 2>/dev/null \
 	|| echo "no_git_information")
 VERSION_TRIMMED := $(VERSION:v%=%)
-REVISION ?= $(shell git -C $(MAKEFILE_DIR) rev-parse HEAD 2>/dev/null || echo "no_git_information")$(shell \
+COMMIT ?= $(shell git -C $(MAKEFILE_DIR) rev-parse HEAD 2>/dev/null || echo "no_git_information")$(shell \
 	if ! git -C $(MAKEFILE_DIR) diff --no-ext-diff --quiet --exit-code 2>/dev/null; then echo .m; fi)
 LINT_COMMIT_RANGE ?= main..HEAD
+DATE = "$(shell date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 ifdef VERBOSE
 	VERBOSE_FLAG := -v
@@ -54,7 +56,7 @@ unit: test-unit test-unit-race test-unit-bench ## Run unit tests
 # Linting tasks
 ##########################
 lint-go:
-	$(call title, $@)
+	$(call title, $@ $(GOOS))
 	@cd $(MAKEFILE_DIR) \
 		&& golangci-lint run $(VERBOSE_FLAG_LONG) ./...
 	$(call footer, $@)
@@ -206,7 +208,6 @@ test-unit-race:
 	test \
 	up \
 	unit \
-	generate \
 	install-dev-tools install-dev-gotestsum install-dev-jsonschema \
 	lint-commits lint-go lint-go-all lint-headers lint-licenses lint-licenses-all lint-mod lint-shell lint-yaml \
 	fix-go fix-go-all fix-mod \
@@ -215,34 +216,3 @@ test-unit-race:
 
 # Default target
 .DEFAULT_GOAL := help
-
-# Binary name
-BINARY_NAME=quark
-BINARY_PATH=./bin/$(BINARY_NAME)
-
-# Go parameters
-GOCMD=go
-GOBUILD=$(GOCMD) build
-GOINSTALL=$(GOCMD) install
-
-generate: install-dev-jsonschema ## Generate code from schemas
-	$(call title, $@)
-	@cd $(MAKEFILE_DIR) \
-		&& go generate ./...
-	$(call footer, $@)
-
-build: ## Build the binary
-	@echo "Building $(BINARY_NAME)..."
-	@mkdir -p bin
-	$(GOBUILD) -o $(BINARY_PATH) ./cmd/$(BINARY_NAME)
-	@echo "Binary built: $(BINARY_PATH)"
-
-install: ## Install to GOPATH/bin
-	@echo "Installing $(BINARY_NAME)..."
-	$(GOINSTALL) ./cmd/$(BINARY_NAME)
-	@echo "Installed to $$(go env GOPATH)/bin/$(BINARY_NAME)"
-
-clean: ## Clean build artifacts
-	@echo "Cleaning..."
-	@rm -rf bin/$(BINARY_NAME)
-	@echo "Clean complete"
