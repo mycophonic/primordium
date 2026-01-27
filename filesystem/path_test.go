@@ -82,9 +82,9 @@ func TestValidateSocketPath_BoundaryLengths(t *testing.T) {
 	var maxUsable int
 
 	switch runtime.GOOS {
-	case "osLinux":
+	case "linux":
 		maxUsable = 107 // 108 - 1 for null terminator
-	case "osWindows":
+	case "windows":
 		// Windows doesn't have Unix sockets in the traditional sense
 		t.Skip("Windows does not have Unix socket path limits")
 	default:
@@ -170,7 +170,7 @@ func TestFilesystemRestrictions(t *testing.T) {
 		"∞",
 	}
 
-	if runtime.GOOS == "osWindows" {
+	if runtime.GOOS == "windows" {
 		invalid = append(invalid, []string{
 			"\\start",
 			"mid\\dle",
