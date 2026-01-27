@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -36,6 +37,9 @@ func ValidatePathComponent(pathComponent string) error {
 // ValidatePath validates a full path by checking each component.
 // Returns an error if any component is invalid.
 func ValidatePath(path string) error {
+	// Strip volume name (e.g., "C:" on Windows) — it is not a path component
+	path = path[len(filepath.VolumeName(path)):]
+
 	// Iterate over path components
 	for component := range strings.SplitSeq(path, string(os.PathSeparator)) {
 		// Skip empty components (from leading/trailing/double separators)

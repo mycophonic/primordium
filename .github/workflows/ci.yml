@@ -56,8 +56,12 @@ jobs:
         run: make lint-shell
 
   test:
-    name: Test
-    runs-on: ubuntu-24.04
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     steps:
       - name: Checkout code
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
@@ -73,3 +77,16 @@ jobs:
 
       - name: Run race detector tests
         run: make test-unit-race
+
+  test-success:
+    name: Test
+    if: always()
+    needs: [test]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check test matrix results
+        run: |
+          if [[ "${{ needs.test.result }}" != "success" ]]; then
+            echo "Test matrix failed: ${{ needs.test.result }}"
+            exit 1
+          fi
