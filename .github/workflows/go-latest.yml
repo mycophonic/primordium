@@ -49,8 +49,12 @@ jobs:
         run: make lint-shell
 
   test:
-    name: Test (Go Latest)
-    runs-on: ubuntu-24.04
+    name: Test (Go Latest, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15, windows-2025]
     steps:
       - name: Checkout code
         uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3  # v6.0.0
