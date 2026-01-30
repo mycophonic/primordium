@@ -3,10 +3,10 @@ package app
 import (
 	"context"
 
-	"github.com/farcloser/primordium/app/logger"
-	"github.com/farcloser/primordium/app/shutdown"
-	"github.com/farcloser/primordium/filesystem"
-	"github.com/farcloser/primordium/network"
+	"github.com/mycophonic/primordium/app/logger"
+	"github.com/mycophonic/primordium/app/shutdown"
+	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/network"
 )
 
 // New does configure application lifecycle.

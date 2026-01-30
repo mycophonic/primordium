@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/crypto/blake2b"
 
-	"github.com/farcloser/primordium/fault"
+	"github.com/mycophonic/primordium/fault"
 )
 
 // Supported digest algorithms.

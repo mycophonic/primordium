@@ -6,8 +6,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/farcloser/primordium/fault"
-	"github.com/farcloser/primordium/filesystem"
+	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem"
 )
 
 func TestValidatePath_PathTraversal(t *testing.T) {

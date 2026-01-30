@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/farcloser/primordium/fault"
+	"github.com/mycophonic/primordium/fault"
 )
 
 func TestSentinelErrors_Exist(t *testing.T) {

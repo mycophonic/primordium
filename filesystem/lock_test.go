@@ -26,7 +26,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
-	"github.com/farcloser/primordium/filesystem"
+	"github.com/mycophonic/primordium/filesystem"
 )
 
 // Note: these tests are NOT racy - the entire point here is to prove that the filesystem lock is effectively protecting

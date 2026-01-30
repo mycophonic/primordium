@@ -1,4 +1,4 @@
-module github.com/farcloser/primordium
+module github.com/mycophonic/primordium
 
 go 1.25.6
 

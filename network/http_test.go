@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/farcloser/primordium/network"
+	"github.com/mycophonic/primordium/network"
 )
 
 func TestMain(m *testing.M) {

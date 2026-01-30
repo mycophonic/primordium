@@ -8,7 +8,7 @@ import (
 	"runtime"
 	"strings"
 
-	"github.com/farcloser/primordium/fault"
+	"github.com/mycophonic/primordium/fault"
 )
 
 var (
