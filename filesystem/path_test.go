@@ -9,8 +9,8 @@ import (
 
 	"gotest.tools/v3/assert"
 
-	"github.com/farcloser/primordium/fault"
-	"github.com/farcloser/primordium/filesystem"
+	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem"
 )
 
 func TestValidateSocketPath_BoundaryLengths(t *testing.T) {

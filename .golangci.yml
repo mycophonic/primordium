@@ -262,7 +262,7 @@ linters:
             - $all
           allow:
             - $gostd
-            - github.com/farcloser/primordium
+            - github.com/mycophonic/primordium
             - github.com/rs/zerolog
             - github.com/samber/slog-zerolog/v2
             - golang.org/x/crypto/blake2b

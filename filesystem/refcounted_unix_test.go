@@ -5,7 +5,7 @@ package filesystem_test
 import (
 	"testing"
 
-	"github.com/farcloser/primordium/filesystem"
+	"github.com/mycophonic/primordium/filesystem"
 )
 
 func TestNewLocker_PanicsOnInvalidPath(t *testing.T) {

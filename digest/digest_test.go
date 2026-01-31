@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/farcloser/primordium/digest"
-	"github.com/farcloser/primordium/fault"
+	"github.com/mycophonic/primordium/digest"
+	"github.com/mycophonic/primordium/fault"
 )
 
 func TestFromString_ValidDigests(t *testing.T) {

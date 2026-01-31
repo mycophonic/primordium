@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/farcloser/primordium/fault"
+	"github.com/mycophonic/primordium/fault"
 )
 
 const (

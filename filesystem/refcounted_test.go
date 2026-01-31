@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/farcloser/primordium/fault"
-	"github.com/farcloser/primordium/filesystem"
+	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem"
 )
 
 func TestLocker_InvalidKey(t *testing.T) {
