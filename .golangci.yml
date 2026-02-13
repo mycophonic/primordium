@@ -265,6 +265,7 @@ linters:
             - github.com/mycophonic/primordium
             - github.com/rs/zerolog
             - github.com/samber/slog-zerolog/v2
+            - github.com/getsentry/sentry-go
             - golang.org/x/crypto/blake2b
             - golang.org/x/crypto/ssh
             - golang.org/x/sys/windows
