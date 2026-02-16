@@ -1,7 +1,7 @@
 //go:build darwin || dragonfly || freebsd || illumos || linux || netbsd || openbsd
 
 /*
-   Copyright Farcloser.
+   Copyright Mycophonic.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.

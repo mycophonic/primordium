@@ -8,6 +8,13 @@
 
 ## Purpose
 
-Primordium provides generic helpers for all Farcloser audio Go project.
-These include filesystem helpers (locking, atomic writes, OS specific limitations handling, refcounting), networking
-(secure defaults for ssh and http), standarized errors, output formatting helpers, digest computation, etc.
+Primordium provides generic helpers for all Mycophonic audio Go project.
+
+- a filesystem layer that provides locking, atomic writes, buffered readers and writers,
+OS specific limitations handling, ref-counting
+- networking secure defaults for ssh and http
+- standardized errors
+- output formatting helpers
+- digest computation
+- logger configuration helpers and other "app" oriented helpers
+- SIMD assembly for audio processing

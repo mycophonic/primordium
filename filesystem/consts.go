@@ -1,5 +1,5 @@
 /*
-   Copyright Farcloser.
+   Copyright Mycophonic.
 
    Licensed under the Apache License, Version 2.0 (the "License");
    you may not use this file except in compliance with the License.
@@ -29,4 +29,5 @@ const (
 
 	defaultUmask           uint32 = 0o077
 	pathComponentMaxLength int    = 255
+	defaultBufferSize      int    = 4096
 )

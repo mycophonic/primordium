@@ -1,3 +1,19 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
 package filesystem
 
 import "errors"
@@ -18,6 +34,8 @@ var (
 	ErrInvalidPath = errors.New("invalid path")
 	// ErrGenericFailure is a generic error indicating a filesystem level failure.
 	ErrGenericFailure = errors.New("a filesystem level failure happened")
+	// ErrBufferFailure is returned when a buffered I/O operation fails.
+	ErrBufferFailure = errors.New("buffered I/O failure")
 
 	errInvalidPathTooLong = errors.New("path component must be stricly shorter than 256 characters")
 	errInvalidPathEmpty   = errors.New("path component cannot be empty")
