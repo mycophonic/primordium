@@ -42,7 +42,7 @@ const (
 	reserved = 0
 	allBytes = ^uint32(0)
 
-	lockPermission = 0o600
+	lockPermission = FilePermissionsPrivate
 )
 
 //nolint:wrapcheck

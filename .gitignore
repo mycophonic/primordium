@@ -2,4 +2,6 @@
 .idea
 _*
 bin
+tmp
 third-party
+generated
