@@ -3,6 +3,7 @@ module github.com/mycophonic/primordium
 go 1.25.7
 
 require (
+	github.com/getsentry/sentry-go v0.42.0
 	github.com/rs/zerolog v1.34.0
 	github.com/samber/slog-zerolog/v2 v2.9.1
 	golang.org/x/crypto v0.48.0
