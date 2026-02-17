@@ -170,6 +170,37 @@ func TestReadSeeker_SeekCurrentBeyondBuffer(t *testing.T) {
 	assert.Assert(t, buf[0] == 'Y', "should read 'Y' at position 100, got %q", buf[0])
 }
 
+func TestReadSeeker_SeekCurrentNegative(t *testing.T) {
+	t.Parallel()
+
+	// Regression: negative SeekCurrent must account for unconsumed buffer bytes.
+	// The underlying source is ahead of the logical position by (end - off) bytes.
+	// Without the fix, Seek(-N, SeekCurrent) passed the raw offset to the source,
+	// landing at (source_pos - N) instead of (logical_pos - N).
+	data := []byte("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghij") // 36 bytes
+	rs := filesystem.NewReadSeekerWithSize(bytes.NewReader(data), 16)
+
+	// Read 4 bytes. Buffer fills with 16 bytes, off=4, end=16.
+	// Logical position: 4. Source position: 16.
+	buf := make([]byte, 4)
+	_, err := rs.Read(buf)
+	assert.NilError(t, err)
+	assert.Assert(t, bytes.Equal(buf, []byte("ABCD")))
+
+	// Seek(-4, SeekCurrent) should go back to position 0.
+	// Without fix: source.Seek(-4, SeekCurrent) → pos 12 (wrong).
+	// With fix: offset adjusted by -12 unconsumed → source.Seek(-16, SeekCurrent) → pos 0.
+	pos, err := rs.Seek(-4, io.SeekCurrent)
+	assert.NilError(t, err, "negative SeekCurrent should succeed")
+	assert.Assert(t, pos == 0, "position should be 0, got %d", pos)
+
+	// Read from position 0 — must get the original first 4 bytes.
+	_, err = rs.Read(buf)
+	assert.NilError(t, err)
+	assert.Assert(t, bytes.Equal(buf, []byte("ABCD")),
+		"read after negative seek should return 'ABCD', got %q", buf)
+}
+
 func TestReadSeeker_SeekEnd(t *testing.T) {
 	t.Parallel()
 
