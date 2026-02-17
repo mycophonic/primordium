@@ -91,20 +91,23 @@ func (rs *ReadSeeker) Read(dest []byte) (int, error) {
 //
 //nolint:wrapcheck // I/O wrapper must return unwrapped errors
 func (rs *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
-	// Optimize small forward seeks within buffered data.
-	if whence == io.SeekCurrent && offset >= 0 {
-		newOff := rs.off + int(offset)
-		if newOff <= rs.end {
-			rs.off = newOff
+	// For SeekCurrent, adjust offset to account for buffered but unconsumed bytes.
+	// The underlying source is ahead of the logical read position by (rs.end - rs.off).
+	if whence == io.SeekCurrent {
+		// Optimize small forward seeks within buffered data.
+		if offset >= 0 {
+			newOff := rs.off + int(offset)
+			if newOff <= rs.end {
+				rs.off = newOff
 
-			// Ask the underlying source for the absolute position.
-			// The source is ahead of our read position by (rs.end - rs.off) bytes.
-			pos, err := rs.source.Seek(0, io.SeekCurrent)
-			if err != nil {
-				return 0, err
+				// Ask the underlying source for the absolute position.
+				pos, err := rs.source.Seek(0, io.SeekCurrent)
+				if err != nil {
+					return 0, err
+				}
+
+				return pos - int64(rs.end-rs.off), nil
 			}
-
-			return pos - int64(rs.end-rs.off), nil
 		}
 
 		// Adjust offset to account for buffered but unconsumed bytes.
