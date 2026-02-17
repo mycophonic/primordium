@@ -181,6 +181,9 @@ lint-licenses:
 		  ./...
 	$(call footer, $@)
 
+ifeq ($(CGO_ENABLED),1)
+lint-licenses-all: lint-licenses
+else
 lint-licenses-all:
 	$(call title, $@)
 	@cd $(PROJECT_DIR) \
@@ -189,6 +192,7 @@ lint-licenses-all:
 		&& GOOS=freebsd $(MAKE) lint-licenses \
 		&& GOOS=windows $(MAKE) lint-licenses
 	$(call footer, $@)
+endif
 
 ##########################
 # Automated fixing tasks
@@ -199,6 +203,9 @@ fix-go:
 		&& golangci-lint run --fix
 	$(call footer, $@)
 
+ifeq ($(CGO_ENABLED),1)
+fix-go-all: fix-go
+else
 fix-go-all:
 	$(call title, $@)
 	@cd $(PROJECT_DIR) \
@@ -207,6 +214,7 @@ fix-go-all:
 		&& GOOS=freebsd $(MAKE) fix-go \
 		&& GOOS=windows $(MAKE) fix-go
 	$(call footer, $@)
+endif
 
 fix-mod:
 	$(call title, $@)
