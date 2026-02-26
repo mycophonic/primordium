@@ -27,15 +27,18 @@ import (
 )
 
 const (
-	cacheSubdir    = "store"
-	volatileSubdir = "volatile"
+	cacheSubdir        = "store"
+	contentIndexSubdir = "content-index"
+	volatileSubdir     = "volatile"
 )
 
 //nolint:gochecknoglobals // Global stores with lazy initialization
 var (
 	cacheStore    *Cache
+	contentStore  *ContentStore
 	volatileStore *Volatile
 	cacheOnce     sync.Once
+	contentOnce   sync.Once
 	volatileOnce  sync.Once
 )
 
@@ -52,6 +55,23 @@ func GetStoreCache() *Cache {
 	})
 
 	return cacheStore
+}
+
+// GetContentStore returns the global content store instance, initializing it on first access.
+// The content store provides identifier-based lookup over the shared cache.
+func GetContentStore() *ContentStore {
+	contentOnce.Do(func() {
+		cache := GetStoreCache()
+
+		cacheDir, err := filesystem.CacheDir()
+		if err != nil {
+			panic(fmt.Errorf("%w: %w", fault.ErrSystemFailure, err))
+		}
+
+		contentStore = NewContentStore(cache, filepath.Join(cacheDir, contentIndexSubdir))
+	})
+
+	return contentStore
 }
 
 // GetStoreVolatile returns the global volatile store instance, initializing it on first access.

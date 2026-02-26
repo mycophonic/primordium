@@ -38,8 +38,8 @@ const (
 	cacheWriteLock    = "lock.write"
 	cachePollInterval = 10 * time.Millisecond
 
-	// DefaultCacheQuota is the default disk space quota for the cache (1GB).
-	DefaultCacheQuota = 1 << 30
+	// DefaultCacheQuota is the default disk space quota for the cache (50GB).
+	DefaultCacheQuota = 50 << 30
 )
 
 // Cache provides content-addressed persistent storage with read-while-write support.

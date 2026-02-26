@@ -84,6 +84,21 @@ func (s *ContentStore) Acquire(identifier, dgst string, fetch FetchFunc) (io.Rea
 	return s.fetchAndHash(fetch, entryDir, metaPath)
 }
 
+// Invalidate removes the index entry for the given identifier.
+// The next Acquire for this identifier will be a cache miss, triggering a fresh fetch.
+// Cached content blobs are not removed — they may be shared by other identifiers
+// and will be cleaned up by Cache garbage collection.
+func (s *ContentStore) Invalidate(identifier string) error {
+	key := digest.Hashpath(identifier)
+	entryDir := filepath.Join(s.indexDir, key)
+
+	if err := os.RemoveAll(entryDir); err != nil {
+		return fmt.Errorf("%w: invalidate: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	return nil
+}
+
 // fetchWithDigest handles the miss path when the caller provides a known digest.
 // Content streams directly from fetch into the cache writer without buffering.
 func (s *ContentStore) fetchWithDigest(

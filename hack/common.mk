@@ -3,11 +3,13 @@ MAKEFILE_DIR := $(patsubst %/,%,$(dir $(abspath $(lastword $(MAKEFILE_LIST)))))
 # We need the project root instead.
 PROJECT_DIR := $(patsubst %/,%,$(dir $(MAKEFILE_DIR)))
 
-VERSION ?= $(shell git -C $(PROJECT_DIR) describe --match 'v[0-9]*' --dirty='.m' --always --tags 2>/dev/null \
+VERSION ?= $(shell git -C $(PROJECT_DIR) rev-parse --verify HEAD >/dev/null 2>&1 \
+	&& git -C $(PROJECT_DIR) describe --match 'v[0-9]*' --dirty='.m' --always --tags 2>/dev/null \
 	|| echo "no_git_information")
 VERSION_TRIMMED := $(VERSION:v%=%)
-COMMIT ?= $(shell git -C $(PROJECT_DIR) rev-parse HEAD 2>/dev/null || echo "no_git_information")$(shell \
-	if ! git -C $(PROJECT_DIR) diff-index --quiet HEAD 2>/dev/null; then echo .m; fi)
+COMMIT ?= $(shell git -C $(PROJECT_DIR) rev-parse --verify HEAD 2>/dev/null || echo "no_git_information")$(shell \
+	git -C $(PROJECT_DIR) rev-parse --verify HEAD >/dev/null 2>&1\
+	&& ! git -C $(PROJECT_DIR) diff-index --quiet HEAD 2>/dev/null && echo .m)
 LINT_COMMIT_RANGE ?= main..HEAD
 DATE = $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 UNAME_S := $(shell uname -s 2>/dev/null || echo Unknown)
