@@ -63,7 +63,7 @@ func (v *Volatile) Acquire(content []byte) (string, func(), error) {
 		dataPath := filepath.Join(dir, volatileDataFile)
 
 		// Write data if it doesn't exist (atomic write)
-		if _, err := os.Stat(dataPath); os.IsNotExist(err) {
+		if _, err := filesystem.Stat(dataPath); os.IsNotExist(err) {
 			if err := filesystem.WriteFile(dataPath, content, filesystem.FilePermissionsPrivate); err != nil {
 				return "", nil, fmt.Errorf("%w: data file: %w", fault.ErrWriteFailure, err)
 			}

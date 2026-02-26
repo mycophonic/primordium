@@ -21,7 +21,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -29,6 +28,7 @@ import (
 	"time"
 
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/store"
 )
 
@@ -507,7 +507,7 @@ func TestContentStore_CorruptIndexRefetches(t *testing.T) {
 	reader2.Close()
 
 	// Find and corrupt the meta file.
-	entries, err := os.ReadDir(indexDir)
+	entries, err := filesystem.ReadDir(indexDir)
 	if err != nil {
 		t.Fatalf("ReadDir() error: %v", err)
 	}
@@ -518,7 +518,7 @@ func TestContentStore_CorruptIndexRefetches(t *testing.T) {
 
 	metaPath := filepath.Join(indexDir, entries[0].Name(), "meta")
 
-	if err := os.WriteFile(metaPath, []byte("{{{{not json}}}}"), 0o600); err != nil {
+	if err := filesystem.WriteFile(metaPath, []byte("{{{{not json}}}}"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error: %v", err)
 	}
 
@@ -1107,7 +1107,7 @@ func TestContentStore_IndexMetadataFormat(t *testing.T) {
 	after := time.Now()
 
 	// Read the raw index file and verify structure.
-	entries, err := os.ReadDir(indexDir)
+	entries, err := filesystem.ReadDir(indexDir)
 	if err != nil {
 		t.Fatalf("ReadDir() error: %v", err)
 	}
@@ -1118,7 +1118,7 @@ func TestContentStore_IndexMetadataFormat(t *testing.T) {
 
 	metaPath := filepath.Join(indexDir, entries[0].Name(), "meta")
 
-	raw, err := os.ReadFile(metaPath)
+	raw, err := filesystem.ReadFile(metaPath)
 	if err != nil {
 		t.Fatalf("ReadFile() error: %v", err)
 	}
@@ -1163,7 +1163,7 @@ func TestContentStore_MultipleIdentifiersSeparateIndexEntries(t *testing.T) {
 		reader.Close()
 	}
 
-	entries, err := os.ReadDir(indexDir)
+	entries, err := filesystem.ReadDir(indexDir)
 	if err != nil {
 		t.Fatalf("ReadDir() error: %v", err)
 	}

@@ -49,7 +49,7 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	dataSize := int64(len(data))
 	perm = (^os.FileMode(currentMask)) & perm
 
-	tmpFile, err := os.CreateTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename))
+	tmpFile, err := CreateTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename))
 	if err != nil {
 		return errors.Join(ErrAtomicWriteFail, err)
 	}

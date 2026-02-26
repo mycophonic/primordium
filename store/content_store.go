@@ -135,17 +135,19 @@ func (s *ContentStore) fetchWithDigest(
 
 			return nil, time.Time{}, fmt.Errorf("%w: %w", fault.ErrWriteFailure, closeErr)
 		}
+
+		now := time.Now()
+
+		if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
+			_ = reader.Close()
+
+			return nil, time.Time{}, err
+		}
+
+		return reader, now, nil
 	}
 
-	now := time.Now()
-
-	if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
-		_ = reader.Close()
-
-		return nil, time.Time{}, err
-	}
-
-	return reader, now, nil
+	return reader, time.Now(), nil
 }
 
 // fetchAndHash handles the miss path when the digest is unknown.
@@ -190,17 +192,19 @@ func (s *ContentStore) fetchAndHash(
 
 			return nil, time.Time{}, fmt.Errorf("%w: %w", fault.ErrWriteFailure, closeErr)
 		}
+
+		now := time.Now()
+
+		if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
+			_ = reader.Close()
+
+			return nil, time.Time{}, err
+		}
+
+		return reader, now, nil
 	}
 
-	now := time.Now()
-
-	if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
-		_ = reader.Close()
-
-		return nil, time.Time{}, err
-	}
-
-	return reader, now, nil
+	return reader, time.Now(), nil
 }
 
 type indexEntry struct {
@@ -209,8 +213,7 @@ type indexEntry struct {
 }
 
 func readIndex(metaPath string) (*indexEntry, error) {
-	//nolint:gosec // Path constructed from digest.Hashpath output (safe hex string).
-	data, err := os.ReadFile(metaPath)
+	data, err := filesystem.ReadFile(metaPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
 	}

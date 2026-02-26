@@ -162,7 +162,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 	}
 
 	// Enumerate all folders
-	entries, err := os.ReadDir(c.rootDir)
+	entries, err := filesystem.ReadDir(c.rootDir)
 	if err != nil {
 		_ = filesystem.Unlock(globalLock)
 
@@ -191,7 +191,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 		}
 
 		// Read size of data file
-		info, err := os.Stat(dataPath)
+		info, err := filesystem.Stat(dataPath)
 		if err != nil {
 			// No data file, release dir lock and continue
 			_ = filesystem.Unlock(dirLock)
@@ -282,8 +282,7 @@ func (*Cache) acquireNoActiveWriter(
 	dirLock, lockFile, writeLock *os.File,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Case 1a: Check if complete data exists
-	//nolint:gosec // Path derived from validated digest
-	if file, err := os.Open(dataPath); err == nil {
+	if file, err := filesystem.Open(dataPath); err == nil {
 		// Complete data exists - return reader only
 		_ = filesystem.Unlock(writeLock)
 		_ = filesystem.Unlock(dirLock)
@@ -298,8 +297,7 @@ func (*Cache) acquireNoActiveWriter(
 	// Clean up any stale temp file from a previous failed write
 	_ = os.Remove(tempPath)
 
-	//nolint:gosec // Path derived from validated digest
-	file, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate)
+	file, err := filesystem.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate)
 	if err != nil {
 		_ = filesystem.Unlock(writeLock)
 		_ = filesystem.Unlock(lockFile)
@@ -309,8 +307,7 @@ func (*Cache) acquireNoActiveWriter(
 	}
 
 	// Open temp file for reading (reader will tail this file)
-	//nolint:gosec // Path derived from validated digest
-	readFile, err := os.Open(tempPath)
+	readFile, err := filesystem.Open(tempPath)
 	if err != nil {
 		_ = file.Close()
 		_ = os.Remove(tempPath)
@@ -366,8 +363,7 @@ func (*Cache) acquireActiveWriter(
 	dirLock, lockFile *os.File,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Case 2a: Try to open the temp file (writer is actively writing)
-	//nolint:gosec // Path derived from validated digest
-	if file, err := os.Open(tempPath); err == nil {
+	if file, err := filesystem.Open(tempPath); err == nil {
 		_ = filesystem.Unlock(dirLock)
 
 		return &inProgressReader{
@@ -380,8 +376,7 @@ func (*Cache) acquireActiveWriter(
 
 	// Case 2b: Temp file doesn't exist - writer may have finished between our check and open
 	// Try to read the completed data file
-	//nolint:gosec // Path derived from validated digest
-	if file, err := os.Open(dataPath); err == nil {
+	if file, err := filesystem.Open(dataPath); err == nil {
 		_ = filesystem.Unlock(dirLock)
 
 		return &cacheReader{
@@ -397,8 +392,9 @@ func (*Cache) acquireActiveWriter(
 		// We got the lock - writer is gone, we should become the writer
 		_ = os.Remove(tempPath) // Clean up any stale temp file
 
-		//nolint:gosec // Path derived from validated digest
-		file, err := os.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate)
+		file, err := filesystem.OpenFile(
+			tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate,
+		)
 		if err != nil {
 			_ = filesystem.Unlock(writeLock)
 			_ = filesystem.Unlock(lockFile)
@@ -408,8 +404,7 @@ func (*Cache) acquireActiveWriter(
 		}
 
 		// Open temp file for reading
-		//nolint:gosec // Path derived from validated digest
-		readFile, err := os.Open(tempPath)
+		readFile, err := filesystem.Open(tempPath)
 		if err != nil {
 			_ = file.Close()
 			_ = os.Remove(tempPath)
@@ -465,8 +460,7 @@ func (*Cache) acquireActiveWriter(
 }
 
 func touchFile(path string) error {
-	//nolint:gosec // Internal function, callers add context; path is controlled
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
+	file, err := filesystem.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
 	//nolint:wrapcheck
 	if err != nil {
 		return err
@@ -620,7 +614,7 @@ func (r *inProgressReader) Read(p []byte) (int, error) {
 		// Writer done - check outcome
 		_ = filesystem.Unlock(writeLock)
 
-		if _, err := os.Stat(r.dataPath); err != nil {
+		if _, err := filesystem.Stat(r.dataPath); err != nil {
 			// Write failed - data file doesn't exist
 			return 0, fault.ErrWriteFailure
 		}

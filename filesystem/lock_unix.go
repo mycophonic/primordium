@@ -37,10 +37,8 @@ const (
 	writeLock lockType = syscall.LOCK_EX
 )
 
-//nolint:wrapcheck
 func platformLock(path string, lockType lockType) (*os.File, error) {
-	//nolint:gosec
-	file, err := os.Open(path)
+	file, err := Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -63,10 +61,8 @@ func platformLock(path string, lockType lockType) (*os.File, error) {
 	return file, nil
 }
 
-//nolint:wrapcheck
 func platformTryLock(path string, lockType lockType) (*os.File, error) {
-	//nolint:gosec
-	file, err := os.Open(path)
+	file, err := Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +84,10 @@ func platformTryLock(path string, lockType lockType) (*os.File, error) {
 
 	return file, nil
 }
+
+// cleanupLockSidecar removes the sidecar lock file created by platformLock.
+// On Unix, flock operates on the path itself, so there is no sidecar to clean up.
+func cleanupLockSidecar(_ string) {}
 
 //nolint:wrapcheck
 func platformUnlock(file *os.File) (err error) {

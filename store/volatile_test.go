@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/mycophonic/primordium/digest"
+	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/store"
 )
 
@@ -67,7 +68,7 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 			paths.Store(id, path)
 
 			// Verify file exists and has correct content
-			data, err := os.ReadFile(path)
+			data, err := filesystem.ReadFile(path)
 			if err != nil {
 				t.Errorf("goroutine %d: failed to read file: %v", id, err)
 			} else if string(data) != string(content) {
@@ -117,7 +118,7 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 	})
 
 	// After all releases, the directory should be cleaned up
-	entries, err := os.ReadDir(root)
+	entries, err := filesystem.ReadDir(root)
 	if err != nil {
 		t.Fatalf("failed to read rootDir dir: %v", err)
 	}
@@ -179,7 +180,7 @@ func TestVolatile_ConcurrentAcquireDifferentContent(t *testing.T) {
 	})
 
 	// All directories should be cleaned up
-	entries, err := os.ReadDir(root)
+	entries, err := filesystem.ReadDir(root)
 	if err != nil {
 		t.Fatalf("failed to read rootDir dir: %v", err)
 	}
@@ -220,7 +221,7 @@ func TestVolatile_StaggeredRelease(t *testing.T) {
 
 			// File should still exist (others still holding)
 			if id < numGoroutines-1 {
-				if _, err := os.Stat(path); os.IsNotExist(err) {
+				if _, err := filesystem.Stat(path); os.IsNotExist(err) {
 					t.Errorf("goroutine %d: file deleted prematurely", id)
 				}
 			}
@@ -232,7 +233,7 @@ func TestVolatile_StaggeredRelease(t *testing.T) {
 	wg.Wait()
 
 	// After all releases, directory should be gone
-	entries, err := os.ReadDir(root)
+	entries, err := filesystem.ReadDir(root)
 	if err != nil {
 		t.Fatalf("failed to read rootDir dir: %v", err)
 	}
@@ -278,7 +279,7 @@ func TestVolatile_RapidAcquireRelease(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 
 				// Verify content
-				data, err := os.ReadFile(path)
+				data, err := filesystem.ReadFile(path)
 				if err != nil {
 					t.Errorf("goroutine %d cycle %d: read failed: %v", id, cycle, err)
 				} else if string(data) != string(content) {
@@ -293,7 +294,7 @@ func TestVolatile_RapidAcquireRelease(t *testing.T) {
 	wg.Wait()
 
 	// All should be cleaned up
-	entries, err := os.ReadDir(root)
+	entries, err := filesystem.ReadDir(root)
 	if err != nil {
 		t.Fatalf("failed to read rootDir dir: %v", err)
 	}
@@ -319,7 +320,7 @@ func TestVolatile_AcquireAfterFullRelease(t *testing.T) {
 	release1()
 
 	// Directory should be cleaned up
-	entries, err := os.ReadDir(root)
+	entries, err := filesystem.ReadDir(root)
 	if err != nil {
 		t.Fatalf("failed to read rootDir dir: %v", err)
 	}
@@ -342,7 +343,7 @@ func TestVolatile_AcquireAfterFullRelease(t *testing.T) {
 	}
 
 	// File should exist with correct content
-	data, err := os.ReadFile(path2)
+	data, err := filesystem.ReadFile(path2)
 	if err != nil {
 		t.Fatalf("failed to read file: %v", err)
 	}
@@ -367,7 +368,7 @@ func TestVolatile_EmptyContent(t *testing.T) {
 	defer release()
 
 	// File should exist and be empty
-	data, err := os.ReadFile(path)
+	data, err := filesystem.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read file: %v", err)
 	}
@@ -396,7 +397,7 @@ func TestVolatile_LargeContent(t *testing.T) {
 
 	defer release()
 
-	data, err := os.ReadFile(path)
+	data, err := filesystem.ReadFile(path)
 	if err != nil {
 		t.Fatalf("failed to read file: %v", err)
 	}
@@ -490,7 +491,7 @@ func TestVolatile_DifferentAlgorithms(t *testing.T) {
 		}
 
 		// Verify content is correct
-		data, err := os.ReadFile(path)
+		data, err := filesystem.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read with %s failed: %v", alg, err)
 		}
