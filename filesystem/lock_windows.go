@@ -46,10 +46,8 @@ const (
 	lockPermission = FilePermissionsPrivate
 )
 
-//nolint:wrapcheck
 func platformLock(path string, lockType lockType) (file *os.File, err error) {
-	//nolint:gosec
-	file, err = os.OpenFile(path+".lock", os.O_CREATE, lockPermission)
+	file, err = OpenFile(path+".lock", os.O_CREATE, lockPermission)
 	if err != nil {
 		return nil, err
 	}
@@ -67,10 +65,8 @@ func platformLock(path string, lockType lockType) (file *os.File, err error) {
 	return file, nil
 }
 
-//nolint:wrapcheck
 func platformTryLock(path string, lockType lockType) (file *os.File, err error) {
-	//nolint:gosec
-	file, err = os.OpenFile(path+".lock", os.O_CREATE, lockPermission)
+	file, err = OpenFile(path+".lock", os.O_CREATE, lockPermission)
 	if err != nil {
 		return nil, err
 	}
@@ -93,6 +89,13 @@ func platformTryLock(path string, lockType lockType) (file *os.File, err error) 
 	}
 
 	return file, nil
+}
+
+// cleanupLockSidecar removes the sidecar lock file created by platformLock.
+// On Windows, platformLock creates path+".lock" as a separate file. After
+// Unlock closes the handle, this file must be explicitly removed.
+func cleanupLockSidecar(path string) {
+	_ = os.Remove(path + ".lock")
 }
 
 //nolint:wrapcheck

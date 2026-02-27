@@ -165,15 +165,18 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 
 		_ = Unlock(exclusiveLock)
 		_ = os.RemoveAll(dir)
+
 		_ = Unlock(dirLock)
+
+		cleanupLockSidecar(dir)
+
 		_ = Unlock(globalLock)
 	}
 }
 
 // touchLockFile creates the lock file if it doesn't exist.
 func touchLockFile(path string) error {
-	//nolint:gosec // Path is derived from user-provided key in controlled directory
-	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDONLY, FilePermissionsPrivate)
+	file, err := OpenFile(path, os.O_CREATE|os.O_RDONLY, FilePermissionsPrivate)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
 	}

@@ -73,7 +73,7 @@ func TestLocker_ConcurrentAcquireSameKey(t *testing.T) {
 
 				dataPath := filepath.Join(dir, "data")
 				// Simulate some work
-				if err := os.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
+				if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
 					return "", nil, err
 				}
 
@@ -88,7 +88,7 @@ func TestLocker_ConcurrentAcquireSameKey(t *testing.T) {
 			defer release()
 
 			// Verify we got a valid path
-			if _, err := os.Stat(path); err != nil {
+			if _, err := filesystem.Stat(path); err != nil {
 				t.Errorf("path %q not accessible: %v", path, err)
 			}
 		}()
@@ -115,7 +115,7 @@ func TestLocker_ReleaseWhenLastHolder(t *testing.T) {
 
 	path, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, "data")
-		if err := os.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
+		if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
 			return "", nil, err
 		}
 
@@ -139,7 +139,7 @@ func TestLocker_ReleaseWhenLastHolder(t *testing.T) {
 	}
 
 	// Resource directory should be removed
-	if _, err := os.Stat(resourceDir); !os.IsNotExist(err) {
+	if _, err := filesystem.Stat(resourceDir); !os.IsNotExist(err) {
 		t.Errorf("resource directory should be removed, got err: %v", err)
 	}
 }
@@ -157,7 +157,7 @@ func TestLocker_MultipleHoldersPreventsCleanup(t *testing.T) {
 	// First acquire
 	path1, release1, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, "data")
-		if err := os.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
+		if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
 			return "", nil, err
 		}
 
@@ -193,7 +193,7 @@ func TestLocker_MultipleHoldersPreventsCleanup(t *testing.T) {
 	release1()
 
 	// Directory should still exist (second holder active)
-	if _, err := os.Stat(resourceDir); err != nil {
+	if _, err := filesystem.Stat(resourceDir); err != nil {
 		t.Errorf("directory should still exist with active holder: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestLocker_MultipleHoldersPreventsCleanup(t *testing.T) {
 	release2()
 
 	// Now directory should be gone
-	if _, err := os.Stat(resourceDir); !os.IsNotExist(err) {
+	if _, err := filesystem.Stat(resourceDir); !os.IsNotExist(err) {
 		t.Errorf("directory should be removed after last release: %v", err)
 	}
 }
@@ -252,7 +252,7 @@ func TestLocker_StressConcurrentKeys(t *testing.T) {
 
 				path, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 					dataPath := filepath.Join(dir, "data")
-					if err := os.WriteFile(dataPath, []byte(key), 0o600); err != nil {
+					if err := filesystem.WriteFile(dataPath, []byte(key), 0o600); err != nil {
 						return "", nil, err
 					}
 
@@ -268,7 +268,7 @@ func TestLocker_StressConcurrentKeys(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 
 				// Verify data
-				data, err := os.ReadFile(path)
+				data, err := filesystem.ReadFile(path)
 				if err != nil {
 					t.Errorf("ReadFile(%q) failed: %v", path, err)
 				} else if string(data) != key {
