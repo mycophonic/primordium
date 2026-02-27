@@ -55,7 +55,7 @@ func NewContentStore(cache *Cache, indexDir string) *ContentStore {
 // The returned reader must be closed by the caller.
 func (s *ContentStore) Acquire(identifier, dgst string, fetch FetchFunc) (io.ReadCloser, time.Time, error) {
 	key := digest.Hashpath(identifier)
-	entryDir := filepath.Join(s.indexDir, key)
+	entryDir := filepath.Join(s.indexDir, key[:2], key)
 	metaPath := filepath.Join(entryDir, contentIndexFile)
 
 	// Index hit — try serving from cache.
@@ -90,7 +90,7 @@ func (s *ContentStore) Acquire(identifier, dgst string, fetch FetchFunc) (io.Rea
 // and will be cleaned up by Cache garbage collection.
 func (s *ContentStore) Invalidate(identifier string) error {
 	key := digest.Hashpath(identifier)
-	entryDir := filepath.Join(s.indexDir, key)
+	entryDir := filepath.Join(s.indexDir, key[:2], key)
 
 	if err := os.RemoveAll(entryDir); err != nil {
 		return fmt.Errorf("%w: invalidate: %w", fault.ErrFilesystemFailure, err)

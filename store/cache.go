@@ -73,8 +73,11 @@ func (c *Cache) Acquire(dgst string) (io.ReadCloser, io.WriteCloser, error) {
 		return nil, nil, fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
 	}
 
-	// Use algorithm-encoded format for directory name (safe: validated hex + known algorithm)
-	resourceDir := filepath.Join(c.rootDir, strings.Replace(cacheKey.String(), ":", "-", 1))
+	// Use algorithm-encoded format for directory name (safe: validated hex + known algorithm).
+	// Shard into 256 prefix buckets by first 2 hex chars of the encoded hash.
+	name := strings.Replace(cacheKey.String(), ":", "-", 1)
+	prefix := cacheKey.Encoded()[:2]
+	resourceDir := filepath.Join(c.rootDir, prefix, name)
 	dataPath := filepath.Join(resourceDir, cacheDataFile)
 	tempPath := filepath.Join(resourceDir, cacheDataFileTemp)
 	readLockPath := filepath.Join(resourceDir, cacheLockFile)
@@ -161,12 +164,76 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 		return stats, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	// Enumerate all folders
-	entries, err := filesystem.ReadDir(c.rootDir)
+	// Enumerate all prefix buckets, then entry folders within each.
+	prefixes, err := filesystem.ReadDir(c.rootDir)
 	if err != nil {
 		_ = filesystem.Unlock(globalLock)
 
 		return stats, fmt.Errorf("%w: cache directory: %w", fault.ErrReadFailure, err)
+	}
+
+	var total int64
+
+	var candidates []gcCandidate
+
+	for _, pfx := range prefixes {
+		if !pfx.IsDir() {
+			continue
+		}
+
+		prefixDir := filepath.Join(c.rootDir, pfx.Name())
+
+		bucketTotal, bucketCandidates := gcScanBucket(prefixDir)
+		total += bucketTotal
+
+		candidates = append(candidates, bucketCandidates...)
+	}
+
+	// Release global lock - we now have exclusive locks on candidate directories
+	_ = filesystem.Unlock(globalLock)
+
+	stats.Remaining = total
+
+	// If under quota, release all locks and return
+	if total <= c.quota {
+		for _, candidate := range candidates {
+			_ = filesystem.Unlock(candidate.lock)
+		}
+
+		return stats, nil
+	}
+
+	// Delete entries until under quota
+	for _, candidate := range candidates {
+		if stats.Remaining <= c.quota {
+			// Under quota, release remaining locks
+			_ = filesystem.Unlock(candidate.lock)
+
+			continue
+		}
+
+		// Delete this entry
+		if err := os.RemoveAll(candidate.path); err != nil {
+			_ = filesystem.Unlock(candidate.lock)
+
+			continue
+		}
+
+		_ = filesystem.Unlock(candidate.lock)
+
+		stats.BytesFreed += candidate.size
+		stats.Remaining -= candidate.size
+	}
+
+	return stats, nil
+}
+
+// gcScanBucket scans a single prefix bucket directory for GC candidates.
+// Returns the total size of data files and any candidates eligible for eviction.
+func gcScanBucket(prefixDir string) (int64, []gcCandidate) {
+	entries, err := filesystem.ReadDir(prefixDir)
+	if err != nil {
+		return 0, nil
 	}
 
 	var total int64
@@ -178,7 +245,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 			continue
 		}
 
-		dir := filepath.Join(c.rootDir, entry.Name())
+		dir := filepath.Join(prefixDir, entry.Name())
 		dataPath := filepath.Join(dir, cacheDataFile)
 		lockPath := filepath.Join(dir, cacheLockFile)
 		writeLockPath := filepath.Join(dir, cacheWriteLock)
@@ -233,43 +300,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 		})
 	}
 
-	// Release global lock - we now have exclusive locks on candidate directories
-	_ = filesystem.Unlock(globalLock)
-
-	stats.Remaining = total
-
-	// If under quota, release all locks and return
-	if total <= c.quota {
-		for _, candidate := range candidates {
-			_ = filesystem.Unlock(candidate.lock)
-		}
-
-		return stats, nil
-	}
-
-	// Delete entries until under quota
-	for _, candidate := range candidates {
-		if stats.Remaining <= c.quota {
-			// Under quota, release remaining locks
-			_ = filesystem.Unlock(candidate.lock)
-
-			continue
-		}
-
-		// Delete this entry
-		if err := os.RemoveAll(candidate.path); err != nil {
-			_ = filesystem.Unlock(candidate.lock)
-
-			continue
-		}
-
-		_ = filesystem.Unlock(candidate.lock)
-
-		stats.BytesFreed += candidate.size
-		stats.Remaining -= candidate.size
-	}
-
-	return stats, nil
+	return total, candidates
 }
 
 // acquireNoActiveWriter handles the case where no writer is active.
