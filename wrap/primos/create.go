@@ -14,66 +14,14 @@
    limitations under the License.
 */
 
-package filesystem
+package primos
 
 import (
-	"errors"
 	"io"
-	"math/rand/v2"
 	"os"
-	"path/filepath"
 	"slices"
-	"strconv"
 	"strings"
 )
-
-const createTempAttempts = 10000
-
-// Create creates or truncates a file for reading and writing.
-// Equivalent to os.Create but with FILE_SHARE_DELETE on Windows.
-func Create(path string) (*os.File, error) {
-	return OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_TRUNC, FilePermissionsDefault)
-}
-
-// CreateTemp creates a new temporary file in the given directory using the
-// pattern to generate its name. Equivalent to os.CreateTemp but with
-// FILE_SHARE_DELETE on Windows.
-//
-// If pattern includes a "*", the random string replaces the "*".
-// Otherwise, the random string is appended to the pattern.
-func CreateTemp(dir, pattern string) (*os.File, error) {
-	if dir == "" {
-		dir = os.TempDir()
-	}
-
-	prefix, suffix, _ := strings.Cut(pattern, "*")
-
-	for range createTempAttempts {
-		name := prefix + nextRandom() + suffix
-
-		file, err := OpenFile(
-			filepath.Join(dir, name),
-			os.O_RDWR|os.O_CREATE|os.O_EXCL,
-			FilePermissionsPrivate,
-		)
-
-		if errors.Is(err, os.ErrExist) {
-			continue
-		}
-
-		return file, err
-	}
-
-	return nil, &os.PathError{
-		Op:   "createtemp",
-		Path: filepath.Join(dir, prefix+"*"+suffix),
-		Err:  os.ErrExist,
-	}
-}
-
-func nextRandom() string {
-	return strconv.FormatUint(rand.Uint64(), 16) //nolint:gosec // Temp file name, not crypto
-}
 
 // ReadFile reads the named file and returns its contents.
 // Equivalent to os.ReadFile but with FILE_SHARE_DELETE on Windows.

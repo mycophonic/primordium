@@ -16,7 +16,7 @@
    limitations under the License.
 */
 
-package filesystem
+package primos
 
 import "os"
 

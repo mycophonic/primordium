@@ -27,6 +27,7 @@ import (
 
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 func TestLocker_InvalidKey(t *testing.T) {
@@ -88,7 +89,7 @@ func TestLocker_ConcurrentAcquireSameKey(t *testing.T) {
 			defer release()
 
 			// Verify we got a valid path
-			if _, err := filesystem.Stat(path); err != nil {
+			if _, err := primos.Stat(path); err != nil {
 				t.Errorf("path %q not accessible: %v", path, err)
 			}
 		}()
@@ -139,7 +140,7 @@ func TestLocker_ReleaseWhenLastHolder(t *testing.T) {
 	}
 
 	// Resource directory should be removed
-	if _, err := filesystem.Stat(resourceDir); !os.IsNotExist(err) {
+	if _, err := primos.Stat(resourceDir); !os.IsNotExist(err) {
 		t.Errorf("resource directory should be removed, got err: %v", err)
 	}
 }
@@ -193,7 +194,7 @@ func TestLocker_MultipleHoldersPreventsCleanup(t *testing.T) {
 	release1()
 
 	// Directory should still exist (second holder active)
-	if _, err := filesystem.Stat(resourceDir); err != nil {
+	if _, err := primos.Stat(resourceDir); err != nil {
 		t.Errorf("directory should still exist with active holder: %v", err)
 	}
 
@@ -206,7 +207,7 @@ func TestLocker_MultipleHoldersPreventsCleanup(t *testing.T) {
 	release2()
 
 	// Now directory should be gone
-	if _, err := filesystem.Stat(resourceDir); !os.IsNotExist(err) {
+	if _, err := primos.Stat(resourceDir); !os.IsNotExist(err) {
 		t.Errorf("directory should be removed after last release: %v", err)
 	}
 }
@@ -268,7 +269,7 @@ func TestLocker_StressConcurrentKeys(t *testing.T) {
 				time.Sleep(10 * time.Millisecond)
 
 				// Verify data
-				data, err := filesystem.ReadFile(path)
+				data, err := primos.ReadFile(path)
 				if err != nil {
 					t.Errorf("ReadFile(%q) failed: %v", path, err)
 				} else if string(data) != key {

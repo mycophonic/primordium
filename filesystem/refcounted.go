@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 const (
@@ -176,7 +177,7 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 
 // touchLockFile creates the lock file if it doesn't exist.
 func touchLockFile(path string) error {
-	file, err := OpenFile(path, os.O_CREATE|os.O_RDONLY, FilePermissionsPrivate)
+	file, err := primos.OpenFile(path, os.O_CREATE|os.O_RDONLY, FilePermissionsPrivate)
 	if err != nil {
 		return fmt.Errorf("open: %w", err)
 	}

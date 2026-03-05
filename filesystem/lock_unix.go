@@ -22,12 +22,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//nolint:wrapcheck
 package filesystem
 
 import (
 	"errors"
 	"os"
 	"syscall"
+
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 type lockType int16
@@ -38,7 +41,7 @@ const (
 )
 
 func platformLock(path string, lockType lockType) (*os.File, error) {
-	file, err := Open(path)
+	file, err := primos.Open(path)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +65,7 @@ func platformLock(path string, lockType lockType) (*os.File, error) {
 }
 
 func platformTryLock(path string, lockType lockType) (*os.File, error) {
-	file, err := Open(path)
+	file, err := primos.Open(path)
 	if err != nil {
 		return nil, err
 	}

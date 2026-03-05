@@ -25,7 +25,7 @@
 //
 // Flag mapping follows Go's internal syscall.Open logic.
 
-package filesystem
+package primos
 
 import (
 	"os"
@@ -52,25 +52,7 @@ const appendAccess = 0x00120114
 // Open opens a file for reading. The handle includes FILE_SHARE_DELETE so
 // that concurrent rename or deletion by other handles is permitted.
 func Open(path string) (*os.File, error) {
-	pathp, err := windows.UTF16PtrFromString(path)
-	if err != nil {
-		return nil, &os.PathError{Op: opOpen, Path: path, Err: err}
-	}
-
-	handle, err := windows.CreateFile(
-		pathp,
-		windows.GENERIC_READ,
-		shareMode,
-		nil,
-		windows.OPEN_EXISTING,
-		windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_BACKUP_SEMANTICS,
-		0,
-	)
-	if err != nil {
-		return nil, &os.PathError{Op: opOpen, Path: path, Err: err}
-	}
-
-	return os.NewFile(uintptr(handle), path), nil
+	return OpenFile(path, os.O_RDONLY, 0)
 }
 
 // OpenFile opens a file with the given flags and permissions. The handle
