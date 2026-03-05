@@ -31,6 +31,7 @@ import (
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/store"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 // fetchFunc returns a FetchFunc that serves the given content.
@@ -1109,7 +1110,7 @@ func TestContentStore_IndexMetadataFormat(t *testing.T) {
 		t.Fatalf("expected 1 index entry, got %d", len(metaPaths))
 	}
 
-	raw, err := filesystem.ReadFile(metaPaths[0])
+	raw, err := primos.ReadFile(metaPaths[0])
 	if err != nil {
 		t.Fatalf("ReadFile() error: %v", err)
 	}

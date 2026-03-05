@@ -28,6 +28,7 @@ import (
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 const contentIndexFile = "meta"
@@ -147,7 +148,17 @@ func (s *ContentStore) fetchWithDigest(
 		return reader, now, nil
 	}
 
-	return reader, time.Now(), nil
+	// Blob exists but index is missing (e.g. prior incomplete run).
+	// Write the index so subsequent lookups are cache hits.
+	now := time.Now()
+
+	if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
+		_ = reader.Close()
+
+		return nil, time.Time{}, err
+	}
+
+	return reader, now, nil
 }
 
 // fetchAndHash handles the miss path when the digest is unknown.
@@ -204,7 +215,17 @@ func (s *ContentStore) fetchAndHash(
 		return reader, now, nil
 	}
 
-	return reader, time.Now(), nil
+	// Blob exists but index is missing (e.g. prior incomplete run).
+	// Write the index so subsequent lookups are cache hits.
+	now := time.Now()
+
+	if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
+		_ = reader.Close()
+
+		return nil, time.Time{}, err
+	}
+
+	return reader, now, nil
 }
 
 type indexEntry struct {
@@ -213,7 +234,7 @@ type indexEntry struct {
 }
 
 func readIndex(metaPath string) (*indexEntry, error) {
-	data, err := filesystem.ReadFile(metaPath)
+	data, err := primos.ReadFile(metaPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
 	}
