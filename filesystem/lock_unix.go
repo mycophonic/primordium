@@ -47,7 +47,7 @@ func platformLock(path string, lockType lockType) (*os.File, error) {
 	}
 
 	for {
-		err = syscall.Flock(int(file.Fd()), int(lockType))
+		err = syscall.Flock(int(file.Fd()), int(lockType)) //nolint:gosec // G115: fd is a small non-negative int
 		if !errors.Is(err, syscall.EINTR) {
 			break
 		}
@@ -71,6 +71,7 @@ func platformTryLock(path string, lockType lockType) (*os.File, error) {
 	}
 
 	// Use LOCK_NB for non-blocking
+	//nolint:gosec // G115: fd is a small non-negative int
 	err = syscall.Flock(int(file.Fd()), int(lockType)|syscall.LOCK_NB)
 	if err != nil {
 		if fileErr := file.Close(); fileErr != nil {
@@ -101,7 +102,7 @@ func platformUnlock(file *os.File) (err error) {
 	}()
 
 	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) //nolint:gosec // G115: fd is a small non-negative int
 		if !errors.Is(err, syscall.EINTR) {
 			return err
 		}

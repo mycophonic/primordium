@@ -38,7 +38,7 @@ var (
 
 // SetDefaults registers signal handlers, exit with timeout.
 func SetDefaults(parent context.Context) context.Context {
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(parent) //nolint:gosec // G118: cancel is called in the signal goroutine
 
 	shutdownMu.Lock()
 	defer shutdownMu.Unlock()

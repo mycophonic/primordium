@@ -19,7 +19,7 @@ package format
 import (
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -67,7 +67,7 @@ func (m *Markdown) printMap(writer io.Writer, meta map[string]any, headingLevel 
 		keys = append(keys, key)
 	}
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	for _, key := range keys {
 		value := meta[key]
@@ -224,7 +224,7 @@ func sortedKeys(data map[string]any) []string {
 		keys = append(keys, key)
 	}
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	return keys
 }
