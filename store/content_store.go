@@ -252,6 +252,13 @@ func writeIndex(entryDir, metaPath, dgst string, createdAt time.Time) error {
 		return fmt.Errorf("%w: index directory: %w", fault.ErrFilesystemFailure, err)
 	}
 
+	lock, err := filesystem.Lock(entryDir)
+	if err != nil {
+		return fmt.Errorf("%w: index lock: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	defer func() { _ = filesystem.Unlock(lock) }()
+
 	entry := indexEntry{
 		Digest:    dgst,
 		CreatedAt: createdAt,
