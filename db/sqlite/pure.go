@@ -14,26 +14,15 @@
    limitations under the License.
 */
 
-package app
+package sqlite
 
 import (
 	"context"
 
-	"github.com/mycophonic/primordium/app/logger"
-	"github.com/mycophonic/primordium/app/shutdown"
-	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/network"
+	_ "modernc.org/sqlite" // Pure-Go SQLite driver (read-only / serve side).
 )
 
-// New configures application lifecycle and returns a context that is
-// cancelled on shutdown signals.
-func New(ctx context.Context, name string) context.Context {
-	logger.SetDefaultsForLogger(ctx)
-	network.SetDefaults()
-
-	ctx = shutdown.SetDefaults(ctx)
-
-	filesystem.Inititalize(name)
-
-	return ctx
+// Open opens or creates a SQLite database using the pure-Go modernc driver.
+func Open(ctx context.Context, path string) (*DB, error) {
+	return OpenWithDriver(ctx, "sqlite", path, PragmasReadOnly)
 }

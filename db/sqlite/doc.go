@@ -14,26 +14,5 @@
    limitations under the License.
 */
 
-package app
-
-import (
-	"context"
-
-	"github.com/mycophonic/primordium/app/logger"
-	"github.com/mycophonic/primordium/app/shutdown"
-	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/network"
-)
-
-// New configures application lifecycle and returns a context that is
-// cancelled on shutdown signals.
-func New(ctx context.Context, name string) context.Context {
-	logger.SetDefaultsForLogger(ctx)
-	network.SetDefaults()
-
-	ctx = shutdown.SetDefaults(ctx)
-
-	filesystem.Inititalize(name)
-
-	return ctx
-}
+// Package sqlite provides shared SQLite database wrapper along with the default pure go driver.
+package sqlite

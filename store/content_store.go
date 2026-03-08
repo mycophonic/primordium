@@ -28,6 +28,7 @@ import (
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 const contentIndexFile = "meta"
@@ -55,7 +56,7 @@ func NewContentStore(cache *Cache, indexDir string) *ContentStore {
 // The returned reader must be closed by the caller.
 func (s *ContentStore) Acquire(identifier, dgst string, fetch FetchFunc) (io.ReadCloser, time.Time, error) {
 	key := digest.Hashpath(identifier)
-	entryDir := filepath.Join(s.indexDir, key)
+	entryDir := filepath.Join(s.indexDir, key[:2], key)
 	metaPath := filepath.Join(entryDir, contentIndexFile)
 
 	// Index hit — try serving from cache.
@@ -90,7 +91,7 @@ func (s *ContentStore) Acquire(identifier, dgst string, fetch FetchFunc) (io.Rea
 // and will be cleaned up by Cache garbage collection.
 func (s *ContentStore) Invalidate(identifier string) error {
 	key := digest.Hashpath(identifier)
-	entryDir := filepath.Join(s.indexDir, key)
+	entryDir := filepath.Join(s.indexDir, key[:2], key)
 
 	if err := os.RemoveAll(entryDir); err != nil {
 		return fmt.Errorf("%w: invalidate: %w", fault.ErrFilesystemFailure, err)
@@ -147,7 +148,17 @@ func (s *ContentStore) fetchWithDigest(
 		return reader, now, nil
 	}
 
-	return reader, time.Now(), nil
+	// Blob exists but index is missing (e.g. prior incomplete run).
+	// Write the index so subsequent lookups are cache hits.
+	now := time.Now()
+
+	if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
+		_ = reader.Close()
+
+		return nil, time.Time{}, err
+	}
+
+	return reader, now, nil
 }
 
 // fetchAndHash handles the miss path when the digest is unknown.
@@ -204,7 +215,17 @@ func (s *ContentStore) fetchAndHash(
 		return reader, now, nil
 	}
 
-	return reader, time.Now(), nil
+	// Blob exists but index is missing (e.g. prior incomplete run).
+	// Write the index so subsequent lookups are cache hits.
+	now := time.Now()
+
+	if err := writeIndex(entryDir, metaPath, dgst, now); err != nil {
+		_ = reader.Close()
+
+		return nil, time.Time{}, err
+	}
+
+	return reader, now, nil
 }
 
 type indexEntry struct {
@@ -213,7 +234,7 @@ type indexEntry struct {
 }
 
 func readIndex(metaPath string) (*indexEntry, error) {
-	data, err := filesystem.ReadFile(metaPath)
+	data, err := primos.ReadFile(metaPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
 	}
@@ -230,6 +251,13 @@ func writeIndex(entryDir, metaPath, dgst string, createdAt time.Time) error {
 	if err := os.MkdirAll(entryDir, filesystem.DirPermissionsPrivate); err != nil {
 		return fmt.Errorf("%w: index directory: %w", fault.ErrFilesystemFailure, err)
 	}
+
+	lock, err := filesystem.Lock(entryDir)
+	if err != nil {
+		return fmt.Errorf("%w: index lock: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	defer func() { _ = filesystem.Unlock(lock) }()
 
 	entry := indexEntry{
 		Digest:    dgst,

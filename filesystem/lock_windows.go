@@ -24,6 +24,7 @@
 
 // https://cs.opensource.google/go/go/+/master:src/cmd/go/internal/lockedfile/internal/filelock/filelock_windows.go
 
+//nolint:wrapcheck
 package filesystem
 
 import (
@@ -31,6 +32,8 @@ import (
 	"os"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 type lockType uint32
@@ -47,7 +50,7 @@ const (
 )
 
 func platformLock(path string, lockType lockType) (file *os.File, err error) {
-	file, err = OpenFile(path+".lock", os.O_CREATE, lockPermission)
+	file, err = primos.OpenFile(path+".lock", os.O_CREATE, lockPermission)
 	if err != nil {
 		return nil, err
 	}
@@ -66,7 +69,7 @@ func platformLock(path string, lockType lockType) (file *os.File, err error) {
 }
 
 func platformTryLock(path string, lockType lockType) (file *os.File, err error) {
-	file, err = OpenFile(path+".lock", os.O_CREATE, lockPermission)
+	file, err = primos.OpenFile(path+".lock", os.O_CREATE, lockPermission)
 	if err != nil {
 		return nil, err
 	}

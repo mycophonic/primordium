@@ -14,26 +14,13 @@
    limitations under the License.
 */
 
-package app
+package sqlite
 
-import (
-	"context"
+// Deref returns the string value of a nullable column, or empty string if nil.
+func Deref(s *string) string {
+	if s == nil {
+		return ""
+	}
 
-	"github.com/mycophonic/primordium/app/logger"
-	"github.com/mycophonic/primordium/app/shutdown"
-	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/network"
-)
-
-// New configures application lifecycle and returns a context that is
-// cancelled on shutdown signals.
-func New(ctx context.Context, name string) context.Context {
-	logger.SetDefaultsForLogger(ctx)
-	network.SetDefaults()
-
-	ctx = shutdown.SetDefaults(ctx)
-
-	filesystem.Inititalize(name)
-
-	return ctx
+	return *s
 }

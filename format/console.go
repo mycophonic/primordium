@@ -19,7 +19,7 @@ package format
 import (
 	"fmt"
 	"io"
-	"sort"
+	"slices"
 	"strings"
 )
 
@@ -74,7 +74,7 @@ func (c *Console) printMap(writer io.Writer, meta map[string]any, indent int) er
 		keys = append(keys, key)
 	}
 
-	sort.Strings(keys)
+	slices.Sort(keys)
 
 	prefix := strings.Repeat(indentUnit, indent)
 

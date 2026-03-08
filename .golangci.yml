@@ -264,14 +264,18 @@ linters:
             - $all
           allow:
             - $gostd
-            - github.com/containerd/nerdctl/mod/tigron
-            - github.com/mycophonic/agar
             - github.com/mycophonic/primordium
+            # Database
+            - modernc.org/sqlite
+            # Logging
             - github.com/rs/zerolog
             - github.com/samber/slog-zerolog/v2
-            - github.com/getsentry/sentry-go
+            # Crypto
             - golang.org/x/crypto/blake2b
             - golang.org/x/crypto/ssh
+            # Monitoring
+            - github.com/getsentry/sentry-go
+            # Platform specifics
             - golang.org/x/sys/windows
 
     staticcheck:

@@ -14,5 +14,26 @@
    limitations under the License.
 */
 
-// Package shutdown provides primitives to manage application shutdown handlers and cleanup.
+// Package shutdown manages graceful process exit with registered cleanup
+// handlers. Handlers run in LIFO order, exactly once, with a timeout.
+//
+// Coverage:
+//
+//   - Normal return from [Run]: handlers run, exit 0.
+//   - Error return from [Run]: handlers run, exit 1.
+//   - Panic in main goroutine (via [Run]): recovered, handlers run, exit 1.
+//   - Panic in goroutine launched via [Go]: recovered, handlers run, exit 1.
+//   - SIGSEGV/SIGBUS (Go converts to panic): caught by [Run]/[Go] recovery.
+//   - SIGINT/SIGTERM/SIGHUP/SIGQUIT: context cancelled, handlers run with
+//     timeout, exit 128+signal.
+//
+// Not covered:
+//
+//   - SIGKILL: uncatchable by any user-space process. No cleanup is possible.
+//     External coordination (e.g. stale-PID detection, lease expiry) is
+//     required to recover from a SIGKILL'd process that held resources.
+//   - Panics in bare "go" goroutines: only goroutines launched via [Go] have
+//     panic recovery. A panic in a goroutine started with a bare "go"
+//     statement crashes the process without running handlers. Use [Go] for
+//     all goroutines that must participate in graceful shutdown.
 package shutdown

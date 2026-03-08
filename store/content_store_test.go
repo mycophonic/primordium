@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -30,6 +31,7 @@ import (
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/store"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 // fetchFunc returns a FetchFunc that serves the given content.
@@ -507,16 +509,12 @@ func TestContentStore_CorruptIndexRefetches(t *testing.T) {
 	reader2.Close()
 
 	// Find and corrupt the meta file.
-	entries, err := filesystem.ReadDir(indexDir)
-	if err != nil {
-		t.Fatalf("ReadDir() error: %v", err)
-	}
-
-	if len(entries) == 0 {
+	metaPaths := findIndexMetaPaths(t, indexDir)
+	if len(metaPaths) == 0 {
 		t.Fatal("expected index directory to have entries")
 	}
 
-	metaPath := filepath.Join(indexDir, entries[0].Name(), "meta")
+	metaPath := metaPaths[0]
 
 	if err := filesystem.WriteFile(metaPath, []byte("{{{{not json}}}}"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error: %v", err)
@@ -1107,18 +1105,12 @@ func TestContentStore_IndexMetadataFormat(t *testing.T) {
 	after := time.Now()
 
 	// Read the raw index file and verify structure.
-	entries, err := filesystem.ReadDir(indexDir)
-	if err != nil {
-		t.Fatalf("ReadDir() error: %v", err)
+	metaPaths := findIndexMetaPaths(t, indexDir)
+	if len(metaPaths) != 1 {
+		t.Fatalf("expected 1 index entry, got %d", len(metaPaths))
 	}
 
-	if len(entries) != 1 {
-		t.Fatalf("expected 1 index entry, got %d", len(entries))
-	}
-
-	metaPath := filepath.Join(indexDir, entries[0].Name(), "meta")
-
-	raw, err := filesystem.ReadFile(metaPath)
+	raw, err := primos.ReadFile(metaPaths[0])
 	if err != nil {
 		t.Fatalf("ReadFile() error: %v", err)
 	}
@@ -1163,13 +1155,9 @@ func TestContentStore_MultipleIdentifiersSeparateIndexEntries(t *testing.T) {
 		reader.Close()
 	}
 
-	entries, err := filesystem.ReadDir(indexDir)
-	if err != nil {
-		t.Fatalf("ReadDir() error: %v", err)
-	}
-
-	if len(entries) != len(identifiers) {
-		t.Errorf("index entries = %d, want %d", len(entries), len(identifiers))
+	metaPaths := findIndexMetaPaths(t, indexDir)
+	if len(metaPaths) != len(identifiers) {
+		t.Errorf("index entries = %d, want %d", len(metaPaths), len(identifiers))
 	}
 }
 
@@ -1272,6 +1260,32 @@ func TestContentStore_StressMixedOperations(t *testing.T) {
 	}
 
 	wg.Wait()
+}
+
+// --- Helper functions ---
+
+// findIndexMetaPaths walks a sharded index directory and returns all meta file paths.
+func findIndexMetaPaths(t *testing.T, indexDir string) []string {
+	t.Helper()
+
+	var paths []string
+
+	err := filepath.WalkDir(indexDir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !d.IsDir() && d.Name() == "meta" {
+			paths = append(paths, path)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("WalkDir() error: %v", err)
+	}
+
+	return paths
 }
 
 // --- Helper types ---

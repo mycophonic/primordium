@@ -1,3 +1,5 @@
+//go:build windows
+
 /*
    Copyright Mycophonic.
 
@@ -14,26 +16,18 @@
    limitations under the License.
 */
 
-package app
+package shutdown
 
 import (
-	"context"
-
-	"github.com/mycophonic/primordium/app/logger"
-	"github.com/mycophonic/primordium/app/shutdown"
-	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/network"
+	"os"
+	"syscall"
 )
 
-// New configures application lifecycle and returns a context that is
-// cancelled on shutdown signals.
-func New(ctx context.Context, name string) context.Context {
-	logger.SetDefaultsForLogger(ctx)
-	network.SetDefaults()
-
-	ctx = shutdown.SetDefaults(ctx)
-
-	filesystem.Inititalize(name)
-
-	return ctx
+// shutdownSignals are the OS signals that trigger graceful shutdown on Windows.
+// Only SIGINT and SIGTERM are meaningful on Windows.
+//
+//nolint:gochecknoglobals // Platform-specific signal list.
+var shutdownSignals = []os.Signal{
+	syscall.SIGINT,
+	syscall.SIGTERM,
 }

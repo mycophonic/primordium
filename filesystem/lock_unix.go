@@ -22,12 +22,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
+//nolint:wrapcheck
 package filesystem
 
 import (
 	"errors"
 	"os"
 	"syscall"
+
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 type lockType int16
@@ -38,13 +41,13 @@ const (
 )
 
 func platformLock(path string, lockType lockType) (*os.File, error) {
-	file, err := Open(path)
+	file, err := primos.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
 	for {
-		err = syscall.Flock(int(file.Fd()), int(lockType))
+		err = syscall.Flock(int(file.Fd()), int(lockType)) //nolint:gosec // G115: fd is a small non-negative int
 		if !errors.Is(err, syscall.EINTR) {
 			break
 		}
@@ -62,12 +65,13 @@ func platformLock(path string, lockType lockType) (*os.File, error) {
 }
 
 func platformTryLock(path string, lockType lockType) (*os.File, error) {
-	file, err := Open(path)
+	file, err := primos.Open(path)
 	if err != nil {
 		return nil, err
 	}
 
 	// Use LOCK_NB for non-blocking
+	//nolint:gosec // G115: fd is a small non-negative int
 	err = syscall.Flock(int(file.Fd()), int(lockType)|syscall.LOCK_NB)
 	if err != nil {
 		if fileErr := file.Close(); fileErr != nil {
@@ -98,7 +102,7 @@ func platformUnlock(file *os.File) (err error) {
 	}()
 
 	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		err = syscall.Flock(int(file.Fd()), syscall.LOCK_UN) //nolint:gosec // G115: fd is a small non-negative int
 		if !errors.Is(err, syscall.EINTR) {
 			return err
 		}

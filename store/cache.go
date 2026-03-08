@@ -29,6 +29,7 @@ import (
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 const (
@@ -73,19 +74,22 @@ func (c *Cache) Acquire(dgst string) (io.ReadCloser, io.WriteCloser, error) {
 		return nil, nil, fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
 	}
 
-	// Use algorithm-encoded format for directory name (safe: validated hex + known algorithm)
-	resourceDir := filepath.Join(c.rootDir, strings.Replace(cacheKey.String(), ":", "-", 1))
+	// Use algorithm-encoded format for directory name (safe: validated hex + known algorithm).
+	// Shard into 256 prefix buckets by first 2 hex chars of the encoded hash.
+	name := strings.Replace(cacheKey.String(), ":", "-", 1)
+	prefix := cacheKey.Encoded()[:2]
+	resourceDir := filepath.Join(c.rootDir, prefix, name)
 	dataPath := filepath.Join(resourceDir, cacheDataFile)
 	tempPath := filepath.Join(resourceDir, cacheDataFileTemp)
 	readLockPath := filepath.Join(resourceDir, cacheLockFile)
 	writeLockPath := filepath.Join(resourceDir, cacheWriteLock)
 
 	// Step 1: Acquire EXCLUSIVE global lock
-	if err := os.MkdirAll(c.rootDir, filesystem.DirPermissionsPrivate); err != nil {
+	if err := os.MkdirAll(filepath.Join(c.rootDir, prefix), filesystem.DirPermissionsPrivate); err != nil {
 		return nil, nil, fmt.Errorf("%w: cache rootDir: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	globalLock, err := filesystem.Lock(c.rootDir)
+	globalLock, err := filesystem.Lock(filepath.Join(c.rootDir, prefix))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -150,23 +154,105 @@ func (c *Cache) Acquire(dgst string) (io.ReadCloser, io.WriteCloser, error) {
 	)
 }
 
+// Exists reports whether cached content for the given digest is present on disk.
+// This is a lockless, best-effort check (subject to TOCTOU races) intended for
+// fast-path skipping in bulk operations where a subsequent Acquire handles correctness.
+func (c *Cache) Exists(dgst string) bool {
+	cacheKey, err := digest.FromString(dgst)
+	if err != nil {
+		return false
+	}
+
+	name := strings.Replace(cacheKey.String(), ":", "-", 1)
+	prefix := cacheKey.Encoded()[:2]
+	dataPath := filepath.Join(c.rootDir, prefix, name, cacheDataFile)
+
+	_, err = os.Stat(dataPath)
+
+	return err == nil
+}
+
 // GarbageCollect removes unused cache entries to stay within quota.
 // Returns statistics about the cleanup operation.
+// Locking is per-shard (prefix bucket), so Acquire operations in other shards
+// can proceed concurrently.
 func (c *Cache) GarbageCollect() (GCStats, error) {
 	stats := GCStats{Quota: c.quota}
 
-	// Acquire exclusive global lock
-	globalLock, err := filesystem.Lock(c.rootDir)
+	// Enumerate all prefix buckets.
+	prefixes, err := primos.ReadDir(c.rootDir)
 	if err != nil {
-		return stats, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
+		return stats, fmt.Errorf("%w: cache directory: %w", fault.ErrReadFailure, err)
 	}
 
-	// Enumerate all folders
-	entries, err := filesystem.ReadDir(c.rootDir)
-	if err != nil {
-		_ = filesystem.Unlock(globalLock)
+	var total int64
 
-		return stats, fmt.Errorf("%w: cache directory: %w", fault.ErrReadFailure, err)
+	var candidates []gcCandidate
+
+	for _, pfx := range prefixes {
+		if !pfx.IsDir() {
+			continue
+		}
+
+		prefixDir := filepath.Join(c.rootDir, pfx.Name())
+
+		// Lock this shard while scanning its entries.
+		shardLock, err := filesystem.Lock(prefixDir)
+		if err != nil {
+			continue
+		}
+
+		bucketTotal, bucketCandidates := gcScanBucket(prefixDir)
+		total += bucketTotal
+
+		candidates = append(candidates, bucketCandidates...)
+
+		// Release shard lock — candidates retain their own entry dir locks.
+		_ = filesystem.Unlock(shardLock)
+	}
+
+	stats.Remaining = total
+
+	// If under quota, release all locks and return
+	if total <= c.quota {
+		for _, candidate := range candidates {
+			_ = filesystem.Unlock(candidate.lock)
+		}
+
+		return stats, nil
+	}
+
+	// Delete entries until under quota
+	for _, candidate := range candidates {
+		if stats.Remaining <= c.quota {
+			// Under quota, release remaining locks
+			_ = filesystem.Unlock(candidate.lock)
+
+			continue
+		}
+
+		// Delete this entry
+		if err := os.RemoveAll(candidate.path); err != nil {
+			_ = filesystem.Unlock(candidate.lock)
+
+			continue
+		}
+
+		_ = filesystem.Unlock(candidate.lock)
+
+		stats.BytesFreed += candidate.size
+		stats.Remaining -= candidate.size
+	}
+
+	return stats, nil
+}
+
+// gcScanBucket scans a single prefix bucket directory for GC candidates.
+// Returns the total size of data files and any candidates eligible for eviction.
+func gcScanBucket(prefixDir string) (int64, []gcCandidate) {
+	entries, err := primos.ReadDir(prefixDir)
+	if err != nil {
+		return 0, nil
 	}
 
 	var total int64
@@ -178,7 +264,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 			continue
 		}
 
-		dir := filepath.Join(c.rootDir, entry.Name())
+		dir := filepath.Join(prefixDir, entry.Name())
 		dataPath := filepath.Join(dir, cacheDataFile)
 		lockPath := filepath.Join(dir, cacheLockFile)
 		writeLockPath := filepath.Join(dir, cacheWriteLock)
@@ -191,7 +277,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 		}
 
 		// Read size of data file
-		info, err := filesystem.Stat(dataPath)
+		info, err := primos.Stat(dataPath)
 		if err != nil {
 			// No data file, release dir lock and continue
 			_ = filesystem.Unlock(dirLock)
@@ -233,43 +319,7 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 		})
 	}
 
-	// Release global lock - we now have exclusive locks on candidate directories
-	_ = filesystem.Unlock(globalLock)
-
-	stats.Remaining = total
-
-	// If under quota, release all locks and return
-	if total <= c.quota {
-		for _, candidate := range candidates {
-			_ = filesystem.Unlock(candidate.lock)
-		}
-
-		return stats, nil
-	}
-
-	// Delete entries until under quota
-	for _, candidate := range candidates {
-		if stats.Remaining <= c.quota {
-			// Under quota, release remaining locks
-			_ = filesystem.Unlock(candidate.lock)
-
-			continue
-		}
-
-		// Delete this entry
-		if err := os.RemoveAll(candidate.path); err != nil {
-			_ = filesystem.Unlock(candidate.lock)
-
-			continue
-		}
-
-		_ = filesystem.Unlock(candidate.lock)
-
-		stats.BytesFreed += candidate.size
-		stats.Remaining -= candidate.size
-	}
-
-	return stats, nil
+	return total, candidates
 }
 
 // acquireNoActiveWriter handles the case where no writer is active.
@@ -282,7 +332,7 @@ func (*Cache) acquireNoActiveWriter(
 	dirLock, lockFile, writeLock *os.File,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Case 1a: Check if complete data exists
-	if file, err := filesystem.Open(dataPath); err == nil {
+	if file, err := primos.Open(dataPath); err == nil {
 		// Complete data exists - return reader only
 		_ = filesystem.Unlock(writeLock)
 		_ = filesystem.Unlock(dirLock)
@@ -297,7 +347,7 @@ func (*Cache) acquireNoActiveWriter(
 	// Clean up any stale temp file from a previous failed write
 	_ = os.Remove(tempPath)
 
-	file, err := filesystem.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate)
+	file, err := primos.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate)
 	if err != nil {
 		_ = filesystem.Unlock(writeLock)
 		_ = filesystem.Unlock(lockFile)
@@ -307,7 +357,7 @@ func (*Cache) acquireNoActiveWriter(
 	}
 
 	// Open temp file for reading (reader will tail this file)
-	readFile, err := filesystem.Open(tempPath)
+	readFile, err := primos.Open(tempPath)
 	if err != nil {
 		_ = file.Close()
 		_ = os.Remove(tempPath)
@@ -363,7 +413,7 @@ func (*Cache) acquireActiveWriter(
 	dirLock, lockFile *os.File,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Case 2a: Try to open the temp file (writer is actively writing)
-	if file, err := filesystem.Open(tempPath); err == nil {
+	if file, err := primos.Open(tempPath); err == nil {
 		_ = filesystem.Unlock(dirLock)
 
 		return &inProgressReader{
@@ -376,7 +426,7 @@ func (*Cache) acquireActiveWriter(
 
 	// Case 2b: Temp file doesn't exist - writer may have finished between our check and open
 	// Try to read the completed data file
-	if file, err := filesystem.Open(dataPath); err == nil {
+	if file, err := primos.Open(dataPath); err == nil {
 		_ = filesystem.Unlock(dirLock)
 
 		return &cacheReader{
@@ -392,7 +442,7 @@ func (*Cache) acquireActiveWriter(
 		// We got the lock - writer is gone, we should become the writer
 		_ = os.Remove(tempPath) // Clean up any stale temp file
 
-		file, err := filesystem.OpenFile(
+		file, err := primos.OpenFile(
 			tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate,
 		)
 		if err != nil {
@@ -404,7 +454,7 @@ func (*Cache) acquireActiveWriter(
 		}
 
 		// Open temp file for reading
-		readFile, err := filesystem.Open(tempPath)
+		readFile, err := primos.Open(tempPath)
 		if err != nil {
 			_ = file.Close()
 			_ = os.Remove(tempPath)
@@ -460,7 +510,7 @@ func (*Cache) acquireActiveWriter(
 }
 
 func touchFile(path string) error {
-	file, err := filesystem.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
+	file, err := primos.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
 	//nolint:wrapcheck
 	if err != nil {
 		return err
@@ -614,7 +664,7 @@ func (r *inProgressReader) Read(p []byte) (int, error) {
 		// Writer done - check outcome
 		_ = filesystem.Unlock(writeLock)
 
-		if _, err := filesystem.Stat(r.dataPath); err != nil {
+		if _, err := primos.Stat(r.dataPath); err != nil {
 			// Write failed - data file doesn't exist
 			return 0, fault.ErrWriteFailure
 		}

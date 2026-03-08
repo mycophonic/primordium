@@ -294,14 +294,14 @@ install-dev-tools: export CGO_CPPFLAGS :=
 install-dev-tools: export CGO_LDFLAGS :=
 install-dev-tools: install-dev-gotestsum
 	$(call title, $@)
-	# 2026-01-31
-	# - golangci: v2.8.0
+	# 2026-03-08
+	# - golangci: v2.11.2
 	# - govulncheck: v1.1.4
 	# - git-validation: main
 	# - ltag: main
 	# - go-licenses: v2.0.1
 	@cd $(PROJECT_DIR) \
-		&& go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@e2e40021c9007020676c93680a36e3ab06c6cd33 \
+		&& go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@e8f621973e2dfce68b7839ff16affa09cb103239 \
 		&& go install golang.org/x/vuln/cmd/govulncheck@d1f380186385b4f64e00313f31743df8e4b89a77 \
 		&& go install github.com/vbatts/git-validation@a8d455533459b620fa656bad095b943e70cede9b \
 		&& go install github.com/containerd/ltag@66e6a514664ee2d11a470735519fa22b1a9eaabd \

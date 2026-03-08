@@ -25,6 +25,7 @@ import (
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/wrap/primos"
 )
 
 const (
@@ -63,7 +64,7 @@ func (v *Volatile) Acquire(content []byte) (string, func(), error) {
 		dataPath := filepath.Join(dir, volatileDataFile)
 
 		// Write data if it doesn't exist (atomic write)
-		if _, err := filesystem.Stat(dataPath); os.IsNotExist(err) {
+		if _, err := primos.Stat(dataPath); os.IsNotExist(err) {
 			if err := filesystem.WriteFile(dataPath, content, filesystem.FilePermissionsPrivate); err != nil {
 				return "", nil, fmt.Errorf("%w: data file: %w", fault.ErrWriteFailure, err)
 			}

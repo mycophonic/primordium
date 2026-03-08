@@ -14,26 +14,15 @@
    limitations under the License.
 */
 
-package app
+package sqlite
 
-import (
-	"context"
+import "github.com/mycophonic/primordium/fault"
 
-	"github.com/mycophonic/primordium/app/logger"
-	"github.com/mycophonic/primordium/app/shutdown"
-	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/network"
+// Sentinel aliases for database operations, re-exported from fault
+// so callers can use errors.Is without importing fault directly.
+var (
+	ErrOpen  = fault.ErrFilesystemFailure
+	ErrClose = fault.ErrFilesystemFailure
+	ErrRead  = fault.ErrReadFailure
+	ErrWrite = fault.ErrWriteFailure
 )
-
-// New configures application lifecycle and returns a context that is
-// cancelled on shutdown signals.
-func New(ctx context.Context, name string) context.Context {
-	logger.SetDefaultsForLogger(ctx)
-	network.SetDefaults()
-
-	ctx = shutdown.SetDefaults(ctx)
-
-	filesystem.Inititalize(name)
-
-	return ctx
-}
