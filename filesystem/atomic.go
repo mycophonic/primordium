@@ -17,13 +17,13 @@
 package filesystem
 
 import (
-	"bytes"
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 
-	"github.com/mycophonic/primordium/wrap/primos"
+	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/umask"
+	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Adapted from: https://github.com/containerd/continuity/blob/main/ioutils.go under Apache License
@@ -45,40 +45,43 @@ import (
 */
 
 // WriteFile atomically writes data to a file by first writing to a temp file and calling rename.
+// Generally speaking, this should almost always be used as a dropin for os.WriteFile.
+// The only exception is when inodes matter.
 func WriteFile(filename string, data []byte, perm os.FileMode) error {
-	reader := bytes.NewBuffer(data)
+	perm = (^os.FileMode(umask.Get())) & perm
 
-	dataSize := int64(len(data))
-	perm = (^os.FileMode(currentMask)) & perm
-
-	tmpFile, err := primos.CreateTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename))
+	tmpFile, err := xos.CreateTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename))
 	if err != nil {
-		return errors.Join(ErrAtomicWriteFail, err)
+		return errors.Join(fault.ErrWriteFailure, err)
 	}
+
+	defer func() {
+		// Clean up temp file on any failure. Remove before Close so that
+		// the name is still valid; ignore errors — best effort cleanup.
+		if err != nil {
+			_ = os.Remove(tmpFile.Name())
+			_ = tmpFile.Close()
+		}
+	}()
 
 	if err = os.Chmod(tmpFile.Name(), perm); err != nil {
-		return errors.Join(ErrAtomicWriteFail, err, tmpFile.Close())
+		return errors.Join(fault.ErrWriteFailure, err)
 	}
 
-	n, err := io.Copy(tmpFile, reader)
-	if err == nil && n < dataSize {
-		return errors.Join(ErrAtomicWriteFail, io.ErrShortWrite, tmpFile.Close())
-	}
-
-	if err != nil {
-		return errors.Join(ErrAtomicWriteFail, err, tmpFile.Close())
+	if _, err = tmpFile.Write(data); err != nil {
+		return errors.Join(fault.ErrWriteFailure, err)
 	}
 
 	if err = tmpFile.Sync(); err != nil {
-		return errors.Join(ErrAtomicWriteFail, err, tmpFile.Close())
+		return errors.Join(fault.ErrWriteFailure, err)
 	}
 
 	if err = tmpFile.Close(); err != nil {
-		return errors.Join(ErrAtomicWriteFail, err)
+		return errors.Join(fault.ErrWriteFailure, err)
 	}
 
 	if err = os.Rename(tmpFile.Name(), filename); err != nil {
-		return errors.Join(ErrAtomicWriteFail, err)
+		return errors.Join(fault.ErrWriteFailure, err)
 	}
 
 	return nil

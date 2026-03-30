@@ -24,42 +24,40 @@ import (
 
 //nolint:gochecknoglobals
 var (
-	// DefaultSSHConfig provides secure cryptographic defaults for use in ssh config.
-	// Note: this WILL break on ancient / misconfigured systems.
-	DefaultSSHConfig = ssh.Config{
-		// Modern key exchanges only (Curve25519-based)
-		KeyExchanges: []string{
-			"curve25519-sha256",
-			"curve25519-sha256@libssh.org",
-		},
-		// AEAD ciphers only - no CBC mode
-		Ciphers: []string{
-			"chacha20-poly1305@openssh.com",
-			"aes256-gcm@openssh.com",
-			"aes128-gcm@openssh.com",
-		},
-		// Encrypt-then-MAC only
-		MACs: []string{
-			"hmac-sha2-256-etm@openssh.com",
-			"hmac-sha2-512-etm@openssh.com",
-		},
+	// defaultKeyExchanges provides modern key exchanges only (Curve25519-based).
+	defaultKeyExchanges = []string{
+		"curve25519-sha256",
+		"curve25519-sha256@libssh.org",
 	}
 
-	// DefaultSSHHostKeyAlgorithms provides the list of algorithms we support for host keys.
+	// Ciphers are AEAD only, no CBC mode.
+	defaultCiphers = []string{
+		"chacha20-poly1305@openssh.com",
+		"aes256-gcm@openssh.com",
+		"aes128-gcm@openssh.com",
+	}
+
+	// MACs encrypt-then-MAC only.
+	defaultMACs = []string{
+		"hmac-sha2-256-etm@openssh.com",
+		"hmac-sha2-512-etm@openssh.com",
+	}
+
+	// defaultSSHHostKeyAlgorithms provides the list of algorithms we support for host keys.
 	// Note: this WILL break on ancient / misconfigured systems.
-	DefaultSSHHostKeyAlgorithms = []string{
+	defaultSSHHostKeyAlgorithms = []string{
 		ssh.KeyAlgoED25519,
 	}
 
-	// DefaultSSHConnectionTimeout is the timeout for ssh connections.
-	DefaultSSHConnectionTimeout = 30 * time.Second
+	// defaultSSHConnectionTimeout is the timeout for ssh connections.
+	defaultSSHConnectionTimeout = 30 * time.Second
 
-	// DefaultSSHKeepaliveTimeout is how long to wait for a keepalive response before
+	// defaultSSHKeepaliveTimeout is how long to wait for a keepalive response before
 	// considering the connection dead.
-	DefaultSSHKeepaliveTimeout = 15 * time.Second
+	defaultSSHKeepaliveTimeout = 15 * time.Second
 
-	// DefaultIdentityFiles defines the well-known private key we might consider.
-	DefaultIdentityFiles = []string{
+	// defaultIdentityFiles defines the well-known private key we might consider.
+	defaultIdentityFiles = []string{
 		// "~/.ssh/id_rsa",
 		// "~/.ssh/id_ecdsa",
 		// "~/.ssh/id_ecdsa_sk",
@@ -67,3 +65,30 @@ var (
 		"~/.ssh/id_ed25519_sk",
 	}
 )
+
+// ClientConfig extends ssh.ClientConfig with keepalive and identity file settings.
+type ClientConfig struct {
+	ssh.ClientConfig
+
+	KeepAliveTimeout time.Duration
+
+	IdentityFiles []string
+}
+
+// GetClientConfig returns a new SSH client configuration with hardened defaults.
+func GetClientConfig() *ClientConfig {
+	return &ClientConfig{
+		ClientConfig: ssh.ClientConfig{
+			Config: ssh.Config{
+				KeyExchanges: append([]string{}, defaultKeyExchanges...),
+				Ciphers:      append([]string{}, defaultCiphers...),
+				MACs:         append([]string{}, defaultMACs...),
+			},
+			HostKeyAlgorithms: append([]string{}, defaultSSHHostKeyAlgorithms...),
+			Timeout:           defaultSSHConnectionTimeout,
+		},
+
+		KeepAliveTimeout: defaultSSHKeepaliveTimeout,
+		IdentityFiles:    append([]string{}, defaultIdentityFiles...),
+	}
+}

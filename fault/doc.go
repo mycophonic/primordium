@@ -14,5 +14,5 @@
    limitations under the License.
 */
 
-// Package fault provides a set of errors consistently used across quark codebase.
+// Package fault provides a set of errors consistently used across all mycophonic projects.
 package fault

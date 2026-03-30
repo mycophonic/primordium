@@ -18,10 +18,10 @@
 // the Go assembler may not support the mnemonic directly.
 #define HADDPS_X0_X0 LONG $0xC07C0FF2
 
-// func dotFloat32(first, second []float32) float32
+// func dotProductF32SSE(first, second []float32) float32
 //
-// Caller guarantees len(first) == len(second) > 0.
-TEXT ·dotProductF32(SB), NOSPLIT, $0-52
+// SSE3 implementation. Caller guarantees len(first) == len(second) > 0.
+TEXT ·dotProductF32SSE(SB), NOSPLIT, $0-52
 	MOVQ  first_base+0(FP), SI  // SI = &first[0]
 	MOVQ  first_len+8(FP), CX   // CX = count
 	MOVQ  second_base+24(FP), DI // DI = &second[0]

@@ -26,8 +26,4 @@ const (
 	// DirPermissionsPrivate is the permission for private directories, only readable, writable, and executable by the
 	// owner.
 	DirPermissionsPrivate = 0o700
-
-	defaultUmask           uint32 = 0o077
-	pathComponentMaxLength int    = 255
-	defaultBufferSize      int    = 4096
 )

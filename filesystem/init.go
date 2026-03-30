@@ -16,18 +16,14 @@
 
 package filesystem
 
-import "math"
+import (
+	"github.com/mycophonic/primordium/filesystem/dirs"
+	"github.com/mycophonic/primordium/filesystem/umask"
+)
 
-// Inititalize initializes the filesystem package by retrieving the current process umask.
-func Inititalize(appName string) {
-	// Retrieve the current umask as a starting point
-	cMask := umask(0)
-
-	if cMask > math.MaxUint32 || cMask < 0 {
-		panic("currently set user umask is out of range")
-	}
-
-	currentMask = uint32(cMask)
-
-	name = appName
+// Initialize sets the application name for directory resolution and reads the system umask.
+func Initialize(appName string) {
+	// For the side effects (bypass system umask).
+	umask.Get()
+	dirs.SetAppName(appName)
 }

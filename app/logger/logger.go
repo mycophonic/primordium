@@ -31,7 +31,7 @@ import (
 // It uses a console writer with RFC3339 timestamps for human-readable output.
 // If a log level is provided, it sets that level. Otherwise, it reads from the LOG_LEVEL
 // environment variable (defaults to "info" if not set or invalid).
-func SetDefaultsForLogger(_ context.Context, level ...zerolog.Level) {
+func SetDefaultsForLogger(_ context.Context, level ...zerolog.Level) bool {
 	zerolog.TimeFieldFormat = time.RFC3339
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
@@ -64,6 +64,8 @@ func SetDefaultsForLogger(_ context.Context, level ...zerolog.Level) {
 		Level:  zerologToSlog(effectiveLevel),
 		Logger: &log.Logger,
 	}.NewZerologHandler()))
+
+	return effectiveLevel == zerolog.DebugLevel
 }
 
 // zerologToSlog maps zerolog levels to slog levels.

@@ -20,16 +20,12 @@ import (
 	"encoding/hex"
 )
 
-const (
-	shorten = 16
-)
-
-// Hashpath returns a hash from a filepath with low-collision risk.
+// HashPath returns a hash from a filepath with low-collision risk.
 // 16 hex characters = 64 bits of entropy.
 // Birthday paradox: ~2^32 (~4 billion) items needed for 50% collision probability.
 // For 100,000 files:
 // P(collision) ≈ n²/(2d) = (10^5)² / (2 × 2^64) ≈ 2.7 × 10^-10.
-func Hashpath(filePath string) string {
+func HashPath(filePath string) string {
 	h := BLAKE2b256.Hash()
 	_, _ = h.Write([]byte(filePath))
 

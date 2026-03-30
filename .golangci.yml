@@ -178,6 +178,13 @@ linters:
         text: "add-constant|cognitive-complexity|confusing-results|nested-structs|use-waitgroup-go|unchecked-type-assertion|unhandled-error|unused-receiver"
         linters:
           - revive
+      # xos and dirs ARE the wrappers around os.* — they must call the raw functions.
+      - path: filesystem/xos/
+        linters:
+          - forbidigo
+      - path: filesystem/dirs/
+        linters:
+          - forbidigo
 
   settings:
     # Note: default, no changes
@@ -224,6 +231,29 @@ linters:
       forbid:
         - pattern: '^fmt\.Print(ln|f)?$'
           msg: "use structured logging instead"
+        - pattern: '^os\.ReadFile$'
+          msg: "use xos.ReadFile instead"
+        - pattern: '^os\.ReadDir$'
+          msg: "use xos.ReadDir instead"
+        - pattern: '^os\.WriteFile$'
+          msg: "use filesystem.WriteFile instead"
+        - pattern: '^os\.Stat$'
+          msg: "use xos.Stat instead"
+        - pattern: '^os\.Open$'
+          msg: "use xos.Open instead"
+        - pattern: '^os\.OpenFile$'
+          msg: "use xos.OpenFile instead"
+        - pattern: '^os\.Create$'
+          msg: "use xos.OpenFile instead"
+        - pattern: '^os\.CreateTemp$'
+          msg: "use xos.CreateTemp instead"
+        - pattern: '^os\.MkdirTemp$'
+          msg: "use xos.MkdirTemp instead"
+        - pattern: '^os\.Truncate$'
+          msg: "use xos.Truncate instead"
+        - pattern: '^os\.UserHomeDir$'
+          msg: "use filesystem.HomeDir instead"
+
       exclude-godoc-examples: true
       analyze-types: true
 
@@ -273,10 +303,21 @@ linters:
             # Crypto
             - golang.org/x/crypto/blake2b
             - golang.org/x/crypto/ssh
-            # Monitoring
-            - github.com/getsentry/sentry-go
             # Platform specifics
             - golang.org/x/sys/windows
+            - golang.org/x/sys/unix
+            # CPU detection
+            - github.com/klauspost/cpuid
+            # Compression
+            - github.com/andybalholm/brotli
+            - github.com/klauspost/compress
+            - github.com/klauspost/pgzip
+            - github.com/pierrec/lz4
+            - github.com/ulikunitz/xz
+            # Vendors
+            - github.com/aws/smithy-go
+            - github.com/getsentry/sentry-go
+            - github.com/aws/aws-sdk-go-v2
 
     staticcheck:
       checks:

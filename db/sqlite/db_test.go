@@ -297,6 +297,81 @@ func TestVacuumInto(t *testing.T) {
 	}
 }
 
+func TestSetMetadataNoTable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	// Open without creating the metadata table.
+	db, err := sqlite.OpenWithDriver(ctx, testDriver, ":memory:", sqlite.Pragmas{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	err = db.SetMetadata(ctx, "key", "value")
+	if err == nil {
+		t.Fatal("expected error when metadata table does not exist")
+	}
+
+	if !errors.Is(err, sqlite.ErrWrite) {
+		t.Fatalf("expected ErrWrite, got: %v", err)
+	}
+}
+
+func TestGetMetadataNoTable(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+
+	// Open without creating the metadata table.
+	db, err := sqlite.OpenWithDriver(ctx, testDriver, ":memory:", sqlite.Pragmas{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	_, err = db.GetMetadata(ctx, "key")
+	if err == nil {
+		t.Fatal("expected error when metadata table does not exist")
+	}
+
+	if !errors.Is(err, sqlite.ErrRead) {
+		t.Fatalf("expected ErrRead, got: %v", err)
+	}
+}
+
+func TestExecStatementsWhitespace(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	db := openTestDB(t)
+
+	if err := db.ExecStatements(ctx, "   \t\n  "); err != nil {
+		t.Fatalf("expected no error for whitespace-only input, got: %v", err)
+	}
+}
+
+func TestExecStatementsCancelledContext(t *testing.T) {
+	t.Parallel()
+
+	db := openTestDB(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := db.ExecStatements(ctx, "CREATE TABLE t (id INTEGER)")
+	if err == nil {
+		t.Fatal("expected error with cancelled context")
+	}
+
+	if !errors.Is(err, sqlite.ErrWrite) {
+		t.Fatalf("expected ErrWrite, got: %v", err)
+	}
+}
+
 func TestVacuumIntoExistingDest(t *testing.T) {
 	t.Parallel()
 

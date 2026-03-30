@@ -22,7 +22,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"time"
+	"slices"
 )
 
 // defaultTransport holds the configured transport before any wrapping.
@@ -32,19 +32,8 @@ import (
 var (
 	defaultTransport *http.Transport
 
-	// RetryStatusCodes contains HTTP status codes that indicate retryable errors.
-	// This list is used both for logging in RoundTripper and can be passed to
-	// libraries like go-containerregistry via remote.WithRetryStatusCodes().
-	RetryStatusCodes = []int{
-		http.StatusTooManyRequests,     // 429 - Rate limit
-		http.StatusInternalServerError, // 500 - Server error
-		http.StatusBadGateway,          // 502 - Proxy error
-		http.StatusServiceUnavailable,  // 503 - Service overloaded
-		http.StatusGatewayTimeout,      // 504 - Upstream timeout
-	}
-
-	// retryReasons maps status codes to human-readable reasons for logging.
-	//
+	// retryReasons maps retryable HTTP status codes to human-readable reasons for logging.
+	// This is the single source of truth — RetryStatusCodes is derived from it.
 	retryReasons = map[int]string{
 		http.StatusTooManyRequests:     "rate limited",
 		http.StatusInternalServerError: "server error",
@@ -52,15 +41,26 @@ var (
 		http.StatusServiceUnavailable:  "service unavailable",
 		http.StatusGatewayTimeout:      "gateway timeout",
 	}
+
+	// RetryStatusCodes contains HTTP status codes that indicate retryable errors.
+	// Derived from retryReasons. Can be passed to libraries like go-containerregistry
+	// via remote.WithRetryStatusCodes().
+	RetryStatusCodes []int
 )
 
-// Transport wraps *http.Transport to expose TLSClientConfig for modification.
-type Transport struct {
-	*http.Transport
+//nolint:gochecknoinits
+func init() {
+	RetryStatusCodes = make([]int, 0, len(retryReasons))
+	for code := range retryReasons {
+		RetryStatusCodes = append(RetryStatusCodes, code)
+	}
+
+	slices.Sort(RetryStatusCodes)
 }
 
-// RoundTripper wraps *http.Transport with logging for retry-worthy responses.
-// Embedding *http.Transport exposes TLSClientConfig for direct access.
+// RoundTripper wraps *http.Transport with auth header injection and
+// logging for retryable responses. Callers can modify TLSClientConfig
+// directly via the embedded transport (e.g., custom CAs, client certs).
 type RoundTripper struct {
 	*http.Transport
 
@@ -82,6 +82,7 @@ func NewTransport() *RoundTripper {
 
 	return &RoundTripper{
 		Transport: cloned,
+		TokenType: "Bearer",
 	}
 }
 
@@ -119,25 +120,12 @@ func defaultTLSConfig() *tls.Config {
 	}
 }
 
-// Transport timeout and pool configuration constants.
-const (
-	dialTimeout           = 30 * time.Second
-	dialKeepAlive         = 30 * time.Second
-	tlsHandshakeTimeout   = 10 * time.Second
-	responseHeaderTimeout = 30 * time.Second
-	idleConnTimeout       = 90 * time.Second
-	expectContinueTimeout = 1 * time.Second
-	maxIdleConns          = 100
-	maxIdleConnsPerHost   = 100
-	maxConnsPerHost       = 100
-)
-
 // SetDefaults configures http.DefaultTransport with our TLS and connection settings,
 // and wraps it with logging. Must be called once at startup before any HTTP requests.
 func SetDefaults() {
 	transport, ok := http.DefaultTransport.(*http.Transport)
 	if !ok {
-		panic("http.DefaultTransport has been tampered with")
+		panic("http.DefaultTransport has already been wrapped or is not http.Transport")
 	}
 
 	// Proxy configuration
