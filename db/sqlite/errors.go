@@ -16,13 +16,17 @@
 
 package sqlite
 
-import "github.com/mycophonic/primordium/fault"
+import (
+	"fmt"
+
+	"github.com/mycophonic/primordium/fault"
+)
 
 // Sentinel aliases for database operations, re-exported from fault
 // so callers can use errors.Is without importing fault directly.
 var (
-	ErrOpen  = fault.ErrFilesystemFailure
-	ErrClose = fault.ErrFilesystemFailure
+	ErrOpen  = fmt.Errorf("%w: sqlite open failure", fault.ErrFilesystemFailure)
+	ErrClose = fmt.Errorf("%w: sqlite close failure", fault.ErrFilesystemFailure)
 	ErrRead  = fault.ErrReadFailure
 	ErrWrite = fault.ErrWriteFailure
 )

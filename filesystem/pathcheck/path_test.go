@@ -1,0 +1,157 @@
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package pathcheck_test
+
+import (
+	"errors"
+	"fmt"
+	"runtime"
+	"strings"
+	"testing"
+
+	"gotest.tools/v3/assert"
+
+	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/pathcheck"
+)
+
+func TestValidateSocket_BoundaryLengths(t *testing.T) {
+	t.Parallel()
+
+	// Determine platform-specific max length
+	var maxUsable int
+
+	switch runtime.GOOS {
+	case "linux", "windows":
+		maxUsable = 107 // 108 - 1 for null terminator
+	default:
+		maxUsable = 103 // 104 - 1 for null terminator (macOS/BSD)
+	}
+
+	tests := []struct {
+		name    string
+		length  int
+		wantErr bool
+	}{
+		{"exactly-at-limit", maxUsable, false},
+		{"one-over-limit", maxUsable + 1, true},
+		{"well-under-limit", 50, false},
+		{"way-over-limit", maxUsable + 100, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			path := strings.Repeat("x", tc.length)
+			err := pathcheck.ValidateSocket(path)
+
+			if tc.wantErr && err == nil {
+				t.Errorf("ValidateSocket(len=%d) should fail, got nil", tc.length)
+			}
+
+			if !tc.wantErr && err != nil {
+				t.Errorf("ValidateSocket(len=%d) = %v, want nil", tc.length, err)
+			}
+
+			if tc.wantErr && err != nil && !errors.Is(err, fault.ErrInvalidArgument) {
+				t.Errorf("ValidateSocket error = %v, want fault.ErrInvalidArgument", err)
+			}
+		})
+	}
+}
+
+func TestValidateSocket_ErrorMessageContainsDetails(t *testing.T) {
+	t.Parallel()
+
+	// Create a path that's definitely too long
+	longPath := strings.Repeat("a", 200)
+
+	err := pathcheck.ValidateSocket(longPath)
+	if err == nil {
+		t.Fatal("expected error for long path")
+	}
+
+	errMsg := err.Error()
+
+	// Error should contain useful debugging info
+	if !strings.Contains(errMsg, runtime.GOOS) {
+		t.Errorf("error message should contain OS name, got: %s", errMsg)
+	}
+
+	if !strings.Contains(errMsg, "200") {
+		t.Errorf("error message should contain actual length (200), got: %s", errMsg)
+	}
+}
+
+func TestFilesystemRestrictions(t *testing.T) {
+	t.Parallel()
+
+	invalid := []string{
+		"/",
+		"/start",
+		"mid/dle",
+		"end/",
+		".",
+		"..",
+		"",
+		fmt.Sprintf("A%0255s", "A"),
+	}
+
+	valid := []string{
+		fmt.Sprintf("A%0254s", "A"),
+		"test",
+		"test-hyphen",
+		".start.dot",
+		"mid.dot",
+		"∞",
+	}
+
+	if runtime.GOOS == "windows" {
+		invalid = append(invalid, []string{
+			"\\start",
+			"mid\\dle",
+			"end\\",
+			"\\",
+			"\\.",
+			"com².whatever",
+			"lpT2",
+			"Prn.",
+			"nUl",
+			"AUX",
+			"A<A",
+			"A>A",
+			"A:A",
+			"A\"A",
+			"A|A",
+			"A?A",
+			"A*A",
+			"end.dot.",
+			"end.space ",
+		}...)
+	}
+
+	for _, v := range invalid {
+		err := pathcheck.ValidateComponent(v)
+		assert.ErrorIs(t, err, pathcheck.ErrInvalidPath, v)
+	}
+
+	for _, v := range valid {
+		err := pathcheck.ValidateComponent(v)
+		assert.NilError(t, err, v)
+	}
+}

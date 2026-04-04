@@ -14,5 +14,5 @@
    limitations under the License.
 */
 
-// Package format provides output formatters for hypha.
+// Package format provides output formatters for mycophonic clis.
 package format

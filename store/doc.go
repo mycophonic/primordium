@@ -17,4 +17,6 @@
 // Package store provides cache and volatile storage facilities.
 // Use cases are typically temporary file creation for third-party binaries,
 // and caching for network requests like blob copies.
+// Specialized code may still create their own separate storage.
+// This here is simply global application convenience instantiation.
 package store

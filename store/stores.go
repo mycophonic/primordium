@@ -17,73 +17,81 @@
 package store
 
 import (
-	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sync"
 
 	"github.com/mycophonic/primordium/digest"
-	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem"
-)
-
-const (
-	cacheSubdir        = "store"
-	contentIndexSubdir = "content-index"
-	volatileSubdir     = "volatile"
+	"github.com/mycophonic/primordium/filesystem/dirs"
+	"github.com/mycophonic/primordium/store/cache"
+	"github.com/mycophonic/primordium/store/content"
+	"github.com/mycophonic/primordium/store/volatile"
 )
 
 //nolint:gochecknoglobals // Global stores with lazy initialization
 var (
-	cacheStore    *Cache
-	contentStore  *ContentStore
-	volatileStore *Volatile
+	cacheStore    *cache.Cache
+	contentStore  *content.Store
+	volatileStore *volatile.Volatile
 	cacheOnce     sync.Once
 	contentOnce   sync.Once
 	volatileOnce  sync.Once
 )
 
-// GetStoreCache returns the global cache store instance, initializing it on first access.
-// Registers a shutdown handler to run garbage collection on exit.
-func GetStoreCache() *Cache {
+// GetCache returns the global cache store instance, initializing it on first access.
+// Registering a shutdown handler to run garbage collection is the caller's responsibility.
+func GetCache() *cache.Cache {
 	cacheOnce.Do(func() {
-		cacheDir, err := filesystem.CacheDir()
+		cacheDir, err := dirs.CacheDir()
 		if err != nil {
-			panic(fmt.Errorf("%w: %w", fault.ErrSystemFailure, err))
+			panic(err)
 		}
 
-		cacheStore = NewCache(filepath.Join(cacheDir, cacheSubdir))
+		cacheStore = cache.New(filepath.Join(cacheDir, cacheSubdir), cache.DefaultCacheQuota)
 	})
 
 	return cacheStore
 }
 
-// GetContentStore returns the global content store instance, initializing it on first access.
-// The content store provides identifier-based lookup over the shared cache.
-func GetContentStore() *ContentStore {
+// GetContent returns the global content store instance, initializing it on first access.
+// The content store provides identifier-based lookup over its own internal cache.
+func GetContent() *content.Store {
 	contentOnce.Do(func() {
-		cache := GetStoreCache()
-
-		cacheDir, err := filesystem.CacheDir()
+		cacheDir, err := dirs.CacheDir()
 		if err != nil {
-			panic(fmt.Errorf("%w: %w", fault.ErrSystemFailure, err))
+			panic(err)
 		}
 
-		contentStore = NewContentStore(cache, filepath.Join(cacheDir, contentIndexSubdir))
+		contentStore, err = content.New(filepath.Join(cacheDir, contentSubdir), nil)
+		if err != nil {
+			panic(err)
+		}
 	})
 
 	return contentStore
 }
 
-// GetStoreVolatile returns the global volatile store instance, initializing it on first access.
-func GetStoreVolatile() *Volatile {
+// GetVolatile returns the global volatile store instance, initializing it on first access.
+func GetVolatile() *volatile.Volatile {
 	volatileOnce.Do(func() {
-		runtimeDir, err := filesystem.RuntimeDir()
+		runtimeDir, err := dirs.RuntimeDir()
 		if err != nil {
-			panic(fmt.Errorf("%w: %w", fault.ErrSystemFailure, err))
+			panic(err)
 		}
 
-		volatileStore = NewVolatile(filepath.Join(runtimeDir, volatileSubdir), digest.BLAKE2b256)
+		volatileStore = volatile.New(filepath.Join(runtimeDir, volatileSubdir), digest.BLAKE2b256)
 	})
 
 	return volatileStore
+}
+
+// Shutdown closes stores that were initialized. Safe to call even if no
+// stores were ever created. Intended to be registered via shutdown.Register
+// from the app package.
+func Shutdown() {
+	if contentStore != nil {
+		if err := contentStore.Close(); err != nil {
+			slog.Error("content store close failed", "error", err)
+		}
+	}
 }

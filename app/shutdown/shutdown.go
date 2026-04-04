@@ -27,52 +27,51 @@ import (
 	"time"
 )
 
-const shutdownTimeout = 10 * time.Second
-
 //nolint:gochecknoglobals // Shutdown state.
 var (
 	shutdownHandlers []func()
 	shutdownMu       sync.Mutex
 	shutdownOnce     sync.Once
+	setDefaultsOnce  sync.Once
 )
 
 // SetDefaults registers signal handlers, exit with timeout.
+// Safe to call multiple times; only the first call has effect.
 func SetDefaults(parent context.Context) context.Context {
 	ctx, cancel := context.WithCancel(parent) //nolint:gosec // G118: cancel is called in the signal goroutine
 
-	shutdownMu.Lock()
-	defer shutdownMu.Unlock()
-
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, shutdownSignals...)
-
-	go func() {
-		sig := <-sigChan
-		signal.Stop(sigChan)
-		cancel()
-
-		// Run shutdown handlers with timeout.
-		done := make(chan struct{})
+	setDefaultsOnce.Do(func() {
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, shutdownSignals...)
 
 		go func() {
-			Shutdown()
-			close(done)
-		}()
+			sig := <-sigChan
+			signal.Stop(sigChan)
+			cancel()
 
-		select {
-		case <-done:
-			// Graceful shutdown completed, use conventional signal exit code (128 + signal number).
-			if syssig, ok := sig.(syscall.Signal); ok {
-				//nolint:mnd // 128 + signal is conventional.
-				os.Exit(128 + int(syssig)) //revive:disable-line:deep-exit
+			// Run shutdown handlers with timeout.
+			done := make(chan struct{})
+
+			go func() {
+				Shutdown()
+				close(done)
+			}()
+
+			select {
+			case <-done:
+				// Graceful shutdown completed, use conventional signal exit code (128 + signal number).
+				if syssig, ok := sig.(syscall.Signal); ok {
+					//nolint:mnd // 128 + signal is conventional.
+					os.Exit(128 + int(syssig)) //revive:disable-line:deep-exit
+				}
+
+				os.Exit(0) //revive:disable-line:deep-exit
+			case <-time.After(shutdownTimeout):
+				slog.Error("shutdown timed out, some operations may not have completed cleanly")
+				os.Exit(1) //revive:disable-line:deep-exit
 			}
-
-			os.Exit(0) //revive:disable-line:deep-exit
-		case <-time.After(shutdownTimeout):
-			slog.Error("shutdown timed out, some operations may not have completed cleanly")
-			os.Exit(1) //revive:disable-line:deep-exit
-		}
-	}()
+		}()
+	})
 
 	return ctx
 }

@@ -17,13 +17,14 @@
 package format
 
 import (
-	"errors"
 	"fmt"
 	"io"
+
+	"github.com/mycophonic/primordium/fault"
 )
 
-// ErrUnknownFormat indicates an unsupported output format was requested.
-var ErrUnknownFormat = errors.New("unknown format")
+// Kind identifies an output format.
+type Kind string
 
 // Data holds the information to be formatted.
 type Data struct {
@@ -38,16 +39,16 @@ type Formatter interface {
 	PrintAll(data []*Data, writer io.Writer) error
 }
 
-// GetFormatter returns a formatter for the given format name.
-func GetFormatter(format string) (Formatter, error) {
-	switch format {
-	case "json":
+// GetFormatter returns a formatter for the given format kind.
+func GetFormatter(kind Kind) (Formatter, error) {
+	switch kind {
+	case KindJSON:
 		return &JSON{}, nil
-	case "markdown":
+	case KindMarkdown:
 		return &Markdown{}, nil
-	case "console":
+	case KindConsole:
 		return &Console{}, nil
 	default:
-		return nil, fmt.Errorf("%w: %s", ErrUnknownFormat, format)
+		return nil, fmt.Errorf("%w: %s", fault.ErrInvalidArgument, kind)
 	}
 }

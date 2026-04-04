@@ -111,9 +111,8 @@ else
 lint-go-all:
 	$(call title, $@)
 	@cd $(PROJECT_DIR) \
-		&& GOOS=darwin $(MAKE) lint-go \
-		&& GOOS=linux $(MAKE) lint-go \
-		&& GOOS=freebsd $(MAKE) lint-go \
+		&& GOOS=darwin GOARCH=arm64 $(MAKE) lint-go \
+		&& GOOS=linux GOARCH=amd64 $(MAKE) lint-go \
 		&& GOOS=windows $(MAKE) lint-go
 	$(call footer, $@)
 endif
@@ -191,7 +190,6 @@ lint-licenses-all:
 	@cd $(PROJECT_DIR) \
 		&& GOOS=darwin $(MAKE) lint-licenses \
 		&& GOOS=linux $(MAKE) lint-licenses \
-		&& GOOS=freebsd $(MAKE) lint-licenses \
 		&& GOOS=windows $(MAKE) lint-licenses
 	$(call footer, $@)
 endif
@@ -213,7 +211,6 @@ fix-go-all:
 	@cd $(PROJECT_DIR) \
 		&& GOOS=darwin $(MAKE) fix-go \
 		&& GOOS=linux $(MAKE) fix-go \
-		&& GOOS=freebsd $(MAKE) fix-go \
 		&& GOOS=windows $(MAKE) fix-go
 	$(call footer, $@)
 endif

@@ -19,4 +19,8 @@
 package simd
 
 //go:noescape
-func dotProductF32(first, second []float32) float32
+func dotProductF32SSE(first, second []float32) float32
+
+func dotProductF32(first, second []float32) float32 {
+	return dotProductF32SSE(first, second)
+}

@@ -18,11 +18,12 @@
 // the Go assembler may not support the mnemonic directly.
 #define HADDPS_X0_X0 LONG $0xC07C0FF2
 
-// func matVecProduct64x32(dst *[64]float32, mat *[64][32]float32, vec *[32]float32)
+// func matVecProduct64x32SSE(dst *[64]float32, mat *[64][32]float32, vec *[32]float32)
 //
+// SSE3 implementation.
 // Computes dst[i] = dot(mat[i], vec) for i in 0..63.
 // The 32-element vector is loaded once into X8-X15 and reused for all 64 rows.
-TEXT ·matVecProduct64x32(SB), NOSPLIT, $0-24
+TEXT ·matVecProduct64x32SSE(SB), NOSPLIT, $0-24
 	MOVQ dst+0(FP), AX       // AX = &dst[0]
 	MOVQ mat+8(FP), SI       // SI = &mat[0][0]
 	MOVQ vec+16(FP), DI      // DI = &vec[0]

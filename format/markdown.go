@@ -23,12 +23,6 @@ import (
 	"strings"
 )
 
-const (
-	headingChar     = "#"
-	maxHeadingLevel = 6
-	mdRuleSeparator = "---"
-)
-
 // Markdown formats output as structured markdown with tables.
 type Markdown struct{}
 
@@ -62,16 +56,16 @@ func (m *Markdown) printOne(data *Data, writer io.Writer) error {
 }
 
 func (m *Markdown) printMap(writer io.Writer, meta map[string]any, headingLevel int) error {
-	keys := make([]string, 0, len(meta))
-	for key := range meta {
-		keys = append(keys, key)
+	scalarFields, nestedFields := separateFields(meta)
+
+	if len(scalarFields) > 0 {
+		if err := m.printTable(writer, scalarFields); err != nil {
+			return err
+		}
 	}
 
-	slices.Sort(keys)
-
-	for _, key := range keys {
-		value := meta[key]
-		if err := m.printValue(writer, key, value, headingLevel); err != nil {
+	for _, key := range sortedKeys(nestedFields) {
+		if err := m.printValue(writer, key, nestedFields[key], headingLevel); err != nil {
 			return err
 		}
 	}
@@ -136,8 +130,8 @@ func (m *Markdown) printSliceSection(
 		case map[string]any:
 			itemHeading := strings.Repeat(headingChar, min(headingLevel+1, maxHeadingLevel))
 
-			if _, err := fmt.Fprintf(writer, "%s Stream %d\n\n", itemHeading, index+1); err != nil {
-				return fmt.Errorf("writing stream %d heading: %w", index, err)
+			if _, err := fmt.Fprintf(writer, "%s Item %d\n\n", itemHeading, index+1); err != nil {
+				return fmt.Errorf("writing item %d heading: %w", index, err)
 			}
 
 			scalarFields, nestedFields := separateFields(typedItem)
@@ -164,42 +158,34 @@ func (m *Markdown) printSliceSection(
 }
 
 func (*Markdown) printTable(writer io.Writer, fields map[string]any) error {
-	// Check for spectrogram and handle specially
-	spectrogramPath, hasSpectrogram := fields["spectrogram_path"].(string)
-	if hasSpectrogram {
-		// Remove spectrogram fields from table, will render as image below
-		delete(fields, "spectrogram_path")
-		delete(fields, "spectrogram_rel_path")
+	if _, err := fmt.Fprintln(writer, "| Field | Value |"); err != nil {
+		return fmt.Errorf("writing table header: %w", err)
 	}
 
-	if len(fields) > 0 {
-		if _, err := fmt.Fprintln(writer, "| Field | Value |"); err != nil {
-			return fmt.Errorf("writing table header: %w", err)
-		}
+	if _, err := fmt.Fprintln(writer, "|-------|-------|"); err != nil {
+		return fmt.Errorf("writing table separator: %w", err)
+	}
 
-		if _, err := fmt.Fprintln(writer, "|-------|-------|"); err != nil {
-			return fmt.Errorf("writing table separator: %w", err)
-		}
-
-		for _, key := range sortedKeys(fields) {
-			if _, err := fmt.Fprintf(writer, "| %s | %v |\n", key, fields[key]); err != nil {
-				return fmt.Errorf("writing table row %s: %w", key, err)
-			}
-		}
-
-		if _, err := fmt.Fprintln(writer); err != nil {
-			return fmt.Errorf("writing table trailing newline: %w", err)
+	for _, key := range sortedKeys(fields) {
+		if _, err := fmt.Fprintf(
+			writer,
+			"| %s | %s |\n",
+			escapePipe(key),
+			escapePipe(fmt.Sprintf("%v", fields[key])),
+		); err != nil {
+			return fmt.Errorf("writing table row %s: %w", key, err)
 		}
 	}
 
-	// Render spectrogram as embedded image
-	if hasSpectrogram && spectrogramPath != "" {
-		if _, err := fmt.Fprintf(writer, "**Spectrogram:**\n\n![Spectrogram](%s)\n\n", spectrogramPath); err != nil {
-			return fmt.Errorf("writing spectrogram: %w", err)
-		}
+	if _, err := fmt.Fprintln(writer); err != nil {
+		return fmt.Errorf("writing table trailing newline: %w", err)
 	}
 
 	return nil
+}
+
+func escapePipe(s string) string {
+	return strings.ReplaceAll(s, "|", `\|`)
 }
 
 func separateFields(data map[string]any) (scalars, nested map[string]any) {

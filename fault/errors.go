@@ -27,7 +27,7 @@ var (
 	// ErrMissingRequirements indicates that a pre-requisite is not / could not be installed.
 	ErrMissingRequirements = errors.New("requirements failed")
 
-	// ErrNotImplemented indicates a concrete structs failed to implement a required method.
+	// ErrNotImplemented indicates a certain feature or aspect of a feature is not currently implemented.
 	ErrNotImplemented = errors.New("not implemented")
 
 	// ErrInvalidArgument indicates the provided argument is invalid.
@@ -51,13 +51,10 @@ var (
 	ErrAuthenticationFailure = errors.New("failed to authenticate")
 
 	// ErrCancelled indicates the operation was cancelled via context.
-	ErrCancelled = errors.New("operation cancelled")
+	ErrCancelled = errors.New("operation has been explicitly cancelled")
 
-	// ErrContext is returned on context error.
-	ErrContext = errors.New("context errored")
-
-	// ErrTimeout indicates something took longer than reasonnably expected.
-	ErrTimeout = errors.New("timeout")
+	// ErrTimeout indicates something took longer than reasonably expected.
+	ErrTimeout = errors.New("operation failed to complete in the allocated time span")
 
 	// ErrCommandFailure indicates a call to an external binary failed.
 	ErrCommandFailure = errors.New("command failed")
@@ -70,8 +67,8 @@ var (
 	// fatal one.
 	ErrHashMismatch = errors.New("hash mismatch")
 
-	// ErrNetworkError indicates we failed to establish a connection.
-	ErrNetworkError = errors.New("network error")
+	// ErrNetworkCommunication indicates a transport level failure occurred during a network operation.
+	ErrNetworkCommunication = errors.New("network error")
 
 	// ErrUnacceptableResponse indicates an http server returned a non-OK response when we expect one.
 	ErrUnacceptableResponse = errors.New("unacceptable response")

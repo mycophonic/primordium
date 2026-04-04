@@ -1,0 +1,89 @@
+//go:build !windows
+
+/*
+   Copyright Mycophonic.
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+*/
+
+package pathcheck_test
+
+import (
+	"errors"
+	"testing"
+
+	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/pathcheck"
+)
+
+func TestValidate_PathTraversal(t *testing.T) {
+	t.Parallel()
+
+	// Path traversal attempts should be rejected
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"dot-dot", "/foo/../bar"},
+		{"dot-dot-only", ".."},
+		{"leading-dot-dot", "../secret"},
+		{"nested-traversal", "/a/b/../../c"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := pathcheck.Validate(tc.path)
+			if err == nil {
+				t.Errorf("Validate(%q) should reject path traversal", tc.path)
+			}
+
+			if !errors.Is(err, fault.ErrInvalidArgument) {
+				t.Errorf("Validate(%q) error = %v, want fault.ErrInvalidArgument", tc.path, err)
+			}
+		})
+	}
+}
+
+func TestValidate_ValidPaths(t *testing.T) {
+	t.Parallel()
+
+	tests := []string{
+		"/usr/local/bin",
+		"/home/user/.config",
+		"relative/path",
+		"single",
+		"/",
+		"",
+	}
+
+	for _, path := range tests {
+		t.Run(path, func(t *testing.T) {
+			t.Parallel()
+
+			if err := pathcheck.Validate(path); err != nil {
+				t.Errorf("Validate(%q) = %v, want nil", path, err)
+			}
+		})
+	}
+}
+
+func TestValidate_DoubleSeparators(t *testing.T) {
+	t.Parallel()
+
+	// Double separators should be handled (empty components skipped)
+	if err := pathcheck.Validate("/foo//bar"); err != nil {
+		t.Errorf("Validate with double separator failed: %v", err)
+	}
+}

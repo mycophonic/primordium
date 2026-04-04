@@ -23,11 +23,6 @@ import (
 	"strings"
 )
 
-const (
-	indentUnit    = "  "
-	ruleSeparator = "────────────────────────────────────────────────────────────────────────────────"
-)
-
 func wrapKeyError(key string, err error) error {
 	return fmt.Errorf("writing key %q: %w", key, err)
 }

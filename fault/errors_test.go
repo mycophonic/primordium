@@ -19,6 +19,7 @@ package fault_test
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/mycophonic/primordium/fault"
@@ -42,10 +43,9 @@ func TestSentinelErrors_Exist(t *testing.T) {
 		{"ErrWriteFailure", fault.ErrWriteFailure},
 		{"ErrAuthenticationFailure", fault.ErrAuthenticationFailure},
 		{"ErrCancelled", fault.ErrCancelled},
-		{"ErrContext", fault.ErrContext},
 		{"ErrHashMismatch", fault.ErrHashMismatch},
 		{"ErrInvalidJSON", fault.ErrInvalidJSON},
-		{"ErrNetworkError", fault.ErrNetworkError},
+		{"ErrNetworkCommunication", fault.ErrNetworkCommunication},
 		{"ErrUnacceptableResponse", fault.ErrUnacceptableResponse},
 		{"ErrCommandFailure", fault.ErrCommandFailure},
 	}
@@ -80,10 +80,9 @@ func TestSentinelErrors_Identity(t *testing.T) {
 		fault.ErrWriteFailure,
 		fault.ErrAuthenticationFailure,
 		fault.ErrCancelled,
-		fault.ErrContext,
 		fault.ErrHashMismatch,
 		fault.ErrInvalidJSON,
-		fault.ErrNetworkError,
+		fault.ErrNetworkCommunication,
 		fault.ErrUnacceptableResponse,
 		fault.ErrCommandFailure,
 	}
@@ -145,7 +144,7 @@ func TestSentinelErrors_Distinctness(t *testing.T) {
 		{"SystemFailure vs FilesystemFailure", fault.ErrSystemFailure, fault.ErrFilesystemFailure},
 		{"NotFound vs NotImplemented", fault.ErrNotFound, fault.ErrNotImplemented},
 		{"ReadFailure vs WriteFailure", fault.ErrReadFailure, fault.ErrWriteFailure},
-		{"Cancelled vs Context", fault.ErrCancelled, fault.ErrContext},
+		{"Cancelled vs Timeout", fault.ErrCancelled, fault.ErrTimeout},
 		{"InvalidArgument vs InvalidJSON", fault.ErrInvalidArgument, fault.ErrInvalidJSON},
 	}
 
@@ -200,7 +199,7 @@ func TestSentinelErrors_ErrorMessages(t *testing.T) {
 		{fault.ErrCancelled, "cancelled"},
 		{fault.ErrHashMismatch, "hash"},
 		{fault.ErrInvalidJSON, "JSON"},
-		{fault.ErrNetworkError, "network"},
+		{fault.ErrNetworkCommunication, "network"},
 		{fault.ErrCommandFailure, "command"},
 	}
 
@@ -208,45 +207,9 @@ func TestSentinelErrors_ErrorMessages(t *testing.T) {
 		t.Run(tt.err.Error(), func(t *testing.T) {
 			t.Parallel()
 
-			msg := tt.err.Error()
-			// Case-insensitive check
-			found := false
-
-			for i := range len(msg) - len(tt.contains) + 1 {
-				if equalFoldSubstring(msg[i:i+len(tt.contains)], tt.contains) {
-					found = true
-
-					break
-				}
-			}
-
-			if !found {
-				t.Errorf("error message %q should contain %q", msg, tt.contains)
+			if !strings.Contains(strings.ToLower(tt.err.Error()), strings.ToLower(tt.contains)) {
+				t.Errorf("error message %q should contain %q", tt.err.Error(), tt.contains)
 			}
 		})
 	}
-}
-
-// equalFoldSubstring does case-insensitive comparison.
-func equalFoldSubstring(a, b string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for i := range len(a) {
-		ca, cb := a[i], b[i]
-		if ca >= 'A' && ca <= 'Z' {
-			ca += 'a' - 'A'
-		}
-
-		if cb >= 'A' && cb <= 'Z' {
-			cb += 'a' - 'A'
-		}
-
-		if ca != cb {
-			return false
-		}
-	}
-
-	return true
 }

@@ -18,10 +18,21 @@
 
 package simd
 
+//revive:disable:add-constant // Array dimensions are fixed by the SIMD assembly contract.
+
 //go:noescape
-//revive:disable:add-constant
-func matVecProduct64x32(
+func matVecProduct64x32SSE(
 	dst *[64]float32,
 	mat *[64][32]float32,
 	vec *[32]float32,
 )
+
+func matVecProduct64x32(
+	dst *[64]float32,
+	mat *[64][32]float32,
+	vec *[32]float32,
+) {
+	matVecProduct64x32SSE(dst, mat, vec)
+}
+
+//revive:enable:add-constant

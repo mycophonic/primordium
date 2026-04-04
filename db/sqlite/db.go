@@ -21,14 +21,19 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 )
 
 // Pragmas holds SQLite PRAGMA statements and connection pool settings
 // to apply when opening a database.
+//
+// Statements are executed in order. Order matters: some pragmas (e.g. page_size,
+// auto_vacuum) must be set before the first write to the database, so they must
+// appear before pragmas that implicitly write (e.g. journal_mode).
 type Pragmas struct {
 	Statements []string
-	MaxConns   int // 0 = database/sql default (unlimited).
+	MaxConns   uint // 0 = database/sql default (unlimited).
 }
 
 // PragmasReadOnly configures SQLite for pure read performance.
@@ -73,7 +78,10 @@ var PragmasReadWrite = Pragmas{
 var PragmasImport = Pragmas{
 	MaxConns: 1,
 	Statements: []string{
-		"PRAGMA page_size = 16384",  // 16 KB (must be before first write)
+		// page_size and auto_vacuum must precede any pragma that writes
+		// (e.g. journal_mode). Reordering these below journal_mode will
+		// silently leave them at their defaults.
+		"PRAGMA page_size = 16384",  // 16 KB
 		"PRAGMA auto_vacuum = NONE", // no page reclamation overhead
 		"PRAGMA foreign_keys = OFF",
 		"PRAGMA journal_mode = OFF",
@@ -110,15 +118,20 @@ var PragmasVacuum = Pragmas{
 // destPath must not already exist; SQLite will refuse to overwrite an
 // existing file. Callers that want in-place compaction should vacuum
 // into a temporary file and rename it over the original.
-func VacuumInto(ctx context.Context, driver, path, destPath string) error {
+func VacuumInto(ctx context.Context, driver, path, destPath string) (err error) {
 	store, err := OpenWithDriver(ctx, driver, path, PragmasVacuum)
 	if err != nil {
 		return err
 	}
 
-	defer func() { _ = store.Close() }()
+	defer func() {
+		closeErr := store.Close()
+		if err == nil {
+			err = closeErr
+		}
+	}()
 
-	if _, err := store.conn.ExecContext(ctx, "VACUUM INTO ?", destPath); err != nil {
+	if _, err = store.conn.ExecContext(ctx, "VACUUM INTO ?", destPath); err != nil {
 		return fmt.Errorf("%w: vacuum into: %w", ErrWrite, err)
 	}
 
@@ -139,7 +152,7 @@ func OpenWithDriver(ctx context.Context, driver, path string, pragmas Pragmas) (
 	}
 
 	if pragmas.MaxConns > 0 {
-		conn.SetMaxOpenConns(pragmas.MaxConns)
+		conn.SetMaxOpenConns(int(min(pragmas.MaxConns, uint(math.MaxInt)))) //nolint:gosec // Clamped to MaxInt.
 	}
 
 	for _, pragma := range pragmas.Statements {
@@ -203,20 +216,23 @@ func (store *DB) GetMetadata(ctx context.Context, key string) (string, error) {
 	return value, nil
 }
 
-// ExecStatements splits a semicolon-delimited SQL string and executes each
-// statement atomically inside a transaction.
+// ExecStatements executes a semicolon-delimited SQL string atomically
+// inside a transaction.
 func (store *DB) ExecStatements(ctx context.Context, raw string) error {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
 	txn, err := store.conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("%w: begin: %w", ErrWrite, err)
 	}
 
-	for _, stmt := range splitStatements(raw) {
-		if _, err := txn.ExecContext(ctx, stmt); err != nil {
-			_ = txn.Rollback()
+	if _, err := txn.ExecContext(ctx, raw); err != nil {
+		_ = txn.Rollback() // Intentional: rollback failure doesn't change what the caller should do.
 
-			return fmt.Errorf("%w: exec [%.80s]: %w", ErrWrite, stmt, err)
-		}
+		return fmt.Errorf("%w: exec: %w", ErrWrite, err)
 	}
 
 	if err := txn.Commit(); err != nil {
@@ -224,19 +240,4 @@ func (store *DB) ExecStatements(ctx context.Context, raw string) error {
 	}
 
 	return nil
-}
-
-// splitStatements splits a semicolon-delimited SQL file into individual statements.
-func splitStatements(raw string) []string {
-	parts := strings.Split(raw, ";")
-	stmts := make([]string, 0, len(parts))
-
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			stmts = append(stmts, trimmed)
-		}
-	}
-
-	return stmts
 }

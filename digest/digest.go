@@ -18,9 +18,11 @@ package digest
 
 import (
 	"crypto"
+	_ "crypto/md5"  //nolint:gosec // MD5 needed for external digest verification
 	_ "crypto/sha1" //nolint:gosec // SHA1 needed for legacy git compatibility
 	_ "crypto/sha256"
 	_ "crypto/sha512"
+	"encoding/hex"
 	"fmt"
 	"hash"
 	"regexp"
@@ -33,6 +35,7 @@ import (
 
 // Supported digest algorithms.
 const (
+	MD5        Algorithm = "md5"
 	SHA1       Algorithm = "sha1"
 	SHA256     Algorithm = "sha256"
 	SHA384     Algorithm = "sha384"
@@ -45,6 +48,7 @@ const (
 var (
 	// hashConstructors maps algorithms to their hash constructor functions.
 	hashConstructors = map[Algorithm]func() hash.Hash{
+		MD5:        crypto.MD5.New,
 		SHA1:       crypto.SHA1.New,
 		SHA256:     crypto.SHA256.New,
 		SHA384:     crypto.SHA384.New,
@@ -56,12 +60,24 @@ var (
 	// anchoredEncodedRegexps contains anchored regular expressions for hex-encoded digests.
 	// Note that /A-F/ disallowed.
 	anchoredEncodedRegexps = map[Algorithm]*regexp.Regexp{
+		MD5:        regexp.MustCompile(`^[a-f0-9]{32}$`),
 		SHA1:       regexp.MustCompile("^[a-f0-9]{40}$"),
 		SHA256:     regexp.MustCompile(`^[a-f0-9]{64}$`),
 		SHA384:     regexp.MustCompile(`^[a-f0-9]{96}$`),
 		SHA512:     regexp.MustCompile(`^[a-f0-9]{128}$`),
 		BLAKE2b256: regexp.MustCompile(`^[a-f0-9]{64}$`),
 		BLAKE2b512: regexp.MustCompile(`^[a-f0-9]{128}$`),
+	}
+
+	// digestSizes maps algorithms to their expected byte lengths.
+	digestSizes = map[Algorithm]int{
+		MD5:        16,
+		SHA1:       20,
+		SHA256:     32,
+		SHA384:     48,
+		SHA512:     64,
+		BLAKE2b256: 32,
+		BLAKE2b512: 64,
 	}
 )
 
@@ -107,6 +123,23 @@ type Digest interface {
 type digest struct {
 	algorithm Algorithm
 	encoded   string
+}
+
+// New creates a Digest from an algorithm and raw hash bytes.
+func New(alg Algorithm, raw []byte) (Digest, error) {
+	size, ok := digestSizes[alg]
+	if !ok {
+		return nil, fmt.Errorf("%w: unknown algorithm %s", fault.ErrInvalidArgument, alg)
+	}
+
+	if len(raw) != size {
+		return nil, fmt.Errorf("%w: expected %d bytes for %s, got %d", fault.ErrInvalidArgument, size, alg, len(raw))
+	}
+
+	return &digest{
+		algorithm: alg,
+		encoded:   hex.EncodeToString(raw),
+	}, nil
 }
 
 // FromString parses a digest string in the format "algorithm:encoded".
