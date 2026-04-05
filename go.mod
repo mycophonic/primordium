@@ -13,7 +13,7 @@ require (
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/klauspost/pgzip v1.2.6
 	github.com/pierrec/lz4/v4 v4.1.26
-	github.com/rs/zerolog v1.34.0
+	github.com/rs/zerolog v1.35.0
 	github.com/samber/slog-zerolog/v2 v2.9.2
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/crypto v0.49.0
