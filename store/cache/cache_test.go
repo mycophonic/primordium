@@ -413,7 +413,11 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 		close(writerStarted)
 
 		// Read in background
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			_, _ = io.ReadAll(reader)
 			reader.Close()
 		}()
@@ -907,7 +911,11 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 		close(writerStarted)
 
 		// Reader in background
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			io.ReadAll(reader)
 			reader.Close()
 		}()
@@ -1003,9 +1011,15 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 		t.Fatalf("initial Acquire() error: %v", err)
 	}
 
+	var wg sync.WaitGroup
+
 	initReader := reader
 
+	wg.Add(1)
+
 	go func() {
+		defer wg.Done()
+
 		io.ReadAll(initReader)
 		initReader.Close()
 	}()
@@ -1018,8 +1032,6 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 
 	// Now rapidly acquire and close
 	const iterations = 100
-
-	var wg sync.WaitGroup
 
 	for i := range iterations {
 		wg.Add(1)
@@ -1351,7 +1363,11 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 		close(writerStarted)
 
 		// Drain reader
+		wg.Add(1)
+
 		go func() {
+			defer wg.Done()
+
 			io.ReadAll(reader)
 			reader.Close()
 		}()
@@ -1718,7 +1734,11 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 				return
 			}
 
+			wg.Add(1)
+
 			go func() {
+				defer wg.Done()
+
 				io.ReadAll(reader)
 				reader.Close()
 			}()
