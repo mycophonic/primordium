@@ -9,7 +9,7 @@ require (
 	github.com/aws/smithy-go v1.24.2
 	github.com/getsentry/sentry-go v0.44.1
 	github.com/johannesboyne/gofakes3 v0.0.0-20260208201424-4c385a1f6a73
-	github.com/klauspost/compress v1.18.4
+	github.com/klauspost/compress v1.18.5
 	github.com/klauspost/cpuid/v2 v2.3.0
 	github.com/klauspost/pgzip v1.2.6
 	github.com/pierrec/lz4/v4 v4.1.26
