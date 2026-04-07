@@ -13,6 +13,7 @@ jobs:
   lint:
     name: Lint (Go Latest, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -39,6 +40,7 @@ jobs:
   test:
     name: Test (Go Latest, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
