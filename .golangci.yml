@@ -188,6 +188,13 @@ linters:
 
   settings:
     # Note: default, no changes
+    errorlint:
+      # Disable err==target → errors.Is(err, target) auto-rewrite. The fixer
+      # has known bugs where it adds the errors.Is() call but fails to add
+      # the "errors" import, leaving the file uncompilable. The two forms
+      # behave identically unless someone wraps io.EOF, which never happens
+      # in practice.
+      comparison: false
     wsl_v5:
       # Configuration options
       allow-first-in-block: true    # Allow cuddling if variable used first in following block

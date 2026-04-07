@@ -1,9 +1,23 @@
-# Dependabot configuration for automated dependency updates
+# Dependabot configuration for automated dependency updates.
+#
+# Strategy:
+#   - Bundle minor/patch updates into a small number of grouped PRs
+#     (one for the AWS SDK family, one for golang.org/x, one for everything
+#     else, one for GitHub Actions). This collapses the typical 15-20
+#     PRs/week into 3-4.
+#   - Major version bumps are NOT in any group, so each one still gets its
+#     own PR for individual review (since they may need code changes).
+#   - A 7-day cooldown defers PRs until after a release has had time to
+#     attract follow-up patches and bug reports, avoiding churn from
+#     quickly-superseded releases.
+#
 # See: https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file
-
 version: 2
+
 updates:
-  # Go module dependencies
+  # ============================================================================
+  # Go modules
+  # ============================================================================
   - package-ecosystem: "gomod"
     directory: "/"
     schedule:
@@ -17,8 +31,44 @@ updates:
       - "go"
     commit-message:
       prefix: "chore(deps)"
+    cooldown:
+      default-days: 7
+      semver-major-days: 14
+    groups:
+      # AWS SDK v2 has many separately-versioned modules that always bump
+      # together. Without this group, a single SDK release produces 15+ PRs.
+      aws-sdk-go-v2:
+        patterns:
+          - "github.com/aws/aws-sdk-go-v2"
+          - "github.com/aws/aws-sdk-go-v2/*"
+          - "github.com/aws/smithy-go"
+        update-types:
+          - "minor"
+          - "patch"
+      # golang.org/x/* family — frequent coordinated minor/patch releases.
+      golang-x:
+        patterns:
+          - "golang.org/x/*"
+        update-types:
+          - "minor"
+          - "patch"
+      # Everything else: bundle remaining minor/patch updates into a single
+      # weekly PR. Major updates are not matched and stay individual.
+      go-deps:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "github.com/aws/aws-sdk-go-v2"
+          - "github.com/aws/aws-sdk-go-v2/*"
+          - "github.com/aws/smithy-go"
+          - "golang.org/x/*"
+        update-types:
+          - "minor"
+          - "patch"
 
-  # GitHub Actions dependencies
+  # ============================================================================
+  # GitHub Actions
+  # ============================================================================
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
@@ -26,8 +76,20 @@ updates:
       day: "monday"
       time: "09:00"
       timezone: "UTC"
+    open-pull-requests-limit: 5
     labels:
       - "dependencies"
       - "github-actions"
     commit-message:
       prefix: "chore(ci)"
+    cooldown:
+      default-days: 7
+    groups:
+      # Bundle all action minor/patch updates into one weekly PR. Actions
+      # are well-tested and rarely break in non-major versions.
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
