@@ -16,8 +16,8 @@ require (
 	github.com/rs/zerolog v1.35.0
 	github.com/samber/slog-zerolog/v2 v2.9.2
 	github.com/ulikunitz/xz v0.5.15
-	golang.org/x/crypto v0.49.0
-	golang.org/x/sys v0.42.0
+	golang.org/x/crypto v0.50.0
+	golang.org/x/sys v0.43.0
 	gotest.tools/v3 v3.5.2
 	modernc.org/sqlite v1.48.1
 )
@@ -42,8 +42,8 @@ require (
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/samber/slog-common v0.21.0 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
-	golang.org/x/text v0.35.0 // indirect
-	golang.org/x/tools v0.42.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
+	golang.org/x/tools v0.43.0 // indirect
 	modernc.org/libc v1.70.0 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
