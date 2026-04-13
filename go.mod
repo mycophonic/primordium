@@ -17,7 +17,7 @@ require (
 	github.com/samber/slog-zerolog/v2 v2.9.2
 	github.com/ulikunitz/xz v0.5.15
 	golang.org/x/crypto v0.49.0
-	golang.org/x/sys v0.42.0
+	golang.org/x/sys v0.43.0
 	gotest.tools/v3 v3.5.2
 	modernc.org/sqlite v1.48.1
 )
