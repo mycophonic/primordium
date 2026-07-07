@@ -29,9 +29,19 @@ jobs:
           go-version: 'stable'
           cache: true
 
-      - name: Install dependencies
-        run: |
-          make init-dev
+      - name: Install system dependencies
+        run: make init-dev-system
+
+      - name: Cache dev tools
+        id: cache-dev-tools
+        uses: actions/cache@668228422ae6a00e4ad889ee87cd7109ec5666a7  # v5.0.4
+        with:
+          path: ~/go/bin
+          key: dev-tools-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('hack/common.mk') }}
+
+      - name: Install Go dev tools
+        if: steps.cache-dev-tools.outputs.cache-hit != 'true'
+        run: make install-dev-tools
 
       - name: Lint
         run: make lint
