@@ -22,6 +22,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"syscall"
 	"time"
@@ -38,7 +39,7 @@ var (
 // SetDefaults registers signal handlers, exit with timeout.
 // Safe to call multiple times; only the first call has effect.
 func SetDefaults(parent context.Context) context.Context {
-	ctx, cancel := context.WithCancel(parent) //nolint:gosec // G118: cancel is called in the signal goroutine
+	ctx, cancel := context.WithCancel(parent)
 
 	setDefaultsOnce.Do(func() {
 		sigChan := make(chan os.Signal, 1)
@@ -94,8 +95,8 @@ func Shutdown() {
 		copy(handlers, shutdownHandlers)
 		shutdownMu.Unlock()
 
-		for i := len(handlers) - 1; i >= 0; i-- {
-			handlers[i]()
+		for _, v := range slices.Backward(handlers) {
+			v()
 		}
 	})
 }

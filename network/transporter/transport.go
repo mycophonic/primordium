@@ -167,7 +167,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr)
 			}
 
-			//nolint:gosec // G706: slog structured KV
 			slog.Warn("HTTP transport error, retrying",
 				"attempt", attempt+1,
 				"elapsed", elapsed,
@@ -180,7 +179,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			continue
 		}
 
-		//nolint:gosec // G706: slog structured KV
 		slog.Debug("HTTP roundtrip",
 			"status", resp.StatusCode,
 			"elapsed", elapsed,
@@ -193,7 +191,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			resp.StatusCode >= http.StatusInternalServerError
 		if !retryable {
 			if elapsed > slowRequestThreshold {
-				//nolint:gosec // G706: slog structured KV
 				slog.Warn("slow HTTP request",
 					"elapsed", elapsed,
 					"status", resp.StatusCode,
@@ -217,7 +214,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		lastErr = fmt.Errorf("%w: HTTP %d", fault.ErrUnacceptableResponse, resp.StatusCode)
 
 		if attempt == t.maxRetries {
-			//nolint:gosec // G706: slog structured KV
 			slog.Warn("HTTP retries exhausted",
 				"status", resp.StatusCode,
 				"attempts", t.maxRetries+1,
@@ -230,7 +226,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		retryAfterVal = retryAfter(resp.Header)
 
 		if t.maxBackoff > 0 && retryAfterVal > t.maxBackoff {
-			//nolint:gosec // G706: slog structured KV
 			slog.Warn("Retry-After too large, giving up",
 				"status", resp.StatusCode,
 				"retry_after", retryAfterVal,
@@ -243,7 +238,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 
 		nextBackoff := max(retryAfterVal, t.backoffDuration(attempt+1))
 
-		//nolint:gosec // G706: slog structured KV
 		slog.Warn("HTTP error, retrying",
 			"status", resp.StatusCode,
 			"attempt", attempt+1,
