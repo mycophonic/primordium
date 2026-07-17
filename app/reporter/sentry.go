@@ -60,9 +60,10 @@ func Initialize(conf *Config) error {
 		Environment:      conf.Environment,
 		Release:          conf.Release,
 		TracesSampleRate: sampleRate,
-		// EnableLogs activates Sentry's structured logging ingestion so that
-		// slog output captured via the Sentry handler reaches the dashboard.
-		EnableLogs: true,
+		// Structured logging ingestion (so slog output captured via the Sentry
+		// handler reaches the dashboard) is enabled by default as of sentry-go
+		// v0.47.0; the former EnableLogs opt-in is gone, replaced by a DisableLogs
+		// opt-out we do not set.
 		// Use the global default client so that Sentry traffic inherits the
 		// TLS and transport settings configured by network.SetDefaults.
 		HTTPClient: http.DefaultClient,

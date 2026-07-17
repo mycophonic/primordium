@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-// Package logger installs the process-wide stdlib slog handler with sensible
-// defaults: lmittmann/tint for colored console output on a terminal, and slog's
-// JSON handler when stderr is redirected.
-package logger
+// Package term provides thin, cross-platform helpers for interacting with
+// terminals. It wraps mattn/go-isatty so callers get consistent behavior,
+// including detection of Cygwin/MSYS2 pseudo-terminals on Windows.
+package term

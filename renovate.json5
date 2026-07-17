@@ -15,18 +15,4 @@
   // branches; without this, Renovate treats the branch as human-modified and
   // stops rebasing it.
   gitIgnoredAuthors: ["41898282+github-actions[bot]@users.noreply.github.com"],
-  customManagers: [
-    // The aqua preset above only manages the lowercase `aqua_version:` input of
-    // the official installer action, and aqua.yaml itself. The AQUA_VERSION env
-    // of the hand-rolled installer (.github/actions/setup-aqua) needs its own
-    // manager, keyed on the standard renovate comment above the pin.
-    {
-      customType: "regex",
-      managerFilePatterns: ["/^\\.github/.+\\.ya?ml$/"],
-      matchStrings: [
-        "# renovate: depName=(?<depName>[^\\s]+)\\n\\s*AQUA_VERSION: (?<currentValue>[^\\s]+)",
-      ],
-      datasourceTemplate: "github-releases",
-    },
-  ],
 }

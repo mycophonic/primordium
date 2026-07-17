@@ -45,7 +45,6 @@ linters:
     # Specialized linters
     - promlinter # prometheus
     - sloglint # slog
-    - zerologlint # zerolog
 
     # Documentation style
     - godoclint # warn if package level doc is duplicated
@@ -63,6 +62,9 @@ linters:
     - gocritic
     - misspell
     - unconvert
+
+    # Remove legacy behavior
+    - copyloopvar # go 1.22+
 
     # More linters that are enabled by default to review
 
@@ -125,7 +127,6 @@ linters:
 
   disable:
     # These are the linters that we know we do not want
-    - copyloopvar # go 1.22+
     - errchkjson # forces handling of json err (eg: prevents _), which is too much
     - exhaustruct # does not serve much of a purpose
     - ginkgolinter # no ginkgo
@@ -305,8 +306,8 @@ linters:
             # Database
             - modernc.org/sqlite
             # Logging
-            - github.com/rs/zerolog
-            - github.com/samber/slog-zerolog/v2
+            - github.com/lmittmann/tint
+            - github.com/mattn/go-isatty
             # Crypto
             - golang.org/x/crypto/blake2b
             - golang.org/x/crypto/ssh
@@ -320,7 +321,7 @@ linters:
             - github.com/klauspost/compress
             - github.com/klauspost/pgzip
             - github.com/pierrec/lz4
-            - github.com/ulikunitz/xz
+            - github.com/mycophonic/xz # forked from github.com/ulikunitz/xz for performance
             # Vendors
             - github.com/aws/smithy-go
             - github.com/getsentry/sentry-go
