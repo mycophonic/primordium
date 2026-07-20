@@ -152,7 +152,7 @@ func OpenWithDriver(ctx context.Context, driver, path string, pragmas Pragmas) (
 	}
 
 	if pragmas.MaxConns > 0 {
-		conn.SetMaxOpenConns(int(min(pragmas.MaxConns, uint(math.MaxInt)))) //nolint:gosec // Clamped to MaxInt.
+		conn.SetMaxOpenConns(int(min(pragmas.MaxConns, uint(math.MaxInt))))
 	}
 
 	for _, pragma := range pragmas.Statements {

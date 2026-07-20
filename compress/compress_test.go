@@ -26,7 +26,8 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/klauspost/pgzip"
 	"github.com/pierrec/lz4/v4"
-	"github.com/ulikunitz/xz"
+
+	"github.com/mycophonic/xz"
 
 	"github.com/mycophonic/primordium/compress"
 	_ "github.com/mycophonic/primordium/compress/bzip2"

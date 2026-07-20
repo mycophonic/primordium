@@ -36,7 +36,6 @@ func MapFile(file *os.File, size int) ([]byte, Mapping, error) {
 		return nil, Mapping{}, fmt.Errorf("%w: mmap size must be positive, got %d", fault.ErrInvalidArgument, size)
 	}
 
-	//nolint:gosec // G115: fd is a small non-negative int
 	data, err := syscall.Mmap(
 		int(file.Fd()),
 		0,

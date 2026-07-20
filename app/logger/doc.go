@@ -14,5 +14,7 @@
    limitations under the License.
 */
 
-// Package logger configures zerolog with sensible defaults as a backend for stdlib slog.
+// Package logger installs the process-wide stdlib slog handler with sensible
+// defaults: lmittmann/tint for colored console output on a terminal, and slog's
+// JSON handler when stderr is redirected.
 package logger

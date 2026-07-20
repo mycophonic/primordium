@@ -50,7 +50,7 @@ func New(ctx context.Context, opts *Options) context.Context {
 	// Filesystem first. Wipe out system umask, set the app name for locations.
 	filesystem.Initialize(opts.Name)
 
-	// Set the logger: honor LOG_LEVEL env var, set the zerolog wrapper for slog.
+	// Set the logger: honor LOG_LEVEL env var, install the tint/JSON slog handler.
 	debug := logger.SetDefaultsForLogger(ctx)
 
 	// Configure the default http and ssh configurations.

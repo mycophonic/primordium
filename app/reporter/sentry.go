@@ -60,9 +60,6 @@ func Initialize(conf *Config) error {
 		Environment:      conf.Environment,
 		Release:          conf.Release,
 		TracesSampleRate: sampleRate,
-		// EnableLogs activates Sentry's structured logging ingestion so that
-		// slog output captured via the Sentry handler reaches the dashboard.
-		EnableLogs: true,
 		// Use the global default client so that Sentry traffic inherits the
 		// TLS and transport settings configured by network.SetDefaults.
 		HTTPClient: http.DefaultClient,
@@ -70,6 +67,14 @@ func Initialize(conf *Config) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
+
+	// Route slog into Sentry: wrap the current default handler (the console
+	// handler that logger.SetDefaultsForLogger installed) so ERROR records become
+	// Sentry events and lower levels become breadcrumbs, while the console keeps
+	// writing everything to stderr. Done here, after Init, because the Sentry
+	// client must exist before the handler can capture. Without this step nothing
+	// reaches Sentry — sentry.Init alone does not observe slog.
+	slog.SetDefault(slog.New(newSentryHandler(slog.Default().Handler())))
 
 	slog.Info("Reporter Sentry configured")
 

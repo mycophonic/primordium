@@ -20,68 +20,69 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/rs/zerolog"
-	"github.com/rs/zerolog/log"
-	slogzerolog "github.com/samber/slog-zerolog/v2"
+	"github.com/lmittmann/tint"
+
+	"github.com/mycophonic/primordium/term"
 )
 
-// SetDefaultsForLogger configures a global zerolog logger with sensible defaults.
-// It uses a console writer with RFC3339 timestamps for human-readable output.
-// If a log level is provided, it sets that level. Otherwise, it reads from the LOG_LEVEL
-// environment variable (defaults to "info" if not set or invalid).
-func SetDefaultsForLogger(_ context.Context, level ...zerolog.Level) bool {
-	zerolog.TimeFieldFormat = time.RFC3339
-	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-
-	// Determine effective level
-	var effectiveLevel zerolog.Level
+// SetDefaultsForLogger installs the process-wide slog handler. When stderr is a
+// terminal it uses lmittmann/tint for colored, human-readable console output with
+// RFC3339 timestamps; when stderr is redirected (file, pipe, CI) it falls back to
+// slog's JSON handler so logs stay machine-parseable.
+//
+// The level comes from the optional argument, else the LOG_LEVEL environment
+// variable (debug/info/warn/error — "trace" maps to debug, which slog has no
+// distinct level for), defaulting to info. It returns true when the effective
+// level is debug or lower, for callers that gate debug-only behavior (e.g. the
+// Sentry reporter).
+func SetDefaultsForLogger(_ context.Context, level ...slog.Level) bool {
+	var (
+		effective slog.Level
+		badEnv    string
+	)
 
 	if len(level) > 0 {
-		effectiveLevel = level[0]
+		effective = level[0]
+	} else if lvl, ok := parseLevel(os.Getenv("LOG_LEVEL")); ok {
+		effective = lvl
 	} else {
-		logLevel := os.Getenv("LOG_LEVEL")
-		if logLevel == "" {
-			logLevel = "info"
-		}
-
-		var err error
-
-		effectiveLevel, err = zerolog.ParseLevel(logLevel)
-		if err != nil {
-			effectiveLevel = zerolog.InfoLevel
-
-			log.Warn().Str("LOG_LEVEL", logLevel).Msg("Invalid log level, defaulting to info")
-		}
+		effective = slog.LevelInfo
+		badEnv = os.Getenv("LOG_LEVEL")
 	}
 
-	// Apply to zerolog
-	zerolog.SetGlobalLevel(effectiveLevel)
+	var handler slog.Handler
+	if term.IsTerminal(os.Stderr.Fd()) {
+		handler = tint.NewTextHandler(os.Stderr, &tint.Options{Level: effective, TimeFormat: time.RFC3339})
+	} else {
+		handler = slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{Level: effective})
+	}
 
-	// Apply to slog (via zerolog handler)
-	slog.SetDefault(slog.New(slogzerolog.Option{
-		Level:  zerologToSlog(effectiveLevel),
-		Logger: &log.Logger,
-	}.NewZerologHandler()))
+	slog.SetDefault(slog.New(handler))
 
-	return effectiveLevel == zerolog.DebugLevel
+	if badEnv != "" {
+		slog.Warn("invalid LOG_LEVEL, defaulting to info", "LOG_LEVEL", badEnv)
+	}
+
+	return effective <= slog.LevelDebug
 }
 
-// zerologToSlog maps zerolog levels to slog levels.
-func zerologToSlog(level zerolog.Level) slog.Level {
-	switch level {
-	case zerolog.TraceLevel:
-		return slog.LevelDebug - 4 //nolint:mnd // slog has no trace, use lower than debug
-	case zerolog.DebugLevel:
-		return slog.LevelDebug
-	case zerolog.WarnLevel:
-		return slog.LevelWarn
-	case zerolog.ErrorLevel, zerolog.FatalLevel, zerolog.PanicLevel:
-		return slog.LevelError
-	case zerolog.InfoLevel, zerolog.NoLevel, zerolog.Disabled:
-		return slog.LevelInfo
+// parseLevel maps a LOG_LEVEL string to a slog.Level. slog has no trace level, so
+// "trace" collapses to debug. ok is false only for a non-empty, unrecognized value
+// (so the caller can warn); an empty value is a valid "use the default" and returns info.
+func parseLevel(value string) (slog.Level, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "info":
+		return slog.LevelInfo, true
+	case "trace", "debug":
+		return slog.LevelDebug, true
+	case "warn", "warning":
+		return slog.LevelWarn, true
+	case "error":
+		return slog.LevelError, true
+	default:
+		return slog.LevelInfo, false
 	}
-
-	return slog.LevelInfo
 }

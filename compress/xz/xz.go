@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"io"
 
-	uxz "github.com/ulikunitz/xz"
+	uxz "github.com/mycophonic/xz"
 
 	"github.com/mycophonic/primordium/compress"
 	"github.com/mycophonic/primordium/fault"
