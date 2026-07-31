@@ -155,6 +155,130 @@ func (c *Cache) Acquire(dgst digest.Digest) (io.ReadCloser, io.WriteCloser, erro
 	)
 }
 
+// PinnedFile is a complete cached blob exposed as an immutable on-disk file,
+// pinned against garbage collection until Release is called.
+type PinnedFile struct {
+	// Path locates the blob's data file. The bytes there are complete and
+	// immutable (rename-committed, content-addressed) for as long as the
+	// pin is held.
+	Path string
+	// Size is the byte length of the file at Path.
+	Size int64
+
+	lockFile *os.File
+}
+
+// Release drops the pin. The path must not be used afterwards.
+func (p *PinnedFile) Release() error {
+	//nolint:wrapcheck // single flock call; context adds nothing
+	return flock.Unlock(p.lockFile)
+}
+
+// AcquireFile returns COMPLETE cached content as a GC-pinned on-disk file.
+// It exists for consumers that need the blob as an immutable file rather
+// than a stream — attaching it to a virtual machine as a read-only block
+// device, say — where a reader cannot serve.
+//
+// It never exposes in-progress data: if the content is absent, or a writer
+// is still streaming it, it fails with fault.ErrNotFound, and the caller is
+// expected to complete a regular Acquire first and try again. The pin is the
+// same shared read flock a reader holds, so GarbageCollect skips the entry
+// while the pin is outstanding.
+func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
+	name := strings.Replace(dgst.String(), ":", "-", 1)
+	prefix := dgst.Encoded()[:2]
+	resourceDir := filepath.Join(c.rootDir, prefix, name)
+	dataPath := filepath.Join(resourceDir, cacheDataFile)
+	readLockPath := filepath.Join(resourceDir, cacheLockFile)
+	writeLockPath := filepath.Join(resourceDir, cacheWriteLock)
+
+	// Fast miss, decided WITHOUT locks: this function never creates entries,
+	// so an absent entry directory is a definitive miss. It must not be
+	// derived from the lock ladder failing — flock.Lock on a missing path
+	// fails on Unix (it opens the directory itself) but SUCCEEDS on Windows
+	// (it locks a sibling file it creates on demand), which turned this miss
+	// into a mid-ladder filesystem error there. Locklessness is sound in
+	// both directions: a stale positive is re-verified by the data-file stat
+	// under the locks below, and a stale negative is the same answer a
+	// locked probe would have returned a moment earlier.
+	if _, err := xos.Stat(resourceDir); err != nil {
+		return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
+	}
+
+	// Same lock ladder as Acquire (global → entry dir → read lock → write
+	// probe); see Acquire for the step-by-step rationale.
+	if err := os.MkdirAll(filepath.Join(c.rootDir, prefix), filesystem.DirPermissionsPrivate); err != nil {
+		return nil, fmt.Errorf("%w: cache rootDir: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	globalLock, err := flock.Lock(filepath.Join(c.rootDir, prefix))
+	if err != nil {
+		return nil, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	dirLock, err := flock.Lock(resourceDir)
+	_ = flock.Unlock(globalLock)
+
+	if err != nil {
+		// Concurrent GC may have deleted the entry between the stat above
+		// and here (Unix surfaces that as a failed lock).
+		if _, statErr := xos.Stat(resourceDir); statErr != nil {
+			return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
+		}
+
+		return nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
+	}
+
+	if err := touchFile(readLockPath); err != nil {
+		_ = flock.Unlock(dirLock)
+
+		// Same GC race, as Windows surfaces it: the sibling-file lock above
+		// succeeds even when the entry directory is gone, so the deletion is
+		// only discovered here, creating the read-lock file inside it.
+		if _, statErr := xos.Stat(resourceDir); statErr != nil {
+			return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
+		}
+
+		return nil, fmt.Errorf("%w: lock file: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	lockFile, err := flock.ReadOnlyLock(readLockPath)
+	if err != nil {
+		_ = flock.Unlock(dirLock)
+
+		return nil, fmt.Errorf("%w: read lock: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	pin := &PinnedFile{lockFile: lockFile}
+
+	// An active writer means the data file (if present at all) is a stale
+	// name for in-flight bytes: refuse rather than expose it.
+	writeLock, tryLockErr := flock.TryLock(writeLockPath)
+	if tryLockErr != nil {
+		_ = pin.Release()
+		_ = flock.Unlock(dirLock)
+
+		return nil, fmt.Errorf("%w: content for %s is still being written", fault.ErrNotFound, dgst.String())
+	}
+
+	_ = flock.Unlock(writeLock)
+
+	info, statErr := xos.Stat(dataPath)
+
+	_ = flock.Unlock(dirLock)
+
+	if statErr != nil {
+		_ = pin.Release()
+
+		return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
+	}
+
+	pin.Path = dataPath
+	pin.Size = info.Size()
+
+	return pin, nil
+}
+
 // Exists reports whether cached content for the given digest is present on disk.
 // This is a lockless, best-effort check (subject to TOCTOU races) intended for
 // fast-path skipping in bulk operations where a subsequent Acquire handles correctness.

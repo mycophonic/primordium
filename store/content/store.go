@@ -19,6 +19,7 @@ package content
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -39,6 +40,9 @@ import (
 // rather than inside it: the GC walks the cache root treating every child as a
 // shard bucket, and a staging directory there would be walked as one.
 const stagingDir = "staging"
+
+// errFmtFetch wraps a failed FetchFunc invocation.
+const errFmtFetch = "%w: fetch: %w"
 
 // algorithmToID maps digest algorithms to stable numeric identifiers for
 // on-disk index records. These IDs are a persistence contract owned by this
@@ -188,6 +192,78 @@ func (s *Store) Acquire(identifier string, dgst digest.Digest, fetch FetchFunc) 
 	return s.fetchAndHash(key, fetch)
 }
 
+// AcquireFile is Acquire for consumers that need the blob as a complete,
+// immutable, GC-pinned file on disk rather than a stream — attaching a
+// cached blob to a virtual machine as a read-only block device is the
+// motivating case. The returned pin must be held (and then Released) for as
+// long as the file is in use.
+//
+// On a hit this costs an index lookup and a lock acquisition; no content is
+// read. On a miss it drives fetch to COMPLETION first — a file consumer
+// cannot tail an in-flight fetch, so the digest-less path stages, hashes and
+// commits synchronously — and then pins the committed blob.
+func (s *Store) AcquireFile(
+	identifier string, dgst digest.Digest, fetch FetchFunc,
+) (*cache.PinnedFile, error) {
+	key := hashKey(identifier)
+
+	resolved := dgst
+	if resolved == nil {
+		rec, found, err := s.idx.Get(key)
+		if err != nil {
+			return nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
+		}
+
+		if found {
+			resolved, _ = decodeValue(rec.Value)
+		}
+	}
+
+	// Warm path: the blob is committed and merely needs pinning.
+	if resolved != nil {
+		pin, err := s.cache.AcquireFile(resolved)
+		if err == nil {
+			return pin, nil
+		}
+
+		if !errors.Is(err, fault.ErrNotFound) {
+			//nolint:wrapcheck // cache errors already carry fault sentinels
+			return nil, err
+		}
+	}
+
+	// Miss. With a digest in hand (caller-provided, or indexed but its blob
+	// reclaimed), the regular Acquire fetches and verifies through the cache
+	// pipe; draining the reader waits for the rename-commit.
+	if resolved != nil {
+		reader, _, err := s.Acquire(identifier, dgst, fetch)
+		if err != nil {
+			return nil, err
+		}
+
+		_, copyErr := io.Copy(io.Discard, reader)
+		_ = reader.Close()
+
+		if copyErr != nil {
+			return nil, fmt.Errorf("%w: completing fetch: %w", fault.ErrWriteFailure, copyErr)
+		}
+
+		//nolint:wrapcheck // cache errors already carry fault sentinels
+		return s.cache.AcquireFile(resolved)
+	}
+
+	// Digest-less miss: stage/hash/commit synchronously. Acquire's own
+	// digest-less path commits in a background goroutine after its reader
+	// drains, which would leave this function racing the index write.
+	committed, err := s.commitDigestless(key, fetch)
+	if err != nil {
+		return nil, err
+	}
+
+	//nolint:wrapcheck // cache errors already carry fault sentinels
+	return s.cache.AcquireFile(committed)
+}
+
 // Invalidate removes the index entry for the given identifier.
 // The next Acquire for this identifier will be a cache miss, triggering a fresh fetch.
 // Cached content blobs are not removed — they may be shared by other identifiers
@@ -201,6 +277,54 @@ func (s *Store) Invalidate(identifier string) error {
 	}
 
 	return nil
+}
+
+// commitDigestless fetches, stages, hashes, and commits a digest-less blob,
+// returning its digest once the blob and its index entry are durable. It is
+// fetchAndHash minus the streaming reader: everything happens synchronously.
+func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (digest.Digest, error) {
+	source, err := fetch()
+	if err != nil {
+		return nil, fmt.Errorf(errFmtFetch, fault.ErrReadFailure, err)
+	}
+
+	staged, dgst, err := s.stage(source)
+	_ = source.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() { _ = staged.Close() }()
+
+	reader, writer, err := s.cache.Acquire(dgst)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	if writer != nil {
+		_, writeErr := io.Copy(writer, staged)
+		closeErr := writer.Close()
+		_ = reader.Close()
+
+		if writeErr != nil || closeErr != nil {
+			return nil, fmt.Errorf("%w: committing staged blob: %w", fault.ErrWriteFailure,
+				errors.Join(writeErr, closeErr))
+		}
+	} else {
+		// Another writer got there first (concurrent fetch of identical
+		// content): draining the reader waits for its commit.
+		_, copyErr := io.Copy(io.Discard, reader)
+		_ = reader.Close()
+
+		if copyErr != nil {
+			return nil, fmt.Errorf("%w: waiting for concurrent commit: %w", fault.ErrWriteFailure, copyErr)
+		}
+	}
+
+	_ = s.idx.Put(key, encodeDigest(dgst), time.Now().UnixNano())
+
+	return dgst, nil
 }
 
 // fetchWithDigest acquires content from cache by digest.
@@ -280,7 +404,7 @@ func (s *Store) fetchAndHash(
 
 	source, err := fetch()
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: fetch: %w", fault.ErrReadFailure, err)
+		return nil, time.Time{}, fmt.Errorf(errFmtFetch, fault.ErrReadFailure, err)
 	}
 
 	staged, dgst, err := s.stage(source)

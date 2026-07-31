@@ -28,6 +28,7 @@ import (
 
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/content"
 )
 
@@ -1150,4 +1151,107 @@ func (r *truncatedReader) Read(p []byte) (int, error) {
 	r.pos += toRead
 
 	return toRead, nil
+}
+
+func TestStore_AcquireFileColdAndWarm(t *testing.T) {
+	t.Parallel()
+
+	cs, err := content.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("content.New() error: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	payload := []byte("acquire-file payload bytes")
+	fetches := 0
+	fetch := func() (io.ReadCloser, error) {
+		fetches++
+
+		return io.NopCloser(bytes.NewReader(payload)), nil
+	}
+
+	// Cold: fetch runs to completion synchronously; the pinned file holds
+	// exactly the payload.
+	pin, err := cs.AcquireFile("acquire-file-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("AcquireFile() cold error: %v", err)
+	}
+
+	if fetches != 1 {
+		t.Errorf("cold fetches = %d, want 1", fetches)
+	}
+
+	if pin.Size != int64(len(payload)) {
+		t.Errorf("size = %d, want %d", pin.Size, len(payload))
+	}
+
+	got, err := xos.ReadFile(pin.Path)
+	if err != nil || !bytes.Equal(got, payload) {
+		t.Errorf("file content = %q (%v), want %q", got, err, payload)
+	}
+
+	if err := pin.Release(); err != nil {
+		t.Errorf("Release() error: %v", err)
+	}
+
+	// Warm: no fetch, same content.
+	warm, err := cs.AcquireFile("acquire-file-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("AcquireFile() warm error: %v", err)
+	}
+	defer func() { _ = warm.Release() }()
+
+	if fetches != 1 {
+		t.Errorf("warm fetches = %d, want 1 (no refetch)", fetches)
+	}
+
+	if warm.Path != pin.Path || warm.Size != pin.Size {
+		t.Errorf("warm (path,size) = (%q,%d), want (%q,%d)", warm.Path, warm.Size, pin.Path, pin.Size)
+	}
+}
+
+func TestStore_AcquireFileSharesBlobWithAcquire(t *testing.T) {
+	t.Parallel()
+
+	cs, err := content.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("content.New() error: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	payload := []byte("shared between stream and file consumers")
+	fetches := 0
+	fetch := func() (io.ReadCloser, error) {
+		fetches++
+
+		return io.NopCloser(bytes.NewReader(payload)), nil
+	}
+
+	// Populate via the streaming API...
+	reader, _, err := cs.Acquire("shared-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatalf("drain error: %v", err)
+	}
+
+	_ = reader.Close()
+
+	// ...then pin the same blob as a file without refetching.
+	pin, err := cs.AcquireFile("shared-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("AcquireFile() error: %v", err)
+	}
+	defer func() { _ = pin.Release() }()
+
+	if fetches != 1 {
+		t.Errorf("fetches = %d, want 1", fetches)
+	}
+
+	got, err := xos.ReadFile(pin.Path)
+	if err != nil || !bytes.Equal(got, payload) {
+		t.Errorf("file content = %q (%v), want %q", got, err, payload)
+	}
 }

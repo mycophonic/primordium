@@ -29,4 +29,8 @@ const (
 	DefaultCacheQuota = 50 << 30
 
 	errFmtEntryDir = "%w: entry directory: %w"
+
+	// errFmtNoContent is AcquireFile's miss: no complete cached blob for the
+	// digest (first %w is fault.ErrNotFound).
+	errFmtNoContent = "%w: no cached content for %s"
 )
