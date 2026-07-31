@@ -22,15 +22,23 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"sync"
 	"time"
 
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem"
+	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/cache"
 	"github.com/mycophonic/primordium/store/index"
 )
+
+// stagingDir holds in-flight digest-less fetches. It sits beside the cache
+// rather than inside it: the GC walks the cache root treating every child as a
+// shard bucket, and a staging directory there would be walked as one.
+const stagingDir = "staging"
 
 // algorithmToID maps digest algorithms to stable numeric identifiers for
 // on-disk index records. These IDs are a persistence contract owned by this
@@ -81,7 +89,10 @@ type Options struct {
 type Store struct {
 	cache *cache.Cache
 	idx   *index.Index
-	wg    sync.WaitGroup
+	// root is the store directory, used to stage digest-less fetches on the
+	// same filesystem as the cache they are about to be written into.
+	root string
+	wg   sync.WaitGroup
 }
 
 // New creates a content store under root, using root/cache for the
@@ -108,6 +119,7 @@ func New(root string, opts *Options) (*Store, error) {
 	return &Store{
 		cache: cache.New(filepath.Join(root, "cache"), quota),
 		idx:   idx,
+		root:  root,
 	}, nil
 }
 
@@ -264,35 +276,26 @@ func (s *Store) fetchAndHash(
 	key uint64,
 	fetch FetchFunc,
 ) (io.ReadCloser, time.Time, error) {
-	slog.Debug("fetching without digest (will buffer and hash)")
+	slog.Debug("fetching without digest (will stage and hash)")
 
 	source, err := fetch()
 	if err != nil {
 		return nil, time.Time{}, fmt.Errorf("%w: fetch: %w", fault.ErrReadFailure, err)
 	}
 
-	content, err := readAllSized(source)
+	staged, dgst, err := s.stage(source)
 	_ = source.Close()
 
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: read: %w", fault.ErrReadFailure, err)
-	}
-
-	slog.Debug("content buffered, computing digest", "size", len(content))
-
-	// Compute content digest.
-	hasher := digest.BLAKE2b256.Hash()
-	_, _ = hasher.Write(content)
-
-	dgst, err := digest.New(digest.BLAKE2b256, hasher.Sum(nil))
-	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
+		return nil, time.Time{}, err
 	}
 
 	slog.Debug("computed digest", "digest", dgst.String())
 
 	reader, writer, err := s.cache.Acquire(dgst)
 	if err != nil {
+		_ = staged.Close()
+
 		return nil, time.Time{}, fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
@@ -301,19 +304,28 @@ func (s *Store) fetchAndHash(
 
 	if writer != nil {
 		s.wg.Go(func() {
-			_, writeErr := writer.Write(content)
+			// Closing the staged file drops the last reference to an
+			// already-unlinked inode, so the space is returned here.
+			defer func() { _ = staged.Close() }()
+
+			_, writeErr := io.Copy(writer, staged)
 
 			closeErr := writer.Close()
 
 			if writeErr == nil && closeErr == nil {
-				slog.Debug("buffered write complete", "digest", dgst.String())
+				slog.Debug("staged write complete", "digest", dgst.String())
 
 				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+			} else {
+				slog.Warn("staged write failed", "digest", dgst.String(),
+					"writeErr", writeErr, "closeErr", closeErr)
 			}
 		})
 
 		return reader, now, nil
 	}
+
+	_ = staged.Close()
 
 	slog.Debug("blob already cached", "digest", dgst.String())
 
@@ -321,6 +333,62 @@ func (s *Store) fetchAndHash(
 	_ = s.idx.Put(key, encodedDgst, now.UnixNano())
 
 	return reader, now, nil
+}
+
+// stage writes source to a scratch file while hashing it, and returns that file
+// rewound to the start together with the content digest.
+//
+// A digest-less fetch cannot be addressed until it has been read to the end, so
+// the bytes have to live somewhere in the meantime. On disk rather than in
+// memory: callers hand this path arbitrarily large blobs (a flattened container
+// rootfs, for instance), and buffering those in RAM makes peak memory track
+// content size — several times the blob once the growing []byte is counted.
+// Staging keeps it flat regardless of size.
+//
+// The scratch file is unlinked immediately after creation and used only through
+// the open descriptor. Nothing has to clean it up: the kernel frees the space
+// when the descriptor closes, including when the process is killed mid-fetch,
+// so there is no stale-file sweep and no interference between concurrent
+// callers. It lives under the store root so it lands on the same filesystem as
+// the cache — the space it needs is space the cache was about to need anyway.
+func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
+	dir := filepath.Join(s.root, stagingDir)
+	if err := os.MkdirAll(dir, filesystem.DirPermissionsPrivate); err != nil {
+		return nil, nil, fmt.Errorf("%w: staging dir: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	file, err := xos.CreateTemp(dir, "blob-*")
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: staging file: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	_ = os.Remove(file.Name())
+
+	hasher := digest.BLAKE2b256.Hash()
+
+	written, err := io.Copy(io.MultiWriter(file, hasher), source)
+	if err != nil {
+		_ = file.Close()
+
+		return nil, nil, fmt.Errorf("%w: read: %w", fault.ErrReadFailure, err)
+	}
+
+	slog.Debug("content staged, computing digest", "size", written)
+
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = file.Close()
+
+		return nil, nil, fmt.Errorf("%w: rewind staging file: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	dgst, err := digest.New(digest.BLAKE2b256, hasher.Sum(nil))
+	if err != nil {
+		_ = file.Close()
+
+		return nil, nil, fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
+	}
+
+	return file, dgst, nil
 }
 
 // encodeDigest encodes a digest as [algID:1][rawDigest:N] for index storage.
@@ -375,27 +443,4 @@ func hashKey(s string) uint64 {
 	_, _ = h.Write([]byte(s))
 
 	return binary.BigEndian.Uint64(h.Sum(nil)[:8])
-}
-
-// readAllSized reads all bytes from r. If r implements Size() int64 and
-// returns a positive value, the buffer is preallocated to avoid repeated
-// grow-and-copy cycles on large responses.
-func readAllSized(reader io.Reader) ([]byte, error) {
-	type sizer interface {
-		Size() int64
-	}
-
-	if sized, ok := reader.(sizer); ok {
-		if n := sized.Size(); n > 0 {
-			slog.Debug("preallocating read buffer", "size", n)
-
-			buf := make([]byte, n)
-
-			_, err := io.ReadFull(reader, buf)
-
-			return buf, err //nolint:wrapcheck // caller wraps
-		}
-	}
-
-	return io.ReadAll(reader) //nolint:wrapcheck // caller wraps
 }
