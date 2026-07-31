@@ -18,6 +18,7 @@ package cache
 
 import (
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -252,13 +253,29 @@ func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 	pin := &PinnedFile{lockFile: lockFile}
 
 	// An active writer means the data file (if present at all) is a stale
-	// name for in-flight bytes: refuse rather than expose it.
+	// name for in-flight bytes: refuse rather than expose it. Touch first,
+	// like Acquire's step 5 — on Unix TryLock opens the path itself, so a
+	// missing lock file would read as a probe failure rather than a free lock.
+	if err := touchFile(writeLockPath); err != nil {
+		_ = pin.Release()
+		_ = flock.Unlock(dirLock)
+
+		return nil, fmt.Errorf("%w: write lock file: %w", fault.ErrFilesystemFailure, err)
+	}
+
 	writeLock, tryLockErr := flock.TryLock(writeLockPath)
 	if tryLockErr != nil {
 		_ = pin.Release()
 		_ = flock.Unlock(dirLock)
 
-		return nil, fmt.Errorf("%w: content for %s is still being written", fault.ErrNotFound, dgst.String())
+		// Only a held lock means an active writer. Anything else (EACCES,
+		// EMFILE, …) is a filesystem fault, not a miss — reporting it as
+		// ErrNotFound would send the caller into a pointless refetch.
+		if errors.Is(tryLockErr, flock.ErrLockWouldBlock) {
+			return nil, fmt.Errorf("%w: content for %s is still being written", fault.ErrNotFound, dgst.String())
+		}
+
+		return nil, fmt.Errorf("%w: write lock: %w", fault.ErrFilesystemFailure, tryLockErr)
 	}
 
 	_ = flock.Unlock(writeLock)

@@ -18,6 +18,7 @@ package compress_test
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"os/exec"
@@ -252,5 +253,52 @@ func TestDecompress_PartialPeek(t *testing.T) {
 	_, err := compress.Decompress(bytes.NewReader([]byte{0xAB, 0xCD}))
 	if !errors.Is(err, fault.ErrNotImplemented) {
 		t.Fatalf("expected fault.ErrNotImplemented for partial peek, got: %v", err)
+	}
+}
+
+// TestDecompress_LZ4ParallelMultiBlock exercises the concurrent decode path
+// the lz4 subpackage enables: a payload spanning many independent blocks,
+// followed by a skippable frame (the sector padding a blob store appends),
+// must round-trip exactly and reach clean EOF.
+func TestDecompress_LZ4ParallelMultiBlock(t *testing.T) {
+	t.Parallel()
+
+	payload := bytes.Repeat([]byte("parallel lz4 block decode round-trip "), 200000)
+
+	var buf bytes.Buffer
+
+	writer := lz4.NewWriter(&buf)
+	if err := writer.Apply(lz4.BlockSizeOption(lz4.Block64Kb), lz4.ConcurrencyOption(-1)); err != nil {
+		t.Fatalf("writer options: %v", err)
+	}
+
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatalf("compress: %v", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close writer: %v", err)
+	}
+
+	// Trailing skippable frame: magic 0x184D2A50 + LE length + zeros.
+	tail := make([]byte, 512)
+	binary.LittleEndian.PutUint32(tail[0:4], 0x184D2A50)
+	binary.LittleEndian.PutUint32(tail[4:8], uint32(len(tail)-8))
+	buf.Write(tail)
+
+	decompressed, err := compress.Decompress(&buf)
+	if err != nil {
+		t.Fatalf("Decompress: %v", err)
+	}
+
+	defer func() { _ = decompressed.Close() }()
+
+	got, err := io.ReadAll(decompressed)
+	if err != nil {
+		t.Fatalf("parallel decode failed (or the skippable tail broke it): %v", err)
+	}
+
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("round-trip mismatch: got %d bytes, want %d", len(got), len(payload))
 	}
 }

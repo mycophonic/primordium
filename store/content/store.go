@@ -242,26 +242,26 @@ func (s *Store) AcquireFile(
 		}
 
 		_, copyErr := io.Copy(io.Discard, reader)
-		_ = reader.Close()
-
 		if copyErr != nil {
+			_ = reader.Close()
+
 			return nil, fmt.Errorf("%w: completing fetch: %w", fault.ErrWriteFailure, copyErr)
 		}
 
+		// Pin while the reader's shared read lock is still held: releasing
+		// it first would open a window for GC to reclaim the freshly
+		// committed blob before the pin lands.
+		pin, pinErr := s.cache.AcquireFile(resolved)
+		_ = reader.Close()
+
 		//nolint:wrapcheck // cache errors already carry fault sentinels
-		return s.cache.AcquireFile(resolved)
+		return pin, pinErr
 	}
 
-	// Digest-less miss: stage/hash/commit synchronously. Acquire's own
+	// Digest-less miss: stage/hash/commit/pin synchronously. Acquire's own
 	// digest-less path commits in a background goroutine after its reader
 	// drains, which would leave this function racing the index write.
-	committed, err := s.commitDigestless(key, fetch)
-	if err != nil {
-		return nil, err
-	}
-
-	//nolint:wrapcheck // cache errors already carry fault sentinels
-	return s.cache.AcquireFile(committed)
+	return s.commitDigestless(key, fetch)
 }
 
 // Invalidate removes the index entry for the given identifier.
@@ -279,10 +279,13 @@ func (s *Store) Invalidate(identifier string) error {
 	return nil
 }
 
-// commitDigestless fetches, stages, hashes, and commits a digest-less blob,
-// returning its digest once the blob and its index entry are durable. It is
-// fetchAndHash minus the streaming reader: everything happens synchronously.
-func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (digest.Digest, error) {
+// commitDigestless fetches, stages, hashes, commits, and pins a digest-less
+// blob. It is fetchAndHash minus the streaming reader: everything happens
+// synchronously, and the blob is pinned before the fetch's read lock is
+// released so GC cannot reclaim it in between. The index write is
+// best-effort: the pin is valid without it, and a missed entry only costs a
+// refetch on some later call.
+func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (*cache.PinnedFile, error) {
 	source, err := fetch()
 	if err != nil {
 		return nil, fmt.Errorf(errFmtFetch, fault.ErrReadFailure, err)
@@ -305,9 +308,10 @@ func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (digest.Digest, er
 	if writer != nil {
 		_, writeErr := io.Copy(writer, staged)
 		closeErr := writer.Close()
-		_ = reader.Close()
 
 		if writeErr != nil || closeErr != nil {
+			_ = reader.Close()
+
 			return nil, fmt.Errorf("%w: committing staged blob: %w", fault.ErrWriteFailure,
 				errors.Join(writeErr, closeErr))
 		}
@@ -315,16 +319,28 @@ func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (digest.Digest, er
 		// Another writer got there first (concurrent fetch of identical
 		// content): draining the reader waits for its commit.
 		_, copyErr := io.Copy(io.Discard, reader)
-		_ = reader.Close()
-
 		if copyErr != nil {
+			_ = reader.Close()
+
 			return nil, fmt.Errorf("%w: waiting for concurrent commit: %w", fault.ErrWriteFailure, copyErr)
 		}
 	}
 
-	_ = s.idx.Put(key, encodeDigest(dgst), time.Now().UnixNano())
+	// Pin while the reader's shared read lock still protects the entry from
+	// GC; only then let the reader go.
+	pin, pinErr := s.cache.AcquireFile(dgst)
+	_ = reader.Close()
 
-	return dgst, nil
+	if pinErr != nil {
+		//nolint:wrapcheck // cache errors already carry fault sentinels
+		return nil, pinErr
+	}
+
+	if err := s.idx.Put(key, encodeDigest(dgst), time.Now().UnixNano()); err != nil {
+		slog.Warn("index write failed after commit", "digest", dgst.String(), "err", err)
+	}
+
+	return pin, nil
 }
 
 // fetchWithDigest acquires content from cache by digest.
@@ -365,12 +381,19 @@ func (s *Store) fetchWithDigest(
 			_, copyErr := io.Copy(writer, source)
 			_ = source.Close()
 
+			// Index BEFORE the writer's commit-and-unlock: readers only see
+			// EOF once Close releases the write lock, so a drained reader is
+			// guaranteed to observe the index entry. The mapping stays valid
+			// even if Close then fails — an entry pointing at an absent blob
+			// is the same recoverable state a GC-reclaimed blob leaves.
+			if copyErr == nil {
+				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+			}
+
 			closeErr := writer.Close()
 
 			if copyErr == nil && closeErr == nil {
 				slog.Debug("background write complete", "digest", dgst.String())
-
-				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
 			} else {
 				slog.Warn("background write failed", "digest", dgst.String(),
 					"copyErr", copyErr, "closeErr", closeErr)
@@ -434,12 +457,16 @@ func (s *Store) fetchAndHash(
 
 			_, writeErr := io.Copy(writer, staged)
 
+			// Index before Close — see fetchWithDigest: drained readers must
+			// be guaranteed to observe the entry.
+			if writeErr == nil {
+				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+			}
+
 			closeErr := writer.Close()
 
 			if writeErr == nil && closeErr == nil {
 				slog.Debug("staged write complete", "digest", dgst.String())
-
-				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
 			} else {
 				slog.Warn("staged write failed", "digest", dgst.String(),
 					"writeErr", writeErr, "closeErr", closeErr)
@@ -486,7 +513,12 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 		return nil, nil, fmt.Errorf("%w: staging file: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	_ = os.Remove(file.Name())
+	if err := os.Remove(file.Name()); err != nil {
+		// The unlink-on-create contract above no longer holds for this file:
+		// nothing else will ever remove it, so at least leave a trace.
+		slog.Warn("failed to unlink staging file, it will persist after close",
+			"path", file.Name(), "err", err)
+	}
 
 	hasher := digest.BLAKE2b256.Hash()
 
