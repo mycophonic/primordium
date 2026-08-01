@@ -28,6 +28,7 @@ import (
 
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/content"
 )
 
@@ -1150,4 +1151,161 @@ func (r *truncatedReader) Read(p []byte) (int, error) {
 	r.pos += toRead
 
 	return toRead, nil
+}
+
+func TestStore_AcquireFileColdAndWarm(t *testing.T) {
+	t.Parallel()
+
+	cs, err := content.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("content.New() error: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	payload := []byte("acquire-file payload bytes")
+	fetches := 0
+	fetch := func() (io.ReadCloser, error) {
+		fetches++
+
+		return io.NopCloser(bytes.NewReader(payload)), nil
+	}
+
+	// Cold: fetch runs to completion synchronously; the pinned file holds
+	// exactly the payload.
+	pin, err := cs.AcquireFile("acquire-file-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("AcquireFile() cold error: %v", err)
+	}
+
+	if fetches != 1 {
+		t.Errorf("cold fetches = %d, want 1", fetches)
+	}
+
+	if pin.Size != int64(len(payload)) {
+		t.Errorf("size = %d, want %d", pin.Size, len(payload))
+	}
+
+	got, err := xos.ReadFile(pin.Path)
+	if err != nil || !bytes.Equal(got, payload) {
+		t.Errorf("file content = %q (%v), want %q", got, err, payload)
+	}
+
+	if err := pin.Release(); err != nil {
+		t.Errorf("Release() error: %v", err)
+	}
+
+	// Warm: no fetch, same content.
+	warm, err := cs.AcquireFile("acquire-file-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("AcquireFile() warm error: %v", err)
+	}
+	defer func() { _ = warm.Release() }()
+
+	if fetches != 1 {
+		t.Errorf("warm fetches = %d, want 1 (no refetch)", fetches)
+	}
+
+	if warm.Path != pin.Path || warm.Size != pin.Size {
+		t.Errorf("warm (path,size) = (%q,%d), want (%q,%d)", warm.Path, warm.Size, pin.Path, pin.Size)
+	}
+}
+
+func TestStore_AcquireFileSharesBlobWithAcquire(t *testing.T) {
+	t.Parallel()
+
+	cs, err := content.New(t.TempDir(), nil)
+	if err != nil {
+		t.Fatalf("content.New() error: %v", err)
+	}
+	defer func() { _ = cs.Close() }()
+
+	payload := []byte("shared between stream and file consumers")
+	fetches := 0
+	fetch := func() (io.ReadCloser, error) {
+		fetches++
+
+		return io.NopCloser(bytes.NewReader(payload)), nil
+	}
+
+	// Populate via the streaming API...
+	reader, _, err := cs.Acquire("shared-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if _, err := io.Copy(io.Discard, reader); err != nil {
+		t.Fatalf("drain error: %v", err)
+	}
+
+	_ = reader.Close()
+
+	// ...then pin the same blob as a file without refetching.
+	pin, err := cs.AcquireFile("shared-id", nil, fetch)
+	if err != nil {
+		t.Fatalf("AcquireFile() error: %v", err)
+	}
+	defer func() { _ = pin.Release() }()
+
+	if fetches != 1 {
+		t.Errorf("fetches = %d, want 1", fetches)
+	}
+
+	got, err := xos.ReadFile(pin.Path)
+	if err != nil || !bytes.Equal(got, payload) {
+		t.Errorf("file content = %q (%v), want %q", got, err, payload)
+	}
+}
+
+// TestStore_DigestlessStagingUsesBLAKE3 pins the algorithm that digest-less
+// staging assigns. That digest names the blob in the cache and is persisted in
+// the index, so it is on-disk layout rather than an implementation detail.
+//
+// The check is indirect on purpose: it stages content without a digest, then
+// re-acquires the same bytes under a different identifier using an
+// independently computed BLAKE3 digest and a fetch that fails if called. That
+// only succeeds if staging stored the blob under its BLAKE3 name — and it
+// catches the case where content is hashed with one algorithm but labelled
+// with another, which a digest-value comparison alone would miss.
+func TestStore_DigestlessStagingUsesBLAKE3(t *testing.T) {
+	t.Parallel()
+
+	cs := newStore(t)
+	data := []byte("content addressed by whatever stage() decided to use")
+
+	reader, _, err := cs.Acquire("https://example.com/staged.bin", nil, fetchFunc(data))
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if _, err := io.ReadAll(reader); err != nil {
+		t.Fatalf("ReadAll() error: %v", err)
+	}
+
+	_ = reader.Close()
+
+	h := digest.BLAKE3256.Hash()
+	h.Write(data)
+
+	want, err := digest.New(digest.BLAKE3256, h.Sum(nil))
+	if err != nil {
+		t.Fatalf("digest.New() error: %v", err)
+	}
+
+	sentinel := errors.New("fetch called: blob was not stored under its BLAKE3 digest")
+
+	second, _, err := cs.Acquire("https://example.com/other.bin", want, failingFetch(sentinel))
+	if err != nil {
+		t.Fatalf("re-acquire by BLAKE3 digest: %v", err)
+	}
+
+	defer second.Close()
+
+	got, err := io.ReadAll(second)
+	if err != nil {
+		t.Fatalf("ReadAll() on re-acquire: %v", err)
+	}
+
+	if !bytes.Equal(got, data) {
+		t.Errorf("content mismatch: got %d bytes, want %d", len(got), len(data))
+	}
 }

@@ -19,6 +19,7 @@ package digest_test
 import (
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"regexp"
 	"testing"
 
@@ -76,6 +77,12 @@ func TestFromString_ValidDigests(t *testing.T) {
 			input:   "blake2b-512:786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce",
 			wantAlg: digest.BLAKE2b512,
 			wantEnc: "786a02f742015903c6c6fd852552d272912f4740e15847618a86e217f71f5419d25e1031afee585313896444934eb04b903a685b1448b755d56f701afe9be2ce",
+		},
+		{
+			name:    "blake3-256",
+			input:   "blake3-256:af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
+			wantAlg: digest.BLAKE3256,
+			wantEnc: "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262",
 		},
 	}
 
@@ -202,6 +209,7 @@ func TestAlgorithm_Hash(t *testing.T) {
 		{digest.SHA512, 64},
 		{digest.BLAKE2b256, 32},
 		{digest.BLAKE2b512, 64},
+		{digest.BLAKE3256, 32},
 	}
 
 	for _, tt := range tests {
@@ -238,6 +246,7 @@ func TestNew(t *testing.T) {
 		{digest.SHA512, 64},
 		{digest.BLAKE2b256, 32},
 		{digest.BLAKE2b512, 64},
+		{digest.BLAKE3256, 32},
 	}
 
 	for _, tt := range tests {
@@ -356,5 +365,116 @@ func TestHashPath(t *testing.T) {
 	other := digest.HashPath("/different/path.flac")
 	if result == other {
 		t.Errorf("HashPath collision: %q == %q for different inputs", result, other)
+	}
+}
+
+// TestBLAKE3256_OfficialVectors pins the BLAKE3 implementation against the
+// reference test vectors. The digest here is a persistence contract — content
+// is addressed by it — so an upstream change that altered output would be a
+// silent, unrecoverable corruption of every stored blob. The inputs are the
+// standard repeating 0..250 byte pattern from the BLAKE3 specification.
+func TestBLAKE3256_OfficialVectors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		inputLen int
+		want     string
+	}{
+		{0, "af1349b9f5f9a1a6a0404dea36dcc9499bcb25c9adc112b7cc9a93cae41f3262"},
+		{1, "2d3adedff11b61f14c886e35afa036736dcd87a74d27b5c1510225d0f592e213"},
+		{1024, "42214739f095a406f3fc83deb889744ac00df831c10daa55189b5d121c855af7"},
+		{2048, "e776b6028c7cd22a4d0ba182a8bf62205d2ef576467e838ed6f2529b85fba24a"},
+		{3072, "b98cb0ff3623be03326b373de6b9095218513e64f1ee2edd2525c7ad1e5cffd2"},
+	}
+
+	for _, tt := range tests {
+		t.Run(fmt.Sprintf("len%d", tt.inputLen), func(t *testing.T) {
+			t.Parallel()
+
+			input := make([]byte, tt.inputLen)
+			for i := range input {
+				input[i] = byte(i % 251)
+			}
+
+			h := digest.BLAKE3256.Hash()
+			h.Write(input)
+
+			if got := hex.EncodeToString(h.Sum(nil)); got != tt.want {
+				t.Errorf("BLAKE3-256 of %d bytes = %s, want %s", tt.inputLen, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestBLAKE3256_ChunkedWriteEquivalence covers the parallel Write path: this
+// implementation splits each Write across goroutines, so the digest must not
+// depend on how the caller chunks its input. Sizes straddle the 1KiB chunk
+// and the eigentree boundaries where the split decisions are made.
+func TestBLAKE3256_ChunkedWriteEquivalence(t *testing.T) {
+	t.Parallel()
+
+	input := make([]byte, 1<<20+12345)
+	for i := range input {
+		input[i] = byte(i % 251)
+	}
+
+	oneShot := digest.BLAKE3256.Hash()
+	oneShot.Write(input)
+	want := hex.EncodeToString(oneShot.Sum(nil))
+
+	for _, chunk := range []int{1, 63, 1024, 1025, 32 << 10, 1 << 20} {
+		t.Run(fmt.Sprintf("chunk%d", chunk), func(t *testing.T) {
+			t.Parallel()
+
+			h := digest.BLAKE3256.Hash()
+			for off := 0; off < len(input); off += chunk {
+				h.Write(input[off:min(off+chunk, len(input))])
+			}
+
+			if got := hex.EncodeToString(h.Sum(nil)); got != want {
+				t.Errorf("chunked by %d = %s, want %s", chunk, got, want)
+			}
+		})
+	}
+}
+
+// TestAlgorithmRegistriesConsistent guards the hazard called out in AUDIT.md:
+// Hash(), New() and FromString() each read a different map, so an algorithm
+// added to one but not the others fails only at run time — a missing regexp
+// entry nil-derefs in FromString, a missing size entry makes New reject a
+// known algorithm.
+func TestAlgorithmRegistriesConsistent(t *testing.T) {
+	t.Parallel()
+
+	all := []digest.Algorithm{
+		digest.MD5, digest.SHA1, digest.SHA256, digest.SHA384, digest.SHA512,
+		digest.BLAKE2b256, digest.BLAKE2b512, digest.BLAKE3256,
+	}
+
+	for _, alg := range all {
+		t.Run(string(alg), func(t *testing.T) {
+			t.Parallel()
+
+			// Present in hashConstructors, and the size agrees with digestSizes
+			// via New's length check.
+			h := alg.Hash()
+			raw := h.Sum(nil)
+
+			dgst, err := digest.New(alg, raw)
+			if err != nil {
+				t.Fatalf("New(%s, %d bytes): %v", alg, len(raw), err)
+			}
+
+			// Present in anchoredEncodedRegexps, and the regexp accepts what
+			// the hash actually produces.
+			parsed, err := digest.FromString(dgst.String())
+			if err != nil {
+				t.Fatalf("FromString(%s): %v", dgst.String(), err)
+			}
+
+			if parsed.Algorithm() != alg || parsed.Encoded() != dgst.Encoded() {
+				t.Errorf("round trip changed digest: %s -> %s", dgst, parsed)
+			}
+		})
 	}
 }

@@ -27,6 +27,7 @@ import (
 
 	dgst "github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/cache"
 )
 
@@ -1814,5 +1815,122 @@ func TestCache_Exists(t *testing.T) {
 	otherDigest := computeDigest([]byte("other content"))
 	if blobCache.Exists(otherDigest) {
 		t.Error("Exists() = true for unwritten digest")
+	}
+}
+
+func TestCache_AcquireFileMissing(t *testing.T) {
+	t.Parallel()
+
+	blobCache := cache.New(t.TempDir(), 0)
+
+	_, err := blobCache.AcquireFile(computeDigest([]byte("never written")))
+	if !errors.Is(err, fault.ErrNotFound) {
+		t.Fatalf("AcquireFile() on absent content: err = %v, want fault.ErrNotFound", err)
+	}
+}
+
+func TestCache_AcquireFilePinsCommittedContent(t *testing.T) {
+	t.Parallel()
+
+	blobCache := cache.New(t.TempDir(), 0)
+	content := []byte("committed file content")
+	digest := computeDigest(content)
+
+	reader, writer, err := blobCache.Acquire(digest)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if _, err := writer.Write(content); err != nil {
+		t.Fatalf("Write() error: %v", err)
+	}
+
+	if err := writer.Close(); err != nil {
+		t.Fatalf("writer Close() error: %v", err)
+	}
+
+	_ = reader.Close()
+
+	pin, err := blobCache.AcquireFile(digest)
+	if err != nil {
+		t.Fatalf("AcquireFile() error: %v", err)
+	}
+
+	if pin.Size != int64(len(content)) {
+		t.Errorf("size = %d, want %d", pin.Size, len(content))
+	}
+
+	got, err := xos.ReadFile(pin.Path)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Errorf("file at path = %q (%v), want %q", got, err, content)
+	}
+
+	if err := pin.Release(); err != nil {
+		t.Errorf("Release() error: %v", err)
+	}
+}
+
+func TestCache_AcquireFileRefusesActiveWriter(t *testing.T) {
+	t.Parallel()
+
+	blobCache := cache.New(t.TempDir(), 0)
+	content := []byte("still streaming")
+	digest := computeDigest(content)
+
+	reader, writer, err := blobCache.Acquire(digest)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	// Writer still open: the data is in flight and must not be exposed.
+	if _, err := blobCache.AcquireFile(digest); !errors.Is(err, fault.ErrNotFound) {
+		t.Fatalf("AcquireFile() with active writer: err = %v, want fault.ErrNotFound", err)
+	}
+
+	_, _ = writer.Write(content)
+	_ = writer.Close()
+	_ = reader.Close()
+}
+
+func TestCache_AcquireFilePinSurvivesGC(t *testing.T) {
+	t.Parallel()
+
+	// Quota of one byte: any committed blob is immediately over quota.
+	blobCache := cache.New(t.TempDir(), 1)
+	content := []byte("pinned against garbage collection")
+	digest := computeDigest(content)
+
+	reader, writer, err := blobCache.Acquire(digest)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	_, _ = writer.Write(content)
+	_ = writer.Close()
+	_ = reader.Close()
+
+	pin, err := blobCache.AcquireFile(digest)
+	if err != nil {
+		t.Fatalf("AcquireFile() error: %v", err)
+	}
+
+	if _, err := blobCache.GarbageCollect(); err != nil {
+		t.Fatalf("GarbageCollect() error: %v", err)
+	}
+
+	if _, err := xos.Stat(pin.Path); err != nil {
+		t.Fatalf("pinned blob was reclaimed by GC: %v", err)
+	}
+
+	if err := pin.Release(); err != nil {
+		t.Fatalf("Release() error: %v", err)
+	}
+
+	if _, err := blobCache.GarbageCollect(); err != nil {
+		t.Fatalf("GarbageCollect() after release error: %v", err)
+	}
+
+	if _, err := xos.Stat(pin.Path); err == nil {
+		t.Fatal("released blob survived GC despite being over quota")
 	}
 }
