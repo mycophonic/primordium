@@ -311,6 +311,7 @@ linters:
             # Crypto
             - golang.org/x/crypto/blake2b
             - golang.org/x/crypto/ssh
+            - lukechampine.com/blake3 # parallel BLAKE3; chosen over zeebo/blake3 for multi-core staging throughput
             # Platform specifics
             - golang.org/x/sys/windows
             - golang.org/x/sys/unix

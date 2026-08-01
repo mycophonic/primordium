@@ -44,6 +44,24 @@ const stagingDir = "staging"
 // errFmtFetch wraps a failed FetchFunc invocation.
 const errFmtFetch = "%w: fetch: %w"
 
+// stageBufferSize is the copy buffer stage uses to feed the content hasher.
+//
+// BLAKE3 parallelises across goroutines within a single Write call, over the
+// eigentrees of whatever buffer it is handed, so staging throughput scales
+// with buffer size rather than with content size. io.Copy's default 32KiB is
+// far too small to engage that: it is the worst-performing option of any
+// algorithm here. Measured staging 512MB from a streaming source on arm64
+// with 18 cores:
+//
+//	256KiB  1950MB/s      4MiB  4429MB/s     32MiB  5100MB/s
+//	  1MiB  3224MB/s      8MiB  4733MB/s     64MiB  5234MB/s
+//	  2MiB  3728MB/s     16MiB  4936MB/s
+//
+// The curve flattens past 16MiB while the buffer is allocated per concurrent
+// stage call, so this deliberately stops short of the peak: the remaining
+// ~6% costs four times the resident footprint under concurrent fetches.
+const stageBufferSize = 16 << 20
+
 // algorithmToID maps digest algorithms to stable numeric identifiers for
 // on-disk index records. These IDs are a persistence contract owned by this
 // package — existing values must never be changed or reassigned.
@@ -56,6 +74,7 @@ var algorithmToID = map[digest.Algorithm]uint8{
 	digest.SHA512:     4,
 	digest.BLAKE2b256: 5,
 	digest.BLAKE2b512: 6,
+	digest.BLAKE3256:  7,
 }
 
 // algorithmFromID is the reverse of algorithmToID.
@@ -68,6 +87,7 @@ var algorithmFromID = map[uint8]digest.Algorithm{
 	4: digest.SHA512,
 	5: digest.BLAKE2b256,
 	6: digest.BLAKE2b512,
+	7: digest.BLAKE3256,
 }
 
 // FetchFunc retrieves content from an external source.
@@ -520,9 +540,9 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 			"path", file.Name(), "err", err)
 	}
 
-	hasher := digest.BLAKE2b256.Hash()
+	hasher := digest.BLAKE3256.Hash()
 
-	written, err := io.Copy(io.MultiWriter(file, hasher), source)
+	written, err := io.CopyBuffer(io.MultiWriter(file, hasher), source, make([]byte, stageBufferSize))
 	if err != nil {
 		_ = file.Close()
 
@@ -537,7 +557,7 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 		return nil, nil, fmt.Errorf("%w: rewind staging file: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	dgst, err := digest.New(digest.BLAKE2b256, hasher.Sum(nil))
+	dgst, err := digest.New(digest.BLAKE3256, hasher.Sum(nil))
 	if err != nil {
 		_ = file.Close()
 

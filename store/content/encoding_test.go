@@ -40,6 +40,7 @@ func TestAlgorithmIDStability(t *testing.T) {
 		{digest.SHA512, 4},
 		{digest.BLAKE2b256, 5},
 		{digest.BLAKE2b512, 6},
+		{digest.BLAKE3256, 7},
 	}
 
 	for _, tt := range pinned {

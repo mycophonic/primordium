@@ -1255,3 +1255,57 @@ func TestStore_AcquireFileSharesBlobWithAcquire(t *testing.T) {
 		t.Errorf("file content = %q (%v), want %q", got, err, payload)
 	}
 }
+
+// TestStore_DigestlessStagingUsesBLAKE3 pins the algorithm that digest-less
+// staging assigns. That digest names the blob in the cache and is persisted in
+// the index, so it is on-disk layout rather than an implementation detail.
+//
+// The check is indirect on purpose: it stages content without a digest, then
+// re-acquires the same bytes under a different identifier using an
+// independently computed BLAKE3 digest and a fetch that fails if called. That
+// only succeeds if staging stored the blob under its BLAKE3 name — and it
+// catches the case where content is hashed with one algorithm but labelled
+// with another, which a digest-value comparison alone would miss.
+func TestStore_DigestlessStagingUsesBLAKE3(t *testing.T) {
+	t.Parallel()
+
+	cs := newStore(t)
+	data := []byte("content addressed by whatever stage() decided to use")
+
+	reader, _, err := cs.Acquire("https://example.com/staged.bin", nil, fetchFunc(data))
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if _, err := io.ReadAll(reader); err != nil {
+		t.Fatalf("ReadAll() error: %v", err)
+	}
+
+	_ = reader.Close()
+
+	h := digest.BLAKE3256.Hash()
+	h.Write(data)
+
+	want, err := digest.New(digest.BLAKE3256, h.Sum(nil))
+	if err != nil {
+		t.Fatalf("digest.New() error: %v", err)
+	}
+
+	sentinel := errors.New("fetch called: blob was not stored under its BLAKE3 digest")
+
+	second, _, err := cs.Acquire("https://example.com/other.bin", want, failingFetch(sentinel))
+	if err != nil {
+		t.Fatalf("re-acquire by BLAKE3 digest: %v", err)
+	}
+
+	defer second.Close()
+
+	got, err := io.ReadAll(second)
+	if err != nil {
+		t.Fatalf("ReadAll() on re-acquire: %v", err)
+	}
+
+	if !bytes.Equal(got, data) {
+		t.Errorf("content mismatch: got %d bytes, want %d", len(got), len(data))
+	}
+}

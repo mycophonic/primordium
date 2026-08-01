@@ -29,6 +29,7 @@ import (
 	"strings"
 
 	"golang.org/x/crypto/blake2b"
+	"lukechampine.com/blake3"
 
 	"github.com/mycophonic/primordium/fault"
 )
@@ -42,6 +43,7 @@ const (
 	SHA512     Algorithm = "sha512"
 	BLAKE2b256 Algorithm = "blake2b-256"
 	BLAKE2b512 Algorithm = "blake2b-512"
+	BLAKE3256  Algorithm = "blake3-256"
 )
 
 //nolint:gochecknoglobals // Package-level registry is appropriate here
@@ -55,6 +57,7 @@ var (
 		SHA512:     crypto.SHA512.New,
 		BLAKE2b256: newBLAKE2b256,
 		BLAKE2b512: newBLAKE2b512,
+		BLAKE3256:  newBLAKE3256,
 	}
 
 	// anchoredEncodedRegexps contains anchored regular expressions for hex-encoded digests.
@@ -67,6 +70,7 @@ var (
 		SHA512:     regexp.MustCompile(`^[a-f0-9]{128}$`),
 		BLAKE2b256: regexp.MustCompile(`^[a-f0-9]{64}$`),
 		BLAKE2b512: regexp.MustCompile(`^[a-f0-9]{128}$`),
+		BLAKE3256:  regexp.MustCompile(`^[a-f0-9]{64}$`),
 	}
 
 	// digestSizes maps algorithms to their expected byte lengths.
@@ -78,6 +82,7 @@ var (
 		SHA512:     64,
 		BLAKE2b256: 32,
 		BLAKE2b512: 64,
+		BLAKE3256:  32,
 	}
 )
 
@@ -97,6 +102,15 @@ func newBLAKE2b512() hash.Hash {
 	}
 
 	return h
+}
+
+// newBLAKE3256 returns an unkeyed BLAKE3 hasher with a 256-bit output.
+//
+// This implementation parallelises across goroutines within each Write call,
+// so callers hashing bulk content should feed it large buffers — see
+// stageBufferSize in store/content for the measured trade-off.
+func newBLAKE3256() hash.Hash {
+	return blake3.New(32, nil)
 }
 
 // Algorithm represents a digest algorithm identifier.
