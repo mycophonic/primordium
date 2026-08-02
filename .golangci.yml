@@ -322,7 +322,7 @@ linters:
             - github.com/klauspost/compress
             - github.com/klauspost/pgzip
             - github.com/pierrec/lz4
-            - github.com/mycophonic/xz # forked from github.com/ulikunitz/xz for performance
+            - github.com/forkcloser/xz # forked from github.com/ulikunitz/xz for performance
             # Vendors
             - github.com/aws/smithy-go
             - github.com/getsentry/sentry-go

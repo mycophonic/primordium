@@ -24,11 +24,10 @@ import (
 	"os/exec"
 	"testing"
 
+	"github.com/forkcloser/xz"
 	"github.com/klauspost/compress/zstd"
 	"github.com/klauspost/pgzip"
 	"github.com/pierrec/lz4/v4"
-
-	"github.com/mycophonic/xz"
 
 	"github.com/mycophonic/primordium/compress"
 	_ "github.com/mycophonic/primordium/compress/bzip2"
