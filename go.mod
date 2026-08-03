@@ -7,7 +7,8 @@ require (
 	github.com/aws/aws-sdk-go-v2/credentials v1.19.33
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.106.3
 	github.com/aws/smithy-go v1.27.6
-	github.com/forkcloser/xz v0.0.0-20260802225217-c036a55e6e42
+	github.com/forkcloser/blake3 v0.0.0-20260803064325-464007c72da9
+	github.com/forkcloser/xz v0.0.0-20260803073317-a4204e8399c8
 	github.com/getsentry/sentry-go v0.48.0
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/klauspost/compress v1.19.1
@@ -19,7 +20,6 @@ require (
 	golang.org/x/crypto v0.54.0
 	golang.org/x/sys v0.47.0
 	gotest.tools/v3 v3.5.2
-	lukechampine.com/blake3 v1.4.1
 	modernc.org/sqlite v1.55.0
 )
 

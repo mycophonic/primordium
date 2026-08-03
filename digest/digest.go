@@ -28,8 +28,8 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/forkcloser/blake3"
 	"golang.org/x/crypto/blake2b"
-	"lukechampine.com/blake3"
 
 	"github.com/mycophonic/primordium/fault"
 )
