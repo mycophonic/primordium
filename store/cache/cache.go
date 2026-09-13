@@ -667,11 +667,22 @@ func (w *cacheWriter) Write(p []byte) (int, error) {
 	return written, err
 }
 
-// Close finalizes the write: verifies the content hash, renames (or deletes)
-// the temp file, and releases all locks. Not safe for concurrent or repeated
-// calls — like os.File, callers must not call Close more than once.
+// Close finalizes the write: flushes the temp file to stable storage, verifies
+// the content hash, renames (or deletes) the temp file, and releases all locks.
+// Not safe for concurrent or repeated calls — like os.File, callers must not
+// call Close more than once.
 func (w *cacheWriter) Close() error {
-	// Close the data file first
+	// The bytes reach stable storage before the name does: a rename can survive
+	// a power loss that the unflushed data behind it does not.
+	if err := w.file.Sync(); err != nil {
+		_ = w.file.Close()
+		_ = os.Remove(w.tempPath)
+		_ = flock.Unlock(w.writeLock)
+		_ = flock.Unlock(w.lockFile)
+
+		return fmt.Errorf("%w: sync: %w", fault.ErrFilesystemFailure, err)
+	}
+
 	if err := w.file.Close(); err != nil {
 		_ = os.Remove(w.tempPath)
 		_ = flock.Unlock(w.writeLock)
