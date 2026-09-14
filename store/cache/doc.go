@@ -18,4 +18,6 @@
 // Acquire always returns a reader for consumers, and an optional writer if the resource does not exist yet,
 // allowing read while downloading patterns.
 // Cache size is configurable and has garbage collection mechanisms.
+// A blob is on stable storage before it becomes visible under its digest: a crash never
+// leaves bytes under a digest they do not hash to.
 package cache

@@ -68,7 +68,7 @@ mismatches delete the temp file and propagate `ErrWriteFailure` to readers.
 | `GCStats` | `EntriesFreed`, `BytesFreed`, `Remaining`, `Quota` |
 | `DefaultCacheQuota` | 50 GB (`50 << 30`) |
 | `cacheReader` | Reads completed `data` file, holds shared read lock |
-| `cacheWriter` | Writes to `_data`, verifies hash on Close, renames to `data` |
+| `cacheWriter` | Writes to `_data`; on Close flushes it, verifies hash, renames to `data` |
 | `inProgressReader` | Tails `_data` during active write, polls write lock for completion |
 
 ## Findings
