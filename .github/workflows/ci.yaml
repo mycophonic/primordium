@@ -48,9 +48,8 @@ jobs:
         # windows legs run the recipes under git-bash (native arm64 tools
         # where upstream ships them, Prism-emulated amd64 via aqua's
         # windows_arm_emulation where it does not).
-        # These entries are also the default required-status-check contexts of
-        # the canonical limen:main ruleset (defaultRequiredChecks in
-        # internal/github/audit.go) — change the two together, in one release.
+        # These names are NOT the ruleset's required contexts — `gate` is, so
+        # this list can change freely.
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, windows-2025, windows-11-arm]
     runs-on: ${{ matrix.os }}
     # Generous for the windows legs: those runners are markedly slower, and the
@@ -82,3 +81,104 @@ jobs:
 
       - name: Test
         run: just test
+
+  # One linux leg, not the matrix: fuzzing explores the same corpus wherever
+  # it runs, so more legs cost CPU and add nothing. The recipe passes on a
+  # tree with no targets or no Go module, so this job is safe in every
+  # repository.
+  fuzz:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install aqua (pinned, checksum-verified)
+        uses: ./.github/actions/setup-aqua
+
+      - name: Install pinned tools
+        run: aqua install --only-link
+
+      # The cached corpus is what makes fuzzing cumulative across runs. Keyed
+      # on the fuzz sources so a changed target restarts its corpus;
+      # restore-keys keep the rest.
+      - id: fuzzdir
+        run: echo "dir=$(go env GOCACHE)/fuzz" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.fuzzdir.outputs.dir }}
+          key: fuzz-corpus-${{ runner.os }}-${{ hashFiles('**/*_fuzz_test.go', '**/fuzz_test.go') }}
+          restore-keys: |
+            fuzz-corpus-${{ runner.os }}-
+
+      - name: Fuzz
+        run: just do test go fuzz
+
+      # A crasher is a bug with a reproducer attached; the log names the
+      # target, the input file is what reproduces it locally. Uploaded only
+      # on failure, and only if any was written.
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: fuzz-crashers
+          path: '**/testdata/fuzz/'
+          if-no-files-found: ignore
+
+  # Every pin resolves. The verify legs link only, and a link verifies
+  # nothing: an asset that is missing from a release, or that fails its
+  # checksum, would merge green and fail at first use. One linux leg pays for
+  # the real install; aqua's package store is cached on the exact pins, so a
+  # warm key costs seconds and a changed pin is always a real install.
+  tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Install aqua (pinned, checksum-verified)
+        uses: ./.github/actions/setup-aqua
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.AQUA_ROOT_DIR }}/pkgs
+          key: aqua-pkgs-${{ runner.os }}-${{ hashFiles('aqua.yaml', 'aqua-checksums.json', '.limen/aqua-registry.yaml') }}
+
+      - name: Install every pinned tool
+        run: aqua install
+
+  # The ONE required status check of the limen:main ruleset. Requiring the
+  # matrix legs by name would bake this runner list into the ruleset; this
+  # job collapses the matrix to one stable name.
+  gate:
+    needs: [verify, fuzz, tools]
+    # always(), and the result asserted explicitly. Without always() a failed
+    # or cancelled dependency SKIPS this job instead of failing it, and a
+    # skipped required check does not block a merge — branch protection that
+    # quietly stops protecting. `needs.verify.result` is success only when
+    # every matrix leg succeeded; fuzz and tools are asserted alongside so a
+    # crasher, or a pin that does not build, blocks a merge the same way a
+    # failing test does.
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Every verify leg, fuzz and tools succeeded
+        env:
+          # Via env, never interpolated into the script: the shell sees data,
+          # not something the expression layer can rewrite into code.
+          RESULT: ${{ needs.verify.result }}
+          RESULT_FUZZ: ${{ needs.fuzz.result }}
+          RESULT_TOOLS: ${{ needs.tools.result }}
+        run: |
+          printf 'verify: %s\n' "$RESULT"
+          printf 'fuzz: %s\n' "$RESULT_FUZZ"
+          printf 'tools: %s\n' "$RESULT_TOOLS"
+          [ "$RESULT" = "success" ] && [ "$RESULT_FUZZ" = "success" ] && [ "$RESULT_TOOLS" = "success" ]
