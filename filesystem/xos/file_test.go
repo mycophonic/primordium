@@ -844,6 +844,8 @@ func TestOpenError(t *testing.T) {
 		var perr *os.PathError
 		if !errors.As(err, &perr) {
 			t.Errorf("%v returns error of %T type; want *PathError", name, err)
+
+			continue
 		}
 
 		if !errors.Is(perr.Err, tt.error) {

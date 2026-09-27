@@ -21,10 +21,11 @@ package simd
 // Only the first min(len(a), len(b)) elements are processed.
 // Returns 0 if either slice is empty.
 func DotFloat32(first, second []float32) float32 {
-	count := min(len(first), len(second))
-	if count == 0 {
+	if len(first) == 0 || len(second) == 0 {
 		return 0
 	}
+
+	count := min(len(first), len(second))
 
 	return dotProductF32(first[:count], second[:count])
 }
