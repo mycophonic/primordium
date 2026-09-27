@@ -128,29 +128,45 @@ func (m *Markdown) printSliceSection(
 	for index, item := range slice {
 		switch typedItem := item.(type) {
 		case map[string]any:
-			itemHeading := strings.Repeat(headingChar, min(headingLevel+1, maxHeadingLevel))
-
-			if _, err := fmt.Fprintf(writer, "%s Item %d\n\n", itemHeading, index+1); err != nil {
-				return fmt.Errorf("writing item %d heading: %w", index, err)
-			}
-
-			scalarFields, nestedFields := separateFields(typedItem)
-
-			if len(scalarFields) > 0 {
-				if err := m.printTable(writer, scalarFields); err != nil {
-					return err
-				}
-			}
-
-			for _, nestedKey := range sortedKeys(nestedFields) {
-				if err := m.printValue(writer, nestedKey, nestedFields[nestedKey], headingLevel+2); err != nil {
-					return err
-				}
+			if err := m.printSliceItem(writer, index, typedItem, headingLevel); err != nil {
+				return err
 			}
 		default:
 			if _, err := fmt.Fprintf(writer, "- %v\n", typedItem); err != nil {
 				return fmt.Errorf("writing item %d: %w", index, err)
 			}
+		}
+	}
+
+	return nil
+}
+
+// printSliceItem prints one map item of a slice section: a numbered
+// heading one level down, its scalar fields as a table, then its nested
+// fields as sections of their own.
+func (m *Markdown) printSliceItem(
+	writer io.Writer,
+	index int,
+	item map[string]any,
+	headingLevel int,
+) error {
+	itemHeading := strings.Repeat(headingChar, min(headingLevel+1, maxHeadingLevel))
+
+	if _, err := fmt.Fprintf(writer, "%s Item %d\n\n", itemHeading, index+1); err != nil {
+		return fmt.Errorf("writing item %d heading: %w", index, err)
+	}
+
+	scalarFields, nestedFields := separateFields(item)
+
+	if len(scalarFields) > 0 {
+		if err := m.printTable(writer, scalarFields); err != nil {
+			return err
+		}
+	}
+
+	for _, nestedKey := range sortedKeys(nestedFields) {
+		if err := m.printValue(writer, nestedKey, nestedFields[nestedKey], headingLevel+2); err != nil {
+			return err
 		}
 	}
 
