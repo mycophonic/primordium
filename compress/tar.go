@@ -51,49 +51,55 @@ func writeTar(writer io.Writer, baseDir, relDir string) error {
 			return walkErr
 		}
 
-		// Build relative path from baseDir so the archive preserves the directory structure.
-		relPath, err := filepath.Rel(baseDir, path)
-		if err != nil {
-			return fmt.Errorf("rel path: %w", err)
-		}
-
-		// Use forward slashes in tar entries.
-		relPath = strings.ReplaceAll(relPath, string(os.PathSeparator), "/")
-
-		header, err := tar.FileInfoHeader(info, "")
-		if err != nil {
-			return fmt.Errorf("tar header: %w", err)
-		}
-
-		header.Name = relPath
-
-		if err = tarWriter.WriteHeader(header); err != nil {
-			return fmt.Errorf("write header: %w", err)
-		}
-
-		if info.IsDir() {
-			return nil
-		}
-
-		file, err := xos.Open(path)
-		if err != nil {
-			return fmt.Errorf("open file: %w", err)
-		}
-
-		defer func() { _ = file.Close() }() // read-only: a close error carries nothing
-
-		if _, err := io.Copy(tarWriter, file); err != nil {
-			return fmt.Errorf("copy file: %w", err)
-		}
-
-		return nil
+		return writeTarEntry(tarWriter, baseDir, path, info)
 	})
 	if err != nil {
 		return fmt.Errorf("walk: %w", err)
 	}
 
-	if err := tarWriter.Close(); err != nil {
+	if err = tarWriter.Close(); err != nil {
 		return fmt.Errorf("close tar: %w", err)
+	}
+
+	return nil
+}
+
+// writeTarEntry writes one walked path: its header, named relative to
+// baseDir, and for a regular file its content.
+func writeTarEntry(tarWriter *tar.Writer, baseDir, path string, info os.FileInfo) error {
+	// Build relative path from baseDir so the archive preserves the directory structure.
+	relPath, err := filepath.Rel(baseDir, path)
+	if err != nil {
+		return fmt.Errorf("rel path: %w", err)
+	}
+
+	// Use forward slashes in tar entries.
+	relPath = strings.ReplaceAll(relPath, string(os.PathSeparator), "/")
+
+	header, err := tar.FileInfoHeader(info, "")
+	if err != nil {
+		return fmt.Errorf("tar header: %w", err)
+	}
+
+	header.Name = relPath
+
+	if err = tarWriter.WriteHeader(header); err != nil {
+		return fmt.Errorf("write header: %w", err)
+	}
+
+	if info.IsDir() {
+		return nil
+	}
+
+	file, err := xos.Open(path)
+	if err != nil {
+		return fmt.Errorf("open file: %w", err)
+	}
+
+	defer func() { _ = file.Close() }() // read-only: a close error carries nothing
+
+	if _, err = io.Copy(tarWriter, file); err != nil {
+		return fmt.Errorf("copy file: %w", err)
 	}
 
 	return nil
@@ -115,28 +121,38 @@ func Untar(reader io.Reader, destDir string) error {
 			return fmt.Errorf("tar read: %w", err)
 		}
 
-		target := filepath.Join(destDir, filepath.Clean(header.Name))
+		if err := untarEntry(tarReader, header, destDir); err != nil {
+			return err
+		}
+	}
 
-		if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
-			return fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
+	return nil
+}
+
+// untarEntry extracts the entry header describes, whose content tarReader is
+// positioned at, refusing a name that escapes destDir.
+func untarEntry(tarReader *tar.Reader, header *tar.Header, destDir string) error {
+	target := filepath.Join(destDir, filepath.Clean(header.Name))
+
+	if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+		return fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
+	}
+
+	switch header.Typeflag {
+	case tar.TypeDir:
+		if err := os.MkdirAll(target, filesystem.DirPermissionsDefault); err != nil {
+			return fmt.Errorf("mkdir %s: %w", header.Name, err)
+		}
+	case tar.TypeReg:
+		if err := os.MkdirAll(filepath.Dir(target), filesystem.DirPermissionsDefault); err != nil {
+			return fmt.Errorf("mkdir parent %s: %w", header.Name, err)
 		}
 
-		switch header.Typeflag {
-		case tar.TypeDir:
-			if err := os.MkdirAll(target, filesystem.DirPermissionsDefault); err != nil {
-				return fmt.Errorf("mkdir %s: %w", header.Name, err)
-			}
-		case tar.TypeReg:
-			if err := os.MkdirAll(filepath.Dir(target), filesystem.DirPermissionsDefault); err != nil {
-				return fmt.Errorf("mkdir parent %s: %w", header.Name, err)
-			}
-
-			if err := extractFile(target, tarReader); err != nil {
-				return fmt.Errorf("write %s: %w", header.Name, err)
-			}
-		default:
-			// Skip unsupported entry types (symlinks, etc.).
+		if err := extractFile(target, tarReader); err != nil {
+			return fmt.Errorf("write %s: %w", header.Name, err)
 		}
+	default:
+		// Skip unsupported entry types (symlinks, etc.).
 	}
 
 	return nil
