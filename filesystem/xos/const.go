@@ -22,5 +22,5 @@ const (
 	minReadBuf = 512
 
 	// defaultPerm is the standard Unix permission for os.Create (before umask).
-	defaultPerm os.FileMode = 0o666 //nolint:mnd // Standard Unix permission.
+	defaultPerm os.FileMode = 0o666
 )

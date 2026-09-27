@@ -56,7 +56,7 @@ func (v *Volatile) Acquire(content []byte) (string, func(), error) {
 	h.Write(content)
 	contentHash := hex.EncodeToString(h.Sum(nil))
 
-	//nolint:wrapcheck
+	//nolint:wrapcheck // this module's errors are classified at their source
 	return v.rc.Acquire(contentHash, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, volatileDataFile)
 

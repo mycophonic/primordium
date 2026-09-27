@@ -26,7 +26,7 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // resolved once per process
 var (
 	nameOnce sync.Once
 	name     string

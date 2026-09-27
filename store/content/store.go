@@ -153,14 +153,14 @@ func New(root string, opts *Options) (*Store, error) {
 func (s *Store) Close() error {
 	s.wg.Wait()
 
-	//nolint:wrapcheck
+	//nolint:wrapcheck // this module's errors are classified at their source
 	return s.idx.Close()
 }
 
 // GarbageCollect reclaims disk space from the cache by removing blobs
 // that exceed the quota.
 func (s *Store) GarbageCollect() (cache.GCStats, error) {
-	//nolint:wrapcheck
+	//nolint:wrapcheck // this module's errors are classified at their source
 	return s.cache.GarbageCollect()
 }
 

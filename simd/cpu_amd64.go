@@ -23,7 +23,7 @@ import "github.com/klauspost/cpuid/v2"
 // hasAVX2 is true when the CPU supports AVX2 instructions.
 // Set once at init, read-only thereafter. Will be read by future AVX2
 // dispatch paths in dot_amd64.go and matvec_amd64.go.
-var hasAVX2 bool //nolint:gochecknoglobals
+var hasAVX2 bool //nolint:gochecknoglobals // a CPU feature, detected once at init
 
 //nolint:gochecknoinits // Runtime CPU feature detection must run at init.
 func init() {

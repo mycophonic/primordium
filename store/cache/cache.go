@@ -605,12 +605,12 @@ func becomeWriter(
 
 func touchFile(path string) error {
 	file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
-	//nolint:wrapcheck
+	//nolint:wrapcheck // *os.PathError already names the file
 	if err != nil {
 		return err
 	}
 
-	//nolint:wrapcheck
+	//nolint:wrapcheck // *os.PathError already names the file
 	return file.Close()
 }
 

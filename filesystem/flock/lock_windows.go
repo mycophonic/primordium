@@ -24,7 +24,7 @@
 
 // https://cs.opensource.google/go/go/+/master:src/cmd/go/internal/lockedfile/internal/filelock/filelock_windows.go
 
-//nolint:wrapcheck
+//nolint:wrapcheck // the platform layer; the portable functions wrap
 package flock
 
 import (
@@ -101,7 +101,7 @@ func cleanupLockSidecar(path string) {
 	_ = os.Remove(path + ".lock")
 }
 
-//nolint:wrapcheck
+//nolint:wrapcheck // the platform layer; the portable functions wrap
 func platformUnlock(file *os.File) (err error) {
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {

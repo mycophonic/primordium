@@ -106,7 +106,7 @@ func parseMemInfoLine(line, prefix string) (uint64, bool) {
 	}
 
 	fields := strings.Fields(line)
-	if len(fields) < 2 { //nolint:mnd // "<Key>: <value> kB"
+	if len(fields) < 2 { // "<Key>: <value> kB"
 		return 0, false
 	}
 

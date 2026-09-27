@@ -22,7 +22,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//nolint:wrapcheck
+//nolint:wrapcheck // the platform layer; the portable functions wrap
 package flock
 
 import (
@@ -91,7 +91,7 @@ func platformTryLock(path string, lockType lockType) (*os.File, error) {
 // On Unix, flock operates on the path itself, so there is no sidecar to clean up.
 func cleanupLockSidecar(_ string) {}
 
-//nolint:wrapcheck
+//nolint:wrapcheck // the platform layer; the portable functions wrap
 func platformUnlock(file *os.File) (err error) {
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {

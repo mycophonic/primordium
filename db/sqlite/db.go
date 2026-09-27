@@ -51,7 +51,7 @@ func cacheSizePragma(size int64) string {
 
 // PragmasReadOnly configures SQLite for pure read performance.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // an exported preset, copied by value
 var PragmasReadOnly = Pragmas{
 	MaxConns: 1,
 	Statements: []string{
@@ -66,7 +66,7 @@ var PragmasReadOnly = Pragmas{
 // Read performance and data integrity are paramount, write performance is not a concern.
 // Uses synchronous=FULL (not NORMAL) to guarantee durability on power failure.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // an exported preset, copied by value
 var PragmasReadWrite = Pragmas{
 	MaxConns: 1,
 	Statements: []string{
@@ -87,7 +87,7 @@ var PragmasReadWrite = Pragmas{
 //
 // Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // an exported preset, copied by value
 var PragmasImport = Pragmas{
 	MaxConns: 1,
 	Statements: []string{
@@ -113,7 +113,7 @@ var PragmasImport = Pragmas{
 //
 // Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // an exported preset, copied by value
 var PragmasVacuum = Pragmas{
 	MaxConns: 1,
 	Statements: []string{

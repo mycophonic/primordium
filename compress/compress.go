@@ -48,7 +48,7 @@ type format struct {
 	new   Decompressor
 }
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // the format registry is process-wide by design
 var (
 	formatsMu sync.RWMutex
 	formats   []format
