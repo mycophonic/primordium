@@ -32,7 +32,7 @@ func ReadFile(path string) ([]byte, error) {
 		return nil, err
 	}
 
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: a close error carries nothing
 
 	return readFileContents(file)
 }
@@ -87,7 +87,7 @@ func ReadDir(path string) ([]os.DirEntry, error) {
 		return nil, err
 	}
 
-	defer file.Close()
+	defer func() { _ = file.Close() }() // read-only: a close error carries nothing
 
 	// Match stdlib openDir behavior: fstat and reject non-directories early.
 	fi, err := file.Stat()

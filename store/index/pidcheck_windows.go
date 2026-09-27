@@ -35,9 +35,7 @@ func isProcessAlive(pid int) bool {
 		return false
 	}
 
-	//revive:disable-next-line:unhandled-error // best-effort close
-	// #nosec G104 -- best-effort cleanup
-	syscall.CloseHandle(handle) //nolint:errcheck
+	_ = syscall.CloseHandle(handle) // best-effort close of a probe handle
 
 	return true
 }

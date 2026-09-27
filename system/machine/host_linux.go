@@ -69,7 +69,7 @@ func readMemInfo() (total, available uint64, err error) {
 		return 0, 0, fmt.Errorf("%w: open meminfo: %w", fault.ErrReadFailure, err)
 	}
 
-	defer meminfo.Close()
+	defer func() { _ = meminfo.Close() }() // read-only: a close error carries nothing
 
 	var gotTotal, gotAvail bool
 
@@ -127,7 +127,7 @@ func readCPUModel() string {
 		return ""
 	}
 
-	defer cpuinfo.Close()
+	defer func() { _ = cpuinfo.Close() }() // read-only: a close error carries nothing
 
 	scanner := bufio.NewScanner(cpuinfo)
 	for scanner.Scan() {

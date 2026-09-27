@@ -131,7 +131,7 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 		return err
 	}
 
-	defer body.Close()
+	defer func() { _ = body.Close() }() // a response body: fully read or abandoned
 
 	if contentLength > 0 && contentLength != expectedBytes {
 		return fmt.Errorf("%w: server content-length %d, expected %d",
