@@ -266,8 +266,6 @@ func smallReaddirnames(file *os.File, length int, t *testing.T) []string {
 }
 
 // writeFile is a simplified version of the stdlib helper (no Root parameter).
-//
-//nolint:unparam // the standard library's helper, its signature kept
 func writeFile(t *testing.T, fname string, flag int, text string) string {
 	t.Helper()
 
@@ -1105,9 +1103,9 @@ func TestOpenFileCreateExclDanglingSymlink(t *testing.T) {
 }
 
 func TestAppend(t *testing.T) {
-	t.Chdir(t.TempDir())
+	t.Parallel()
 
-	const f = "append.txt"
+	f := filepath.Join(t.TempDir(), "append.txt")
 
 	s := writeFile(t, f, os.O_CREATE|os.O_TRUNC|os.O_RDWR, "new")
 	if s != "new" {
