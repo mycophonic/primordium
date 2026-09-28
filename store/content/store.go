@@ -416,7 +416,7 @@ func (s *Store) fetchWithDigest(
 				slog.Debug("background write complete", "digest", dgst.String())
 			} else {
 				slog.Warn("background write failed", "digest", dgst.String(),
-					"copyErr", copyErr, "closeErr", closeErr)
+					"copy_err", copyErr, "close_err", closeErr)
 			}
 		})
 
@@ -489,7 +489,7 @@ func (s *Store) fetchAndHash(
 				slog.Debug("staged write complete", "digest", dgst.String())
 			} else {
 				slog.Warn("staged write failed", "digest", dgst.String(),
-					"writeErr", writeErr, "closeErr", closeErr)
+					"write_err", writeErr, "close_err", closeErr)
 			}
 		})
 

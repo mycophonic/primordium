@@ -63,7 +63,7 @@ func SetDefaultsForLogger(ctx context.Context, level ...slog.Level) bool {
 	slog.SetDefault(slog.New(handler))
 
 	if badEnv != "" {
-		slog.WarnContext(ctx, "invalid LOG_LEVEL, defaulting to info", "LOG_LEVEL", badEnv)
+		slog.WarnContext(ctx, "invalid LOG_LEVEL, defaulting to info", "log_level", badEnv)
 	}
 
 	return effective <= slog.LevelDebug

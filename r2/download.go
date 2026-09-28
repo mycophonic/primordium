@@ -64,7 +64,7 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 	// Already complete in dataDir?
 	if info, statErr := xos.Stat(dataFile); statErr == nil && info.Size() == remoteSize {
 		if readETag(dataETag) == remoteETag {
-			slog.InfoContext(ctx, "file already complete", "objectKey", objectKey, "size", remoteSize)
+			slog.InfoContext(ctx, "file already complete", "object_key", objectKey, "size", remoteSize)
 
 			return nil
 		}
@@ -95,7 +95,7 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 
 			switch {
 			case offset == remoteSize:
-				slog.InfoContext(ctx, "temp file already complete, moving to data", "objectKey", objectKey)
+				slog.InfoContext(ctx, "temp file already complete, moving to data", "object_key", objectKey)
 
 				return moveToData(tempFile, tempETag, dataFile, dataETag)
 			case offset > remoteSize:
@@ -119,9 +119,9 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 	}
 
 	if offset > 0 {
-		slog.InfoContext(ctx, "resuming download", "objectKey", objectKey, "offset", offset, "total", remoteSize)
+		slog.InfoContext(ctx, "resuming download", "object_key", objectKey, "offset", offset, "total", remoteSize)
 	} else {
-		slog.InfoContext(ctx, "downloading", "objectKey", objectKey, "size", remoteSize)
+		slog.InfoContext(ctx, "downloading", "object_key", objectKey, "size", remoteSize)
 	}
 
 	expectedBytes := remoteSize - offset
