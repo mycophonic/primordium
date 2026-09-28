@@ -23,8 +23,10 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -35,47 +37,97 @@ import (
 	"github.com/mycophonic/primordium/network/transporter"
 )
 
-// fakeRT is a configurable fake http.RoundTripper for testing.
-type fakeRT struct {
-	handler func(req *http.Request) (*http.Response, error)
-	calls   atomic.Int32
+// schedulingSlack bounds how late a backoff timer and the loopback round
+// trip may run past the backoff itself. Timers never fire early, so lower
+// bounds need none.
+const schedulingSlack = 150 * time.Millisecond
+
+// backend is an HTTP test server recording when each request arrived.
+type backend struct {
+	url   string
+	calls atomic.Int32
+
+	mu       sync.Mutex
+	arrivals []time.Time
 }
 
-func (f *fakeRT) RoundTrip(req *http.Request) (*http.Response, error) {
-	f.calls.Add(1)
-
-	return f.handler(req)
-}
-
-func newResponse(statusCode int) *http.Response {
-	return &http.Response{
-		StatusCode: statusCode,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader("")),
-	}
-}
-
-func newResponseWithHeader(statusCode int, key, value string) *http.Response {
-	resp := newResponse(statusCode)
-	resp.Header.Set(key, value)
-
-	return resp
-}
-
-func doGet(t *testing.T, rt http.RoundTripper) (*http.Response, error) {
+// newBackend serves handler, which is given the 1-based number of the call.
+func newBackend(t *testing.T, handler func(w http.ResponseWriter, r *http.Request, call int32)) *backend {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
+	back := &backend{}
 
-	resp, rtErr := rt.RoundTrip(req)
-	if rtErr != nil && resp != nil {
-		resp.Body.Close()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		back.mu.Lock()
+		back.arrivals = append(back.arrivals, time.Now())
+		back.mu.Unlock()
+
+		handler(w, r, back.calls.Add(1))
+	}))
+	t.Cleanup(srv.Close)
+
+	back.url = srv.URL
+
+	return back
+}
+
+// gaps returns the delay between each request and the one before it.
+func (b *backend) gaps() []time.Duration {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	gaps := make([]time.Duration, 0, len(b.arrivals))
+	for i := 1; i < len(b.arrivals); i++ {
+		gaps = append(gaps, b.arrivals[i].Sub(b.arrivals[i-1]))
 	}
 
-	return resp, rtErr
+	return gaps
+}
+
+func status(code int) func(http.ResponseWriter, *http.Request, int32) {
+	return func(w http.ResponseWriter, _ *http.Request, _ int32) {
+		w.WriteHeader(code)
+	}
+}
+
+func statusWithHeader(code int, key, value string) func(http.ResponseWriter, *http.Request, int32) {
+	return func(w http.ResponseWriter, _ *http.Request, _ int32) {
+		w.Header().Set(key, value)
+		w.WriteHeader(code)
+	}
+}
+
+// hangUp drops the connection without answering, which the client sees as a
+// transport error.
+func hangUp(t *testing.T, w http.ResponseWriter) {
+	t.Helper()
+
+	conn, _, err := http.NewResponseController(w).Hijack()
+	if err != nil {
+		t.Errorf("hijack: %v", err)
+
+		return
+	}
+
+	_ = conn.Close()
+}
+
+func newClient(t *testing.T, opts transporter.Options) *http.Client {
+	t.Helper()
+
+	client := transporter.NewClient(opts)
+	t.Cleanup(client.CloseIdleConnections)
+
+	return client
+}
+
+func doGet(ctx context.Context, t *testing.T, client *http.Client, url string) (*http.Response, error) {
+	t.Helper()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	assert.NilError(t, err)
+
+	return client.Do(req)
 }
 
 // --- Core retry behavior ---
@@ -83,20 +135,18 @@ func doGet(t *testing.T, rt http.RoundTripper) (*http.Response, error) {
 func TestSuccessNoRetry(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{
 		MaxRetries:     3,
 		InitialBackoff: time.Millisecond,
 	})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	resp.Body.Close()
 
-	assert.Equal(t, fake.calls.Load(), int32(1))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 func TestNonRetryableStatus(t *testing.T) {
@@ -108,20 +158,18 @@ func TestNonRetryableStatus(t *testing.T) {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
 			t.Parallel()
 
-			fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-				return newResponse(code), nil
-			}}
-			rt := transporter.NewTestTransport(fake, transporter.Options{
+			back := newBackend(t, status(code))
+			client := newClient(t, transporter.Options{
 				MaxRetries:     3,
 				InitialBackoff: time.Millisecond,
 			})
 
-			resp, err := doGet(t, rt)
+			resp, err := doGet(t.Context(), t, client, back.url)
 			assert.NilError(t, err)
 			assert.Equal(t, resp.StatusCode, code)
 			resp.Body.Close()
 
-			assert.Equal(t, fake.calls.Load(), int32(1))
+			assert.Equal(t, back.calls.Load(), int32(1))
 		})
 	}
 }
@@ -138,22 +186,20 @@ func TestRetryableStatusExhaustsRetries(t *testing.T) {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
 			t.Parallel()
 
-			fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-				return newResponse(code), nil
-			}}
-			rt := transporter.NewTestTransport(fake, transporter.Options{
+			back := newBackend(t, status(code))
+			client := newClient(t, transporter.Options{
 				MaxRetries:     2,
 				InitialBackoff: time.Millisecond,
 			})
 
-			resp, err := doGet(t, rt)
+			resp, err := doGet(t.Context(), t, client, back.url)
 			if resp != nil {
 				resp.Body.Close()
 			}
 
 			assert.Assert(t, resp == nil)
 			assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse))
-			assert.Equal(t, fake.calls.Load(), int32(3)) // 1 initial + 2 retries
+			assert.Equal(t, back.calls.Load(), int32(3)) // 1 initial + 2 retries
 		})
 	}
 }
@@ -161,95 +207,91 @@ func TestRetryableStatusExhaustsRetries(t *testing.T) {
 func TestRetryableStatusEventualSuccess(t *testing.T) {
 	t.Parallel()
 
-	var attempt atomic.Int32
-
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		call := attempt.Add(1)
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, call int32) {
 		if call <= 2 {
-			return newResponse(http.StatusInternalServerError), nil
+			w.WriteHeader(http.StatusInternalServerError)
+
+			return
 		}
 
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+		w.WriteHeader(http.StatusOK)
+	})
+	client := newClient(t, transporter.Options{
 		MaxRetries:     3,
 		InitialBackoff: time.Millisecond,
 	})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	resp.Body.Close()
 
-	assert.Equal(t, attempt.Load(), int32(3))
+	assert.Equal(t, back.calls.Load(), int32(3))
 }
 
 func TestTransportErrorRetried(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return nil, errors.New("connection refused")
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
+		hangUp(t, w)
+	})
+	client := newClient(t, transporter.Options{
 		MaxRetries:     2,
 		InitialBackoff: time.Millisecond,
 	})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
 
 	assert.Assert(t, resp == nil)
 	assert.Assert(t, errors.Is(err, fault.ErrNetworkCommunication))
-	assert.Equal(t, fake.calls.Load(), int32(3))
+	assert.Equal(t, back.calls.Load(), int32(3))
 }
 
 func TestTransportErrorEventualSuccess(t *testing.T) {
 	t.Parallel()
 
-	var attempt atomic.Int32
-
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		call := attempt.Add(1)
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, call int32) {
 		if call == 1 {
-			return nil, errors.New("transient network error")
+			hangUp(t, w)
+
+			return
 		}
 
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+		w.WriteHeader(http.StatusOK)
+	})
+	client := newClient(t, transporter.Options{
 		MaxRetries:     2,
 		InitialBackoff: time.Millisecond,
 	})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	resp.Body.Close()
 
-	assert.Equal(t, attempt.Load(), int32(2))
+	assert.Equal(t, back.calls.Load(), int32(2))
 }
 
 func TestMaxRetriesZeroSingleAttempt(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusInternalServerError), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	back := newBackend(t, status(http.StatusInternalServerError))
+	client := newClient(t, transporter.Options{
 		MaxRetries:     0,
 		InitialBackoff: time.Millisecond,
 	})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
 
 	assert.Assert(t, resp == nil)
 	assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse))
-	assert.Equal(t, fake.calls.Load(), int32(1))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 // --- Retry-After header ---
@@ -257,26 +299,27 @@ func TestMaxRetriesZeroSingleAttempt(t *testing.T) {
 func TestRetryAfterHonored(t *testing.T) {
 	t.Parallel()
 
-	var attempt atomic.Int32
-
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		call := attempt.Add(1)
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, call int32) {
 		if call == 1 {
-			return newResponseWithHeader(
-				http.StatusTooManyRequests, "Retry-After", "1",
-			), nil
+			w.Header().Set("Retry-After", "1")
+			w.WriteHeader(http.StatusTooManyRequests)
+
+			return
 		}
 
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+		w.WriteHeader(http.StatusOK)
+	})
+	// A MaxBackoff just above one second also pins the parsed value from
+	// above: anything larger would be given up on instead of waited for.
+	client := newClient(t, transporter.Options{
 		MaxRetries:     1,
 		InitialBackoff: time.Millisecond,
+		MaxBackoff:     1100 * time.Millisecond,
 	})
 
 	start := time.Now()
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	elapsed := time.Since(start)
 
 	assert.NilError(t, err)
@@ -284,25 +327,21 @@ func TestRetryAfterHonored(t *testing.T) {
 	resp.Body.Close()
 
 	// Retry-After = 1s should dominate over InitialBackoff = 1ms.
-	assert.Assert(t, elapsed >= 900*time.Millisecond,
-		"expected at least ~1s delay from Retry-After, got %v", elapsed)
+	assert.Assert(t, elapsed >= time.Second,
+		"expected at least 1s delay from Retry-After, got %v", elapsed)
 }
 
 func TestRetryAfterExceedsMaxBackoff(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponseWithHeader(
-			http.StatusTooManyRequests, "Retry-After", "60",
-		), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	back := newBackend(t, statusWithHeader(http.StatusTooManyRequests, "Retry-After", "60"))
+	client := newClient(t, transporter.Options{
 		MaxRetries:     3,
 		InitialBackoff: time.Millisecond,
 		MaxBackoff:     5 * time.Second,
 	})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
@@ -310,7 +349,56 @@ func TestRetryAfterExceedsMaxBackoff(t *testing.T) {
 	assert.Assert(t, resp == nil)
 	assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse))
 	// Should abandon after seeing Retry-After > MaxBackoff, not retry all 3 times.
-	assert.Equal(t, fake.calls.Load(), int32(1))
+	assert.Equal(t, back.calls.Load(), int32(1))
+}
+
+// TestRetryAfterParsing reads the parsed Retry-After off the give-up rule: a
+// value above MaxBackoff abandons after one call, anything else is retried.
+func TestRetryAfterParsing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		value      string
+		maxBackoff time.Duration
+		wantCalls  int32
+	}{
+		{"seconds", "5", 4900 * time.Millisecond, 1},
+		{"future_date", time.Now().Add(10 * time.Second).UTC().Format(http.TimeFormat), 5 * time.Second, 1},
+		{"zero", "0", time.Millisecond, 2},
+		{"negative", "-1", time.Millisecond, 2},
+		{"empty", "", time.Millisecond, 2},
+		{"past_date", "Thu, 01 Dec 2025 16:00:00 GMT", time.Millisecond, 2},
+		{"float", "1.5", time.Millisecond, 2},
+		{"garbage", "not-a-date-or-number", time.Millisecond, 2},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
+				if test.value != "" {
+					w.Header().Set("Retry-After", test.value)
+				}
+
+				w.WriteHeader(http.StatusTooManyRequests)
+			})
+			client := newClient(t, transporter.Options{
+				MaxRetries:     1,
+				InitialBackoff: time.Millisecond,
+				MaxBackoff:     test.maxBackoff,
+			})
+
+			resp, err := doGet(t.Context(), t, client, back.url)
+			if resp != nil {
+				resp.Body.Close()
+			}
+
+			assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse))
+			assert.Equal(t, back.calls.Load(), test.wantCalls)
+		})
+	}
 }
 
 // --- Context cancellation ---
@@ -318,152 +406,141 @@ func TestRetryAfterExceedsMaxBackoff(t *testing.T) {
 func TestContextCancelledDuringBackoff(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusInternalServerError), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	arrived := make(chan struct{}, 1)
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
+		w.WriteHeader(http.StatusInternalServerError)
+
+		arrived <- struct{}{}
+	})
+	client := newClient(t, transporter.Options{
 		MaxRetries:     3,
 		InitialBackoff: 10 * time.Second,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
+	ctx, cancel := context.WithCancel(t.Context())
 
 	done := make(chan error, 1)
 
 	go func() {
-		resp, rtErr := rt.RoundTrip(req)
+		resp, err := doGet(ctx, t, client, back.url)
 		if resp != nil {
 			resp.Body.Close()
 		}
 
-		done <- rtErr
+		done <- err
 	}()
 
-	// Give the first attempt time to fail and enter backoff.
+	// Let the first attempt fail and enter its ten-second backoff.
+	<-arrived
 	time.Sleep(50 * time.Millisecond)
 	cancel()
 
 	roundTripErr := <-done
 
 	assert.Assert(t, errors.Is(roundTripErr, fault.ErrCancelled))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 func TestContextCancelledDuringSemaphoreWait(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		// Block forever to hold the semaphore.
-		select {}
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	arrived := make(chan struct{}, 1)
+	back := newBackend(t, func(_ http.ResponseWriter, r *http.Request, _ int32) {
+		arrived <- struct{}{}
+
+		// Hold the only slot until the client gives up.
+		<-r.Context().Done()
+	})
+	client := newClient(t, transporter.Options{
 		Parallelism:    1,
 		MaxRetries:     0,
 		InitialBackoff: time.Millisecond,
 	})
 
 	// Fill the semaphore with a blocking request.
-	blockCtx, blockCancel := context.WithCancel(context.Background())
+	blockCtx, blockCancel := context.WithCancel(t.Context())
 	defer blockCancel()
 
-	blockReq, err := http.NewRequestWithContext(
-		blockCtx, http.MethodGet, "http://example.com/block", nil,
-	)
-	assert.NilError(t, err)
-
 	go func() {
-		resp, _ := rt.RoundTrip(blockReq)
+		resp, _ := doGet(blockCtx, t, client, back.url)
 		if resp != nil {
 			resp.Body.Close()
 		}
 	}()
 
-	// Wait for blocker to acquire semaphore.
-	time.Sleep(50 * time.Millisecond)
+	<-arrived
 
 	// Second request should fail to acquire semaphore when cancelled.
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
-
-	resp, err := rt.RoundTrip(req)
+	resp, err := doGet(ctx, t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 func TestContextCancelledDuringRateLimitWait(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusOK), nil
-	}}
+	back := newBackend(t, status(http.StatusOK))
 	// 1 request per second — after pre-filled token is consumed, next token takes ~1s.
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	client := newClient(t, transporter.Options{
 		MaxPerSecond:   1,
 		MaxRetries:     0,
 		InitialBackoff: time.Millisecond,
 	})
-	defer transporter.CloseTestTransport(rt)
 
 	// Consume the pre-filled token.
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	resp.Body.Close()
 
 	// Next request must wait for a token; cancel before it arrives.
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
-
-	resp, err = rt.RoundTrip(req)
+	resp, err = doGet(ctx, t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 func TestContextCancelledDuringRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(req *http.Request) (*http.Response, error) {
-		return nil, req.Context().Err()
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	arrived := make(chan struct{}, 1)
+	back := newBackend(t, func(_ http.ResponseWriter, r *http.Request, _ int32) {
+		arrived <- struct{}{}
+
+		<-r.Context().Done()
+	})
+	client := newClient(t, transporter.Options{
 		MaxRetries:     2,
 		InitialBackoff: time.Millisecond,
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately.
+	ctx, cancel := context.WithCancel(t.Context())
 
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
+	go func() {
+		<-arrived
+		cancel()
+	}()
 
-	resp, err := rt.RoundTrip(req)
+	resp, err := doGet(ctx, t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 // --- Body reset on retry ---
@@ -474,112 +551,99 @@ func TestBodyResentOnRetry(t *testing.T) {
 	bodyContent := "request-body-payload"
 
 	var (
-		bodies  []string
-		attempt atomic.Int32
+		mu     sync.Mutex
+		bodies []string
 	)
 
-	fake := &fakeRT{handler: func(req *http.Request) (*http.Response, error) {
-		data, readErr := io.ReadAll(req.Body)
-		assert.NilError(t, readErr)
+	back := newBackend(t, func(w http.ResponseWriter, r *http.Request, call int32) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+
+		mu.Lock()
 
 		bodies = append(bodies, string(data))
 
-		call := attempt.Add(1)
+		mu.Unlock()
+
 		if call == 1 {
-			return newResponse(http.StatusInternalServerError), nil
+			w.WriteHeader(http.StatusInternalServerError)
+
+			return
 		}
 
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+		w.WriteHeader(http.StatusOK)
+	})
+	client := newClient(t, transporter.Options{
 		MaxRetries:     1,
 		InitialBackoff: time.Millisecond,
 	})
 
 	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodPost, "http://example.com/test",
+		t.Context(), http.MethodPost, back.url,
 		bytes.NewReader([]byte(bodyContent)),
 	)
 	assert.NilError(t, err)
 
-	resp, err := rt.RoundTrip(req)
+	resp, err := client.Do(req)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	resp.Body.Close()
 
-	assert.Equal(t, len(bodies), 2)
-	assert.Equal(t, bodies[0], bodyContent)
-	assert.Equal(t, bodies[1], bodyContent)
+	mu.Lock()
+	defer mu.Unlock()
+
+	assert.DeepEqual(t, bodies, []string{bodyContent, bodyContent})
 }
 
 // --- User-Agent injection ---
 
-func TestUserAgentInjectedWhenAbsent(t *testing.T) {
-	t.Parallel()
+// receivedUserAgent returns the User-Agent the server saw for a request
+// carrying the given one ("" for none).
+func receivedUserAgent(t *testing.T, opts transporter.Options, sent string) string {
+	t.Helper()
 
-	var capturedUA string
-
-	fake := &fakeRT{handler: func(req *http.Request) (*http.Response, error) {
-		capturedUA = req.Header.Get("User-Agent")
-
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
-		UserAgent: "test-agent/1.0",
+	received := make(chan string, 1)
+	back := newBackend(t, func(_ http.ResponseWriter, r *http.Request, _ int32) {
+		received <- r.Header.Get("User-Agent")
 	})
+	client := newClient(t, opts)
 
-	resp, err := doGet(t, rt)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, back.url, nil)
+	assert.NilError(t, err)
+
+	if sent != "" {
+		req.Header.Set("User-Agent", sent)
+	}
+
+	resp, err := client.Do(req)
 	assert.NilError(t, err)
 	resp.Body.Close()
 
-	assert.Equal(t, capturedUA, "test-agent/1.0")
+	return <-received
+}
+
+func TestUserAgentInjectedWhenAbsent(t *testing.T) {
+	t.Parallel()
+
+	got := receivedUserAgent(t, transporter.Options{UserAgent: "test-agent/1.0"}, "")
+	assert.Equal(t, got, "test-agent/1.0")
 }
 
 func TestUserAgentPreservedWhenPresent(t *testing.T) {
 	t.Parallel()
 
-	var capturedUA string
-
-	fake := &fakeRT{handler: func(req *http.Request) (*http.Response, error) {
-		capturedUA = req.Header.Get("User-Agent")
-
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
-		UserAgent: "test-agent/1.0",
-	})
-
-	req, err := http.NewRequestWithContext(
-		context.Background(), http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
-
-	req.Header.Set("User-Agent", "custom-agent/2.0")
-
-	resp, err := rt.RoundTrip(req)
-	assert.NilError(t, err)
-	resp.Body.Close()
-
-	assert.Equal(t, capturedUA, "custom-agent/2.0")
+	got := receivedUserAgent(t, transporter.Options{UserAgent: "test-agent/1.0"}, "custom-agent/2.0")
+	assert.Equal(t, got, "custom-agent/2.0")
 }
 
 func TestNoUserAgentWhenEmpty(t *testing.T) {
 	t.Parallel()
 
-	var capturedUA string
-
-	fake := &fakeRT{handler: func(req *http.Request) (*http.Response, error) {
-		capturedUA = req.Header.Get("User-Agent")
-
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{})
-
-	resp, err := doGet(t, rt)
-	assert.NilError(t, err)
-	resp.Body.Close()
-
-	assert.Equal(t, capturedUA, "")
+	// Nothing is injected, so the request goes out with net/http's own default.
+	got := receivedUserAgent(t, transporter.Options{}, "")
+	assert.Assert(t, strings.HasPrefix(got, "Go-http-client/"), "got User-Agent %q", got)
 }
 
 // --- Concurrency limiting ---
@@ -594,7 +658,7 @@ func TestConcurrencyLimiting(t *testing.T) {
 
 	const parallelism = 2
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
 		current := inflight.Add(1)
 
 		for {
@@ -607,33 +671,29 @@ func TestConcurrencyLimiting(t *testing.T) {
 		time.Sleep(50 * time.Millisecond) // Hold the slot.
 		inflight.Add(-1)
 
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+		w.WriteHeader(http.StatusOK)
+	})
+	client := newClient(t, transporter.Options{
 		Parallelism: parallelism,
 		MaxRetries:  0,
 	})
 
-	done := make(chan struct{})
+	var wg sync.WaitGroup
 
 	for range 10 {
-		go func() {
-			req, _ := http.NewRequestWithContext(
-				context.Background(), http.MethodGet, "http://example.com/test", nil,
-			)
+		wg.Go(func() {
+			resp, err := doGet(t.Context(), t, client, back.url)
+			if err != nil {
+				t.Errorf("request: %v", err)
 
-			resp, _ := rt.RoundTrip(req)
-			if resp != nil {
-				resp.Body.Close()
+				return
 			}
 
-			done <- struct{}{}
-		}()
+			resp.Body.Close()
+		})
 	}
 
-	for range 10 {
-		<-done
-	}
+	wg.Wait()
 
 	assert.Assert(t, maxInflight.Load() <= int32(parallelism),
 		"max inflight %d exceeded parallelism %d", maxInflight.Load(), parallelism)
@@ -648,18 +708,14 @@ func TestRateLimiting(t *testing.T) {
 
 	const maxPerSecond = 10
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusOK), nil
-	}}
-
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{
 		MaxPerSecond: maxPerSecond,
 		MaxRetries:   0,
 	})
-	defer transporter.CloseTestTransport(rt)
 
 	// First request uses the pre-filled token, so it's instant.
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	resp.Body.Close()
@@ -670,7 +726,7 @@ func TestRateLimiting(t *testing.T) {
 	start := time.Now()
 
 	for range requests {
-		resp, err = doGet(t, rt)
+		resp, err = doGet(t.Context(), t, client, back.url)
 		assert.NilError(t, err)
 		assert.Equal(t, resp.StatusCode, http.StatusOK)
 		resp.Body.Close()
@@ -691,236 +747,144 @@ func TestRateLimiting(t *testing.T) {
 func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {
 	t.Parallel()
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return newResponse(http.StatusOK), nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{
 		MaxPerSecond: 1,
 		MaxRetries:   0,
 	})
 
 	// Consume pre-filled token.
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	resp.Body.Close()
 
 	// Stop the rate limiter.
-	transporter.CloseTestTransport(rt)
+	client.CloseIdleConnections()
 
 	// After stopping, no new tokens are produced. A request with a short
 	// timeout should fail because no token arrives.
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(
-		ctx, http.MethodGet, "http://example.com/test", nil,
-	)
-	assert.NilError(t, err)
-
-	resp, err = rt.RoundTrip(req)
+	resp, err = doGet(ctx, t, client, back.url)
 	if resp != nil {
 		resp.Body.Close()
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
+	assert.Equal(t, back.calls.Load(), int32(1))
 }
 
 // --- Backoff duration ---
 
+// retryGaps exhausts opts.MaxRetries against a failing server and returns the
+// delay the client left before each retry.
+func retryGaps(t *testing.T, opts transporter.Options) []time.Duration {
+	t.Helper()
+
+	back := newBackend(t, status(http.StatusInternalServerError))
+	client := newClient(t, opts)
+
+	// Fail rather than hang when a backoff runs away.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	resp, err := doGet(ctx, t, client, back.url)
+	if resp != nil {
+		resp.Body.Close()
+	}
+
+	assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse), "got %v", err)
+
+	gaps := back.gaps()
+	assert.Equal(t, len(gaps), opts.MaxRetries)
+
+	return gaps
+}
+
 func TestBackoffExponential(t *testing.T) {
 	t.Parallel()
 
-	// Collect samples to average out jitter.
-	const samples = 100
+	const initial = 50 * time.Millisecond
 
-	for attempt := 1; attempt <= 4; attempt++ {
-		var total time.Duration
+	gaps := retryGaps(t, transporter.Options{
+		MaxRetries:     4,
+		InitialBackoff: initial,
+	})
 
-		for range samples {
-			total += transporter.ComputeBackoff(
-				100*time.Millisecond, 0, attempt,
-			)
-		}
+	// Expected center before retry n: initial * 2^(n-1), jittered by ±25%.
+	for i, gap := range gaps {
+		center := initial << i
 
-		avg := total / samples
+		low := center * 3 / 4
+		high := center*5/4 + schedulingSlack
 
-		// Expected center: initBackoff * 2^(attempt-1).
-		expectedCenter := time.Duration(
-			float64(100*time.Millisecond) * float64(int(1)<<(attempt-1)),
-		)
-
-		// Allow ±30% tolerance for averaged jitter.
-		low := time.Duration(float64(expectedCenter) * 0.7)
-		high := time.Duration(float64(expectedCenter) * 1.3)
-
-		assert.Assert(t, avg >= low && avg <= high,
-			"attempt %d: avg backoff %v outside expected range [%v, %v]",
-			attempt, avg, low, high)
+		assert.Assert(t, gap >= low && gap <= high,
+			"retry %d: backoff %v outside expected range [%v, %v]", i+1, gap, low, high)
 	}
 }
 
 func TestBackoffJitterRange(t *testing.T) {
 	t.Parallel()
 
-	var minSeen, maxSeen time.Duration
+	const backoff = 40 * time.Millisecond
 
-	minSeen = time.Hour
+	// MaxBackoff equal to InitialBackoff holds every retry at the same center.
+	gaps := retryGaps(t, transporter.Options{
+		MaxRetries:     40,
+		InitialBackoff: backoff,
+		MaxBackoff:     backoff,
+	})
 
-	for range 1000 {
-		duration := transporter.ComputeBackoff(time.Second, 0, 1)
-		if duration < minSeen {
-			minSeen = duration
-		}
+	minSeen := time.Duration(1<<63 - 1)
 
-		if duration > maxSeen {
-			maxSeen = duration
-		}
+	for i, gap := range gaps {
+		minSeen = min(minSeen, gap)
+
+		// Jitter range: [0.75, 1.25] * 40ms = [30ms, 50ms].
+		assert.Assert(t, gap >= backoff*3/4 && gap <= backoff*5/4+schedulingSlack,
+			"retry %d: backoff %v outside jitter range", i+1, gap)
 	}
 
-	// Jitter range: [0.75, 1.25] * 1s = [750ms, 1250ms].
-	assert.Assert(t, minSeen >= 750*time.Millisecond,
-		"min backoff %v below 750ms", minSeen)
-	assert.Assert(t, maxSeen <= 1250*time.Millisecond,
-		"max backoff %v above 1250ms", maxSeen)
-	// Ensure we actually see spread.
-	assert.Assert(t, maxSeen-minSeen > 200*time.Millisecond,
-		"jitter spread too narrow: min=%v max=%v", minSeen, maxSeen)
+	// Timers only ever run late, so a delay this far under the center can
+	// only come from jitter.
+	assert.Assert(t, minSeen < backoff*9/10,
+		"no retry was jittered below the center: shortest backoff %v", minSeen)
 }
 
 func TestBackoffCappedByMaxBackoff(t *testing.T) {
 	t.Parallel()
 
-	maxBackoff := 5 * time.Second
+	const maxBackoff = 40 * time.Millisecond
 
-	// At attempt 10 with 1s initial, uncapped backoff would be 512s.
-	// With MaxBackoff=5s, it should be capped.
-	for range 100 {
-		duration := transporter.ComputeBackoff(
-			time.Second, maxBackoff, 10,
-		)
-
-		// Capped at 5s, with jitter [0.75, 1.25] → max 6.25s.
-		assert.Assert(t, duration <= time.Duration(
-			float64(maxBackoff)*1.25+float64(time.Millisecond),
-		),
-			"backoff %v exceeded capped max %v * 1.25", duration, maxBackoff)
-	}
-}
-
-func TestBackoffNoOverflowAtHighAttempts(t *testing.T) {
-	t.Parallel()
-
-	// Without the overflow guard, attempt 40 with 1s init would overflow int64.
-	// With MaxBackoff, it must remain positive and bounded.
-	for range 100 {
-		duration := transporter.ComputeBackoff(
-			time.Second, 30*time.Second, 40,
-		)
-		assert.Assert(t, duration > 0,
-			"backoff must be positive at high attempt, got %v", duration)
-		assert.Assert(t, duration <= time.Duration(
-			float64(30*time.Second)*1.25+float64(time.Millisecond),
-		),
-			"backoff %v exceeded capped max", duration)
-	}
-}
-
-// --- retryAfter parsing ---
-
-func TestRetryAfterParsing(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name     string
-		value    string
-		expected time.Duration
-	}{
-		{"valid_seconds", "5", 5 * time.Second},
-		{"zero", "0", 0},
-		{"negative", "-1", 0},
-		{"empty", "", 0},
-		{"past_date", "Thu, 01 Dec 2025 16:00:00 GMT", 0},
-		{"float", "1.5", 0},
-		{"garbage", "not-a-date-or-number", 0},
-	}
-
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			t.Parallel()
-
-			header := make(http.Header)
-			if test.value != "" {
-				header.Set("Retry-After", test.value)
-			}
-
-			got := transporter.ParseRetryAfter(header)
-			assert.Equal(t, got, test.expected)
-		})
-	}
-
-	// Future HTTP-date: must return a positive duration.
-	t.Run("future_date", func(t *testing.T) {
-		t.Parallel()
-
-		future := time.Now().Add(10 * time.Second)
-		header := make(http.Header)
-		header.Set("Retry-After", future.UTC().Format(http.TimeFormat))
-
-		got := transporter.ParseRetryAfter(header)
-		assert.Assert(t, got >= 8*time.Second && got <= 11*time.Second,
-			"expected ~10s for future date, got %v", got)
+	// Uncapped, retry 40 at 20ms initial would be 20ms * 2^39, past int64.
+	gaps := retryGaps(t, transporter.Options{
+		MaxRetries:     40,
+		InitialBackoff: 20 * time.Millisecond,
+		MaxBackoff:     maxBackoff,
 	})
+
+	for i, gap := range gaps {
+		// Capped at 40ms, with jitter [0.75, 1.25] → max 50ms.
+		assert.Assert(t, gap <= maxBackoff*5/4+schedulingSlack,
+			"retry %d: backoff %v exceeded capped max %v * 1.25", i+1, gap, maxBackoff)
+	}
 }
 
-// --- NewClient integration ---
+// --- Response body ---
 
-func TestNewClientTransportWiring(t *testing.T) {
-	t.Parallel()
-
-	// Verify that NewClient produces a functional *http.Client.
-	client := transporter.NewClient(transporter.Options{
-		MaxRetries: 0,
-		UserAgent:  "integration-test",
-	})
-	assert.Assert(t, client != nil)
-	assert.Assert(t, client.Transport != nil)
-}
-
-// --- Progress body ---
-
-func TestProgressBodyPassthrough(t *testing.T) {
-	t.Parallel()
-
-	data := bytes.Repeat([]byte("abcdefghij"), 1024)
-
-	pb := transporter.NewTestProgressBody(
-		io.NopCloser(bytes.NewReader(data)),
-		"http://example.com/file",
-		int64(len(data)),
-	)
-
-	got, err := io.ReadAll(pb)
-	assert.NilError(t, err)
-	assert.DeepEqual(t, got, data)
-	assert.NilError(t, pb.Close())
-}
-
-func TestProgressBodyWrappedByTransport(t *testing.T) {
+func TestResponseBodyPassthrough(t *testing.T) {
 	t.Parallel()
 
 	data := bytes.Repeat([]byte("x"), 64*1024)
 
-	fake := &fakeRT{handler: func(_ *http.Request) (*http.Response, error) {
-		return &http.Response{
-			StatusCode:    http.StatusOK,
-			Body:          io.NopCloser(bytes.NewReader(data)),
-			ContentLength: int64(len(data)),
-			Header:        make(http.Header),
-		}, nil
-	}}
-	rt := transporter.NewTestTransport(fake, transporter.Options{MaxRetries: 0})
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(data)))
+		_, _ = w.Write(data)
+	})
+	client := newClient(t, transporter.Options{MaxRetries: 0})
 
-	resp, err := doGet(t, rt)
+	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 
 	got, err := io.ReadAll(resp.Body)
