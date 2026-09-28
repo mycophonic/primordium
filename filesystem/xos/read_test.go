@@ -31,6 +31,8 @@ import (
 	"syscall"
 	"testing"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
@@ -70,13 +72,12 @@ func TestReadFile(t *testing.T) {
 func TestWriteFile(t *testing.T) {
 	t.Parallel()
 
-	f, err := xos.CreateTemp("", "xos-test")
+	f, err := xos.CreateTemp(t.TempDir(), "xos-test")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	defer f.Close()
-	defer os.Remove(f.Name())
+	defer func() { assert.Check(t, f.Close()) }()
 
 	msg := "Programming today is a race between software engineers striving to " +
 		"build bigger and better idiot-proof programs, and the Universe trying " +
@@ -149,7 +150,7 @@ func TestReadDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.Close()
+	assert.Check(t, f.Close())
 
 	var list []os.DirEntry
 	if list, err = xos.ReadDir(filename); list != nil || !errors.Is(err, syscall.ENOTDIR) {
@@ -166,7 +167,7 @@ func TestReadDir(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tf.Close()
+	assert.Check(t, tf.Close())
 
 	subDir := filepath.Join(dir, "subdir")
 	if err = os.Mkdir(subDir, 0o755); err != nil {

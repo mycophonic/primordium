@@ -145,7 +145,7 @@ func TestSuccessNoRetry(t *testing.T) {
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	assert.Equal(t, back.calls.Load(), int32(1))
 }
@@ -168,7 +168,7 @@ func TestNonRetryableStatus(t *testing.T) {
 			resp, err := doGet(t.Context(), t, client, back.url)
 			assert.NilError(t, err)
 			assert.Equal(t, resp.StatusCode, code)
-			resp.Body.Close()
+			assert.Check(t, resp.Body.Close())
 
 			assert.Equal(t, back.calls.Load(), int32(1))
 		})
@@ -195,7 +195,7 @@ func TestRetryableStatusExhaustsRetries(t *testing.T) {
 
 			resp, err := doGet(t.Context(), t, client, back.url)
 			if resp != nil {
-				resp.Body.Close()
+				assert.Check(t, resp.Body.Close())
 			}
 
 			assert.Assert(t, resp == nil)
@@ -225,7 +225,7 @@ func TestRetryableStatusEventualSuccess(t *testing.T) {
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	assert.Equal(t, back.calls.Load(), int32(3))
 }
@@ -243,7 +243,7 @@ func TestTransportErrorRetried(t *testing.T) {
 
 	resp, err := doGet(t.Context(), t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, resp == nil)
@@ -271,7 +271,7 @@ func TestTransportErrorEventualSuccess(t *testing.T) {
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	assert.Equal(t, back.calls.Load(), int32(2))
 }
@@ -287,7 +287,7 @@ func TestMaxRetriesZeroSingleAttempt(t *testing.T) {
 
 	resp, err := doGet(t.Context(), t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, resp == nil)
@@ -325,7 +325,7 @@ func TestRetryAfterHonored(t *testing.T) {
 
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	// Retry-After = 1s should dominate over InitialBackoff = 1ms.
 	assert.Assert(t, elapsed >= time.Second,
@@ -344,7 +344,7 @@ func TestRetryAfterExceedsMaxBackoff(t *testing.T) {
 
 	resp, err := doGet(t.Context(), t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, resp == nil)
@@ -393,7 +393,7 @@ func TestRetryAfterParsing(t *testing.T) {
 
 			resp, err := doGet(t.Context(), t, client, back.url)
 			if resp != nil {
-				resp.Body.Close()
+				assert.Check(t, resp.Body.Close())
 			}
 
 			assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse))
@@ -425,7 +425,7 @@ func TestContextCancelledDuringBackoff(t *testing.T) {
 	go func() {
 		resp, err := doGet(ctx, t, client, back.url)
 		if resp != nil {
-			resp.Body.Close()
+			assert.Check(t, resp.Body.Close())
 		}
 
 		done <- err
@@ -465,7 +465,7 @@ func TestContextCancelledDuringSemaphoreWait(t *testing.T) {
 	go func() {
 		resp, _ := doGet(blockCtx, t, client, back.url)
 		if resp != nil {
-			resp.Body.Close()
+			assert.Check(t, resp.Body.Close())
 		}
 	}()
 
@@ -477,7 +477,7 @@ func TestContextCancelledDuringSemaphoreWait(t *testing.T) {
 
 	resp, err := doGet(ctx, t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
@@ -499,7 +499,7 @@ func TestContextCancelledDuringRateLimitWait(t *testing.T) {
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	// Next request must wait for a token; cancel before it arrives.
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
@@ -507,7 +507,7 @@ func TestContextCancelledDuringRateLimitWait(t *testing.T) {
 
 	resp, err = doGet(ctx, t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
@@ -537,7 +537,7 @@ func TestContextCancelledDuringRoundTrip(t *testing.T) {
 
 	resp, err := doGet(ctx, t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
@@ -590,7 +590,7 @@ func TestBodyResentOnRetry(t *testing.T) {
 	resp, err := client.Do(req)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	mu.Lock()
 	defer mu.Unlock()
@@ -620,7 +620,7 @@ func receivedUserAgent(t *testing.T, opts transporter.Options, sent string) stri
 
 	resp, err := client.Do(req)
 	assert.NilError(t, err)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	return <-received
 }
@@ -690,7 +690,7 @@ func TestConcurrencyLimiting(t *testing.T) {
 				return
 			}
 
-			resp.Body.Close()
+			assert.Check(t, resp.Body.Close())
 		})
 	}
 
@@ -719,7 +719,7 @@ func TestRateLimiting(t *testing.T) {
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	// Subsequent requests must wait for refill. Issue a few and measure total time.
 	const requests = 5
@@ -730,7 +730,7 @@ func TestRateLimiting(t *testing.T) {
 		resp, err = doGet(t.Context(), t, client, back.url)
 		assert.NilError(t, err)
 		assert.Equal(t, resp.StatusCode, http.StatusOK)
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	elapsed := time.Since(start)
@@ -757,7 +757,7 @@ func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {
 	// Consume pre-filled token.
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
-	resp.Body.Close()
+	assert.Check(t, resp.Body.Close())
 
 	// Stop the rate limiter.
 	client.CloseIdleConnections()
@@ -769,7 +769,7 @@ func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {
 
 	resp, err = doGet(ctx, t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
@@ -792,7 +792,7 @@ func retryGaps(t *testing.T, opts transporter.Options) []time.Duration {
 
 	resp, err := doGet(ctx, t, client, back.url)
 	if resp != nil {
-		resp.Body.Close()
+		assert.Check(t, resp.Body.Close())
 	}
 
 	assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse), "got %v", err)

@@ -49,7 +49,7 @@ func TestMapFile_WriteReadRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	f := createTempFile(t, 4*bytesize.KiB)
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	data, mapping, err := mmap.MapFile(f, 4*bytesize.KiB)
 	assert.NilError(t, err)
@@ -98,7 +98,7 @@ func TestMapFile_ZeroSize(t *testing.T) {
 	t.Parallel()
 
 	f := createTempFile(t, 0)
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	_, _, err := mmap.MapFile(f, 0)
 	assert.Assert(t, err != nil)
@@ -109,7 +109,7 @@ func TestMapFile_NegativeSize(t *testing.T) {
 	t.Parallel()
 
 	f := createTempFile(t, 0)
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	_, _, err := mmap.MapFile(f, -1)
 	assert.Assert(t, err != nil)
@@ -140,7 +140,7 @@ func TestMapFile_MultipleRegionsIndependent(t *testing.T) {
 	t.Parallel()
 
 	f := createTempFile(t, 8*bytesize.KiB)
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	data1, mapping1, err := mmap.MapFile(f, 8*bytesize.KiB)
 	assert.NilError(t, err)

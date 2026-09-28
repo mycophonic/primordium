@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
@@ -90,7 +92,7 @@ func TestStore_MissWithoutDigest(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, err := io.ReadAll(reader)
 	if err != nil {
@@ -122,7 +124,7 @@ func TestStore_MissWithDigest(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, err := io.ReadAll(reader)
 	if err != nil {
@@ -155,7 +157,7 @@ func TestStore_HitReturnsCache(t *testing.T) {
 	}
 
 	data1, err := io.ReadAll(reader1)
-	reader1.Close()
+	assert.Check(t, reader1.Close())
 
 	if err != nil {
 		t.Fatalf("first ReadAll() error: %v", err)
@@ -171,7 +173,7 @@ func TestStore_HitReturnsCache(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	data2, err := io.ReadAll(reader2)
 	if err != nil {
@@ -202,8 +204,11 @@ func TestStore_HitPreservesCreatedAt(t *testing.T) {
 		t.Fatalf("first Acquire() error: %v", err)
 	}
 
-	io.ReadAll(reader1)
-	reader1.Close()
+	if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+		t.Errorf("draining reader1: %v", drainErr)
+	}
+
+	assert.Check(t, reader1.Close())
 
 	// Small delay to ensure timestamps differ if re-created.
 	time.Sleep(10 * time.Millisecond)
@@ -213,8 +218,11 @@ func TestStore_HitPreservesCreatedAt(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	io.ReadAll(reader2)
-	reader2.Close()
+	if _, drainErr := io.ReadAll(reader2); drainErr != nil {
+		t.Errorf("draining reader2: %v", drainErr)
+	}
+
+	assert.Check(t, reader2.Close())
 
 	if !createdAt1.Equal(createdAt2) {
 		t.Errorf("createdAt should be preserved on hit: first=%v, second=%v", createdAt1, createdAt2)
@@ -274,7 +282,7 @@ func TestStore_WrongDigestDoesNotPoison(t *testing.T) {
 		t.Fatalf("Acquire() with correct digest error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, err := io.ReadAll(reader)
 	if err != nil {
@@ -340,7 +348,7 @@ func TestStore_FetchFailureDoesNotPoison(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, err := io.ReadAll(reader)
 	if err != nil {
@@ -371,14 +379,14 @@ func TestStore_DifferentIdentifiersSameContent(t *testing.T) {
 	}
 
 	data1, _ := io.ReadAll(reader1)
-	reader1.Close()
+	assert.Check(t, reader1.Close())
 
 	reader2, _, err := cs.Acquire("https://mirror2.example.com/file", nil, fetch)
 	if err != nil {
 		t.Fatalf("Acquire(mirror2) error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	data2, _ := io.ReadAll(reader2)
 
@@ -410,8 +418,11 @@ func TestStore_DifferentIdentifiersSameDigest(t *testing.T) {
 		t.Fatalf("Acquire(alpha) error: %v", err)
 	}
 
-	io.ReadAll(reader1)
-	reader1.Close()
+	if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+		t.Errorf("draining reader1: %v", drainErr)
+	}
+
+	assert.Check(t, reader1.Close())
 
 	// Second identifier with same digest — cache already has content, fetch NOT called.
 	reader2, _, err := cs.Acquire("id-beta", dgst, fetch)
@@ -419,7 +430,7 @@ func TestStore_DifferentIdentifiersSameDigest(t *testing.T) {
 		t.Fatalf("Acquire(beta) error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	got, _ := io.ReadAll(reader2)
 
@@ -445,7 +456,7 @@ func TestStore_EmptyContent(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, err := io.ReadAll(reader)
 	if err != nil {
@@ -462,7 +473,7 @@ func TestStore_EmptyContent(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	got2, _ := io.ReadAll(reader2)
 
@@ -483,7 +494,7 @@ func TestStore_EmptyContentWithDigest(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, err := io.ReadAll(reader)
 	if err != nil {
@@ -511,7 +522,7 @@ func TestStore_LargeContent(t *testing.T) {
 	}
 
 	got, _ := io.ReadAll(reader)
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	if !bytes.Equal(got, data) {
 		t.Errorf("large content mismatch: got %d bytes, want %d", len(got), len(data))
@@ -523,7 +534,7 @@ func TestStore_LargeContent(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	got2, _ := io.ReadAll(reader2)
 
@@ -549,7 +560,7 @@ func TestStore_LargeContentWithDigest(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, _ := io.ReadAll(reader)
 
@@ -641,7 +652,7 @@ func TestStore_TruncatedFetchDoesNotPoison(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, _ := io.ReadAll(reader)
 
@@ -676,7 +687,7 @@ func TestStore_ConcurrentSameIdentifier(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			got, err := io.ReadAll(reader)
 			if err != nil {
@@ -719,7 +730,7 @@ func TestStore_ConcurrentDifferentIdentifiers(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			got, err := io.ReadAll(reader)
 			if err != nil {
@@ -762,7 +773,7 @@ func TestStore_ConcurrentSameIdentifierWithDigest(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			got, err := io.ReadAll(reader)
 			if err != nil {
@@ -792,8 +803,11 @@ func TestStore_ConcurrentMixedHitAndMiss(t *testing.T) {
 		t.Fatalf("initial Acquire() error: %v", err)
 	}
 
-	io.ReadAll(reader0)
-	reader0.Close()
+	if _, drainErr := io.ReadAll(reader0); drainErr != nil {
+		t.Errorf("draining reader0: %v", drainErr)
+	}
+
+	assert.Check(t, reader0.Close())
 
 	const numGoroutines = 50
 
@@ -808,7 +822,7 @@ func TestStore_ConcurrentMixedHitAndMiss(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			got, err := io.ReadAll(reader)
 			if err != nil {
@@ -839,7 +853,7 @@ func TestStore_IdentifierIsEmptyString(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, _ := io.ReadAll(reader)
 
@@ -862,7 +876,7 @@ func TestStore_VeryLongIdentifier(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, _ := io.ReadAll(reader)
 
@@ -886,8 +900,11 @@ func TestStore_DigestPathSkipsFetchOnCacheHit(t *testing.T) {
 		t.Fatalf("first Acquire() error: %v", err)
 	}
 
-	io.ReadAll(reader1)
-	reader1.Close()
+	if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+		t.Errorf("draining reader1: %v", drainErr)
+	}
+
+	assert.Check(t, reader1.Close())
 
 	if fetchCount.Load() != 1 {
 		t.Fatalf("fetch count = %d, want 1", fetchCount.Load())
@@ -899,7 +916,7 @@ func TestStore_DigestPathSkipsFetchOnCacheHit(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	got, _ := io.ReadAll(reader2)
 
@@ -943,7 +960,7 @@ func TestStore_RapidAcquireRelease(t *testing.T) {
 				t.Errorf("iteration %d: Read() error: %v", id, readErr)
 			}
 
-			reader.Close()
+			assert.Check(t, reader.Close())
 		}(idx)
 	}
 
@@ -955,7 +972,7 @@ func TestStore_RapidAcquireRelease(t *testing.T) {
 		t.Fatalf("final Acquire() error: %v", err)
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	got, _ := io.ReadAll(reader)
 
@@ -982,8 +999,11 @@ func TestStore_InvalidateTriggersRefetch(t *testing.T) {
 		t.Fatalf("first Acquire() error: %v", err)
 	}
 
-	io.ReadAll(reader1)
-	reader1.Close()
+	if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+		t.Errorf("draining reader1: %v", drainErr)
+	}
+
+	assert.Check(t, reader1.Close())
 
 	if fetchCount.Load() != 1 {
 		t.Fatalf("fetch count = %d, want 1", fetchCount.Load())
@@ -1000,7 +1020,7 @@ func TestStore_InvalidateTriggersRefetch(t *testing.T) {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	got, _ := io.ReadAll(reader2)
 
@@ -1059,7 +1079,7 @@ func TestStore_SlowFetchConcurrentReaders(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			got, err := io.ReadAll(reader)
 			if err != nil {
@@ -1116,7 +1136,7 @@ func TestStore_StressMixedOperations(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			_, _ = io.ReadAll(reader)
 		}(idx)
@@ -1298,7 +1318,7 @@ func TestStore_DigestlessStagingUsesBLAKE3(t *testing.T) {
 		t.Fatalf("re-acquire by BLAKE3 digest: %v", err)
 	}
 
-	defer second.Close()
+	defer func() { assert.Check(t, second.Close()) }()
 
 	got, err := io.ReadAll(second)
 	if err != nil {

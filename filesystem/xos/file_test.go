@@ -38,6 +38,8 @@ import (
 	"syscall"
 	"testing"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
@@ -79,7 +81,9 @@ func hasLink() bool {
 		return false
 	}
 
-	f.Close()
+	if f.Close() != nil {
+		return false
+	}
 
 	return os.Link(filepath.Join(dir, "t"), filepath.Join(dir, "l")) == nil
 }
@@ -198,6 +202,16 @@ func newFile(t *testing.T) *os.File {
 	return f
 }
 
+// mustWriteString writes s to f, failing the test if the write does not
+// complete: a test that goes on after a failed setup write tests nothing.
+func mustWriteString(t *testing.T, f *os.File, s string) {
+	t.Helper()
+
+	if _, err := f.WriteString(s); err != nil {
+		t.Fatalf("WriteString(%q): %v", s, err)
+	}
+}
+
 func checkSize(t *testing.T, f *os.File, size int64) {
 	t.Helper()
 
@@ -264,7 +278,7 @@ func writeFile(t *testing.T, fname string, flag int, text string) string {
 		t.Fatalf("WriteString: %d, %v", n, err)
 	}
 
-	f.Close()
+	assert.Check(t, f.Close())
 
 	data, err := xos.ReadFile(fname)
 	if err != nil {
@@ -283,7 +297,7 @@ func testReaddirnames(dir string, contents []string) func(*testing.T) {
 			t.Fatalf("open %q failed: %v", dir, err)
 		}
 
-		defer file.Close()
+		defer func() { assert.Check(t, file.Close()) }()
 
 		s, err2 := file.Readdirnames(-1)
 		if err2 != nil {
@@ -329,7 +343,7 @@ func readdirSubtest(dir string, contents []string) func(*testing.T) {
 			t.Fatalf("open %q failed: %v", dir, err)
 		}
 
-		defer file.Close()
+		defer func() { assert.Check(t, file.Close()) }()
 
 		s, err2 := file.Readdir(-1)
 		if err2 != nil {
@@ -375,7 +389,7 @@ func readDirEntrySubtest(dir string, contents []string) func(*testing.T) {
 			t.Fatalf("open %q failed: %v", dir, err)
 		}
 
-		defer file.Close()
+		defer func() { assert.Check(t, file.Close()) }()
 
 		s, err2 := file.ReadDir(-1)
 		if err2 != nil {
@@ -466,7 +480,7 @@ func assertDevNullFile(t *testing.T, devNullName string) {
 		t.Fatalf("Open(%s): %v", devNullName, err)
 	}
 
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	fi, err := f.Stat()
 	if err != nil {
@@ -580,7 +594,7 @@ func TestFstat(t *testing.T) {
 		t.Fatal("open failed:", err1)
 	}
 
-	defer file.Close()
+	defer func() { assert.Check(t, file.Close()) }()
 
 	dir, err2 := file.Stat()
 	if err2 != nil {
@@ -688,7 +702,7 @@ func TestStatRelativeSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	st, err := f.Stat()
 	if err != nil {
@@ -710,7 +724,9 @@ func TestStatRelativeSymlink(t *testing.T) {
 	}
 
 	if runtime.GOOS == "windows" {
-		os.Remove(link)
+		if removeErr := os.Remove(link); removeErr != nil {
+			t.Fatal(removeErr)
+		}
 
 		if err := os.Symlink(target[len(filepath.VolumeName(target)):], link); err != nil {
 			t.Fatal(err)
@@ -741,7 +757,7 @@ func TestRead0(t *testing.T) {
 		t.Fatal("open failed:", err)
 	}
 
-	defer f.Close()
+	defer func() { assert.Check(t, f.Close()) }()
 
 	b := make([]byte, 0)
 
@@ -768,7 +784,7 @@ func TestReadClosed(t *testing.T) {
 		t.Fatal("open failed:", err)
 	}
 
-	file.Close()
+	assert.Check(t, file.Close())
 
 	b := make([]byte, 100)
 	_, err = file.Read(b)
@@ -782,7 +798,7 @@ func TestReadClosed(t *testing.T) {
 func TestOpenNoName(t *testing.T) {
 	f, err := xos.Open("")
 	if err == nil {
-		f.Close()
+		assert.Check(t, f.Close())
 		t.Fatal(`Open("") succeeded`)
 	}
 }
@@ -814,7 +830,7 @@ func TestOpenError(t *testing.T) {
 		f, err := xos.OpenFile(path, tt.mode, 0)
 		if err == nil {
 			t.Errorf("%v succeeded", name)
-			f.Close()
+			assert.Check(t, f.Close())
 
 			continue
 		}
@@ -857,7 +873,7 @@ func TestOpenFileDevNull(t *testing.T) {
 		t.Fatalf("OpenFile(DevNull): %v", err)
 	}
 
-	f.Close()
+	assert.Check(t, f.Close())
 }
 
 func TestDoubleCloseError(t *testing.T) {
@@ -875,14 +891,14 @@ func TestSameFile(t *testing.T) {
 		t.Fatalf("Create(a): %v", err)
 	}
 
-	fa.Close()
+	assert.Check(t, fa.Close())
 
 	fb, err := xos.Create("b")
 	if err != nil {
 		t.Fatalf("Create(b): %v", err)
 	}
 
-	fb.Close()
+	assert.Check(t, fb.Close())
 
 	ia1, err := xos.Stat("a")
 	if err != nil {
@@ -937,7 +953,8 @@ func TestFileRDWRFlags(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			defer f.Close()
+			// Closed and checked below; this covers the early exits only.
+			defer func() { _ = f.Close() }()
 
 			got, err := io.ReadAll(f)
 			if test.flag == os.O_WRONLY {
@@ -967,7 +984,7 @@ func TestFileRDWRFlags(t *testing.T) {
 				}
 			}
 
-			f.Close()
+			assert.Check(t, f.Close())
 
 			got, err = xos.ReadFile(filename)
 			if err != nil {
@@ -1019,7 +1036,7 @@ func TestFilePermissions(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			f.Close()
+			assert.Check(t, f.Close())
 
 			b, err := xos.ReadFile(filename)
 			if test.mode&0o444 != 0 {
@@ -1067,7 +1084,7 @@ func TestOpenFileCreateExclDanglingSymlink(t *testing.T) {
 
 	f, err := xos.OpenFile(link, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o444)
 	if err == nil {
-		f.Close()
+		assert.Check(t, f.Close())
 	}
 
 	if !errors.Is(err, os.ErrExist) {
@@ -1134,7 +1151,7 @@ func TestAppendDoesntOverwrite(t *testing.T) {
 	}
 
 	if _, err = f.WriteString(" world"); err != nil {
-		f.Close()
+		assert.Check(t, f.Close())
 		t.Fatal(err)
 	}
 
@@ -1163,13 +1180,13 @@ func TestTruncate(t *testing.T) {
 	f := newFile(t)
 
 	checkSize(t, f, 0)
-	f.WriteString("hello, world\n")
+	mustWriteString(t, f, "hello, world\n")
 	checkSize(t, f, 13)
-	xos.Truncate(f.Name(), 10)
+	assert.NilError(t, xos.Truncate(f.Name(), 10))
 	checkSize(t, f, 10)
-	xos.Truncate(f.Name(), bytesize.KiB)
+	assert.NilError(t, xos.Truncate(f.Name(), bytesize.KiB))
 	checkSize(t, f, bytesize.KiB)
-	xos.Truncate(f.Name(), 0)
+	assert.NilError(t, xos.Truncate(f.Name(), 0))
 	checkSize(t, f, 0)
 
 	_, err := f.WriteString("surprise!")
@@ -1184,13 +1201,13 @@ func TestFTruncate(t *testing.T) {
 	f := newFile(t)
 
 	checkSize(t, f, 0)
-	f.WriteString("hello, world\n")
+	mustWriteString(t, f, "hello, world\n")
 	checkSize(t, f, 13)
-	f.Truncate(10)
+	assert.NilError(t, f.Truncate(10))
 	checkSize(t, f, 10)
-	f.Truncate(bytesize.KiB)
+	assert.NilError(t, f.Truncate(bytesize.KiB))
 	checkSize(t, f, bytesize.KiB)
-	f.Truncate(0)
+	assert.NilError(t, f.Truncate(0))
 	checkSize(t, f, 0)
 
 	_, err := f.WriteString("surprise!")
@@ -1230,7 +1247,7 @@ func TestSeek(t *testing.T) {
 	f := newFile(t)
 
 	const data = "hello, world\n"
-	io.WriteString(f, data)
+	mustWriteString(t, f, data)
 
 	type test struct {
 		in     int64
@@ -1273,7 +1290,7 @@ func TestReadAt(t *testing.T) {
 	f := newFile(t)
 
 	const data = "hello, world\n"
-	io.WriteString(f, data)
+	mustWriteString(t, f, data)
 
 	b := make([]byte, 5)
 
@@ -1293,9 +1310,11 @@ func TestReadAtOffset(t *testing.T) {
 	f := newFile(t)
 
 	const data = "hello, world\n"
-	io.WriteString(f, data)
+	mustWriteString(t, f, data)
 
-	f.Seek(0, 0)
+	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+		t.Fatalf("f.Seek: %v", seekErr)
+	}
 
 	b := make([]byte, 5)
 
@@ -1324,9 +1343,11 @@ func TestReadAtNegativeOffset(t *testing.T) {
 	f := newFile(t)
 
 	const data = "hello, world\n"
-	io.WriteString(f, data)
+	mustWriteString(t, f, data)
 
-	f.Seek(0, 0)
+	if _, seekErr := f.Seek(0, io.SeekStart); seekErr != nil {
+		t.Fatalf("f.Seek: %v", seekErr)
+	}
 
 	b := make([]byte, 5)
 	n, err := f.ReadAt(b, -10)
@@ -1360,7 +1381,7 @@ func TestWriteAt(t *testing.T) {
 	f := newFile(t)
 
 	const data = "hello, world"
-	io.WriteString(f, data)
+	mustWriteString(t, f, data)
 
 	n, err := f.WriteAt([]byte("WOR"), 7)
 	if err != nil || n != 3 {
@@ -1387,7 +1408,7 @@ func TestWriteAtConcurrent(t *testing.T) {
 	t.Parallel()
 
 	f := newFile(t)
-	io.WriteString(f, "0000000000")
+	mustWriteString(t, f, "0000000000")
 
 	var wg sync.WaitGroup
 
@@ -1474,8 +1495,8 @@ func TestReaddirNValues(t *testing.T) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		f.WriteString(strings.Repeat("X", i))
-		f.Close()
+		mustWriteString(t, f, strings.Repeat("X", i))
+		assert.Check(t, f.Close())
 	}
 
 	var d *os.File
@@ -1533,14 +1554,14 @@ func TestReaddirNValues(t *testing.T) {
 		openDir()
 		fn(0, 105, nil)
 		fn(0, 0, nil)
-		d.Close()
+		assert.Check(t, d.Close())
 
 		// Slurp with -1 instead
 		openDir()
 		fn(-1, 105, nil)
 		fn(-2, 0, nil)
 		fn(0, 0, nil)
-		d.Close()
+		assert.Check(t, d.Close())
 
 		// Test the bounded case
 		openDir()
@@ -1548,7 +1569,7 @@ func TestReaddirNValues(t *testing.T) {
 		fn(2, 2, nil)
 		fn(105, 102, nil) // and tests buffer >100 case
 		fn(3, 0, io.EOF)
-		d.Close()
+		assert.Check(t, d.Close())
 	}
 }
 
@@ -1561,15 +1582,15 @@ func TestReaddirOfFile(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	f.WriteString("foo")
-	f.Close()
+	mustWriteString(t, f, "foo")
+	assert.Check(t, f.Close())
 
 	reg, err := xos.Open(f.Name())
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	defer reg.Close()
+	defer func() { assert.Check(t, reg.Close()) }()
 
 	names, err := reg.Readdirnames(-1)
 	if err == nil {
@@ -1614,7 +1635,7 @@ func TestReaddirnamesOneAtATime(t *testing.T) {
 		t.Fatalf("open %q failed: %v", dir, err)
 	}
 
-	defer file.Close()
+	defer func() { assert.Check(t, file.Close()) }()
 
 	all, err1 := file.Readdirnames(-1)
 	if err1 != nil {
@@ -1626,7 +1647,7 @@ func TestReaddirnamesOneAtATime(t *testing.T) {
 		t.Fatalf("open %q failed: %v", dir, err2)
 	}
 
-	defer file1.Close()
+	defer func() { assert.Check(t, file1.Close()) }()
 
 	small := smallReaddirnames(file1, len(all)+100, t)
 	if len(small) < len(all) {

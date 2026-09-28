@@ -25,6 +25,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/compress"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -166,8 +168,11 @@ func TestUntar_PathTraversal(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tarWriter.Write([]byte("evil"))
-	tarWriter.Close()
+	if _, writeErr := tarWriter.Write([]byte("evil")); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	assert.Check(t, tarWriter.Close())
 
 	destDir := t.TempDir()
 	err := compress.Untar(&buf, destDir)
@@ -216,7 +221,7 @@ func TestUntar_EmptyArchive(t *testing.T) {
 	var buf bytes.Buffer
 
 	tarWriter := tar.NewWriter(&buf)
-	tarWriter.Close()
+	assert.Check(t, tarWriter.Close())
 
 	destDir := t.TempDir()
 
@@ -232,7 +237,7 @@ func TestTar_NonexistentSource(t *testing.T) {
 	baseDir := t.TempDir()
 
 	rc := compress.Tar(baseDir, "does-not-exist")
-	defer rc.Close()
+	defer func() { assert.Check(t, rc.Close()) }()
 
 	_, err := io.ReadAll(rc)
 	if err == nil {

@@ -27,6 +27,8 @@ import (
 	"testing"
 	"time"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -54,7 +56,7 @@ func openTestIndex(t *testing.T, opts *index.Options) (*index.Index, string) {
 		t.Fatalf("open: %v", err)
 	}
 
-	t.Cleanup(func() { idx.Close() })
+	t.Cleanup(func() { assert.Check(t, idx.Close()) })
 
 	return idx, path
 }
@@ -153,7 +155,7 @@ func TestGrowReopenPreservesData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	verifyRecords(t, idx2, n)
 
@@ -467,7 +469,7 @@ func TestJournalRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen with journal: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	capVal, err := idx2.Cap()
 	if err != nil {
@@ -542,7 +544,7 @@ func TestJournalRecoveryEmptyTable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	capVal, err := idx2.Cap()
 	if err != nil {
@@ -597,7 +599,7 @@ func TestJournalCorruptIgnored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	rec, found, err := idx2.Get(1)
 	if err != nil {
@@ -663,7 +665,7 @@ func TestJournalSizeMismatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	// Should have used the data file, not the corrupt journal.
 	rec, found, err := idx2.Get(42)
@@ -1636,7 +1638,7 @@ func TestStaleWriterRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	// Get from a goroutine with timeout. The reader will spin, detect the
 	// stale writer PID, CAS-reset, and acquire the read lock.
@@ -1735,7 +1737,7 @@ func TestStaleReaderRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
-	defer idx2.Close()
+	defer func() { assert.Check(t, idx2.Close()) }()
 
 	// Put from a goroutine with timeout. The writer will spin until it
 	// hits stalePIDThreshold, detect no alive reader PIDs, and CAS-reset
@@ -1794,7 +1796,7 @@ func TestNewCreatesParentDirectory(t *testing.T) {
 		t.Fatalf("New with non-existent parent dirs: %v", err)
 	}
 
-	defer idx.Close()
+	defer func() { assert.Check(t, idx.Close()) }()
 
 	// Verify the index is functional.
 	val := testValue(42)

@@ -31,6 +31,8 @@ import (
 	"strings"
 	"testing"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
@@ -54,19 +56,18 @@ func TestCreateTempPattern(t *testing.T) {
 		{"tempfile_test*xyz", "tempfile_test", "xyz"},
 	}
 
+	dir := t.TempDir()
+
 	for _, test := range tests {
-		f, err := xos.CreateTemp("", test.pattern)
+		f, err := xos.CreateTemp(dir, test.pattern)
 		if err != nil {
 			t.Errorf("CreateTemp(..., %q) error: %v", test.pattern, err)
 
 			continue
 		}
 
-		//revive:disable:defer
-		defer os.Remove(f.Name())
-
 		base := filepath.Base(f.Name())
-		f.Close()
+		assert.Check(t, f.Close())
 
 		if !strings.HasPrefix(base, test.prefix) || !strings.HasSuffix(base, test.suffix) {
 			t.Errorf("CreateTemp pattern %q created bad name %q; want prefix %q & suffix %q",
@@ -101,7 +102,7 @@ func TestCreateTempBadPattern(t *testing.T) {
 
 			tmpfile, err := xos.CreateTemp(tmpDir, tt.pattern)
 			if tmpfile != nil {
-				defer tmpfile.Close()
+				defer func() { assert.Check(t, tmpfile.Close()) }()
 			}
 
 			if tt.wantErr {
@@ -143,8 +144,6 @@ func TestMkdirTemp(t *testing.T) {
 		if name == "" || err != nil {
 			t.Fatalf("MkdirTemp(dir, %q) = %v, %v", pattern, name, err)
 		}
-
-		defer os.Remove(name)
 
 		re := regexp.MustCompile(wantRePat)
 		if !re.MatchString(name) {
