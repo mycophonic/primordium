@@ -90,7 +90,7 @@ func TestCache_WriteAndRead(t *testing.T) {
 		t.Errorf("writer.Write() = %d, want %d", n, len(content))
 	}
 
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -582,7 +582,7 @@ func TestCache_LargeContent(t *testing.T) {
 		t.Fatalf("writer.Write() error: %v", err)
 	}
 
-	if err := writer1.Close(); err != nil {
+	if err = writer1.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -640,7 +640,7 @@ func TestCache_EmptyContent(t *testing.T) {
 		reader1.Close()
 	}()
 
-	if err := writer1.Close(); err != nil {
+	if err = writer1.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -702,7 +702,7 @@ func TestCache_SequentialWriteThenRead(t *testing.T) {
 	}
 
 	// Close writer (finalizes cache entry)
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -1027,7 +1027,7 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 
 	_, _ = writer.Write(content)
 
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Fatalf("initial writer.Close() error: %v", err)
 	}
 
@@ -1040,19 +1040,19 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			reader, writer, err := blobCache.Acquire(digest)
-			if err != nil {
-				t.Errorf("iteration %d: Acquire() error: %v", id, err)
+			iterReader, iterWriter, iterErr := blobCache.Acquire(digest)
+			if iterErr != nil {
+				t.Errorf("iteration %d: Acquire() error: %v", id, iterErr)
 
 				return
 			}
 
-			if writer != nil {
+			if iterWriter != nil {
 				t.Errorf("iteration %d: unexpected writer for cached content", id)
-				writer.Close()
+				iterWriter.Close()
 			}
 
-			if reader == nil {
+			if iterReader == nil {
 				t.Errorf("iteration %d: expected reader", id)
 
 				return
@@ -1061,12 +1061,12 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 			// Read just a few bytes, then close
 			buf := make([]byte, 5)
 
-			_, err = reader.Read(buf)
-			if err != nil && !errors.Is(err, io.EOF) {
-				t.Errorf("iteration %d: Read() error: %v", id, err)
+			_, iterErr = iterReader.Read(buf)
+			if iterErr != nil && !errors.Is(iterErr, io.EOF) {
+				t.Errorf("iteration %d: Read() error: %v", id, iterErr)
 			}
 
-			reader.Close()
+			iterReader.Close()
 		}(i)
 	}
 
@@ -1113,7 +1113,7 @@ func TestCache_WriterAbandonmentNoWrite(t *testing.T) {
 	}
 
 	// Close writer immediately (valid for empty content)
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Errorf("writer.Close() for empty error: %v", err)
 	}
 
@@ -1471,7 +1471,7 @@ func TestCache_GC_UnderQuota(t *testing.T) {
 
 	_, _ = writer.Write(content)
 
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -1545,7 +1545,7 @@ func TestCache_GC_OverQuota(t *testing.T) {
 
 	_, _ = writer1.Write(content1)
 
-	if err := writer1.Close(); err != nil {
+	if err = writer1.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -1605,7 +1605,7 @@ func TestCache_GC_PreservesInUseEntries(t *testing.T) {
 
 	_, _ = writer.Write(content)
 
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
 	}
 
@@ -1841,11 +1841,11 @@ func TestCache_AcquireFilePinsCommittedContent(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	if _, err := writer.Write(content); err != nil {
+	if _, err = writer.Write(content); err != nil {
 		t.Fatalf("Write() error: %v", err)
 	}
 
-	if err := writer.Close(); err != nil {
+	if err = writer.Close(); err != nil {
 		t.Fatalf("writer Close() error: %v", err)
 	}
 

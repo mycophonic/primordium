@@ -136,7 +136,7 @@ func TestWriteFileAtomicity(t *testing.T) {
 
 	replacement := []byte("replacement content")
 
-	if err := filesystem.WriteFile(path, replacement, filesystem.FilePermissionsDefault); err != nil {
+	if err = filesystem.WriteFile(path, replacement, filesystem.FilePermissionsDefault); err != nil {
 		t.Fatal(err)
 	}
 
