@@ -66,10 +66,10 @@ func New(ctx context.Context, opts *Options) context.Context {
 			Environment:      opts.Environment,
 			TracesSampleRate: 1.0,
 		}); err != nil {
-			slog.Error("failed to initialize reporter", "err", err)
+			slog.ErrorContext(ctx, "failed to initialize reporter", "err", err)
 		}
 	} else {
-		slog.Warn("dsn not provided: crash collection disabled")
+		slog.WarnContext(ctx, "dsn not provided: crash collection disabled")
 	}
 
 	// On modern systems, this is generally reasonable.

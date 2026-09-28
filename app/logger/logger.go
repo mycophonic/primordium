@@ -38,7 +38,7 @@ import (
 // distinct level for), defaulting to info. It returns true when the effective
 // level is debug or lower, for callers that gate debug-only behavior (e.g. the
 // Sentry reporter).
-func SetDefaultsForLogger(_ context.Context, level ...slog.Level) bool {
+func SetDefaultsForLogger(ctx context.Context, level ...slog.Level) bool {
 	var (
 		effective slog.Level
 		badEnv    string
@@ -63,7 +63,7 @@ func SetDefaultsForLogger(_ context.Context, level ...slog.Level) bool {
 	slog.SetDefault(slog.New(handler))
 
 	if badEnv != "" {
-		slog.Warn("invalid LOG_LEVEL, defaulting to info", "LOG_LEVEL", badEnv)
+		slog.WarnContext(ctx, "invalid LOG_LEVEL, defaulting to info", "log_level", badEnv)
 	}
 
 	return effective <= slog.LevelDebug

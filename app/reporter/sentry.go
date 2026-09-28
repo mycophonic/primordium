@@ -79,7 +79,7 @@ func Initialize(conf *Config) error {
 	// reaches Sentry — sentry.Init alone does not observe slog.
 	slog.SetDefault(slog.New(newSentryHandler(slog.Default().Handler())))
 
-	slog.Info("Reporter Sentry configured")
+	slog.Info("sentry reporter configured")
 
 	return nil
 }

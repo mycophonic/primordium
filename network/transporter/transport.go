@@ -167,7 +167,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr)
 			}
 
-			slog.Warn("HTTP transport error, retrying",
+			slog.WarnContext(req.Context(), "HTTP transport error, retrying",
 				"attempt", attempt+1,
 				"elapsed", elapsed,
 				"token_wait", tokenWait,
@@ -179,7 +179,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			continue
 		}
 
-		slog.Debug("HTTP roundtrip",
+		slog.DebugContext(req.Context(), "HTTP roundtrip",
 			"status", resp.StatusCode,
 			"elapsed", elapsed,
 			"token_wait", tokenWait,
@@ -191,7 +191,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			resp.StatusCode >= http.StatusInternalServerError
 		if !retryable {
 			if elapsed > slowRequestThreshold {
-				slog.Warn("slow HTTP request",
+				slog.WarnContext(req.Context(), "slow HTTP request",
 					"elapsed", elapsed,
 					"status", resp.StatusCode,
 					"url", req.URL.String(),
@@ -214,7 +214,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		lastErr = fmt.Errorf("%w: HTTP %d", fault.ErrUnacceptableResponse, resp.StatusCode)
 
 		if attempt == t.maxRetries {
-			slog.Warn("HTTP retries exhausted",
+			slog.WarnContext(req.Context(), "HTTP retries exhausted",
 				"status", resp.StatusCode,
 				"attempts", t.maxRetries+1,
 				"url", req.URL.String(),
@@ -226,7 +226,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		retryAfterVal = retryAfter(resp.Header)
 
 		if t.maxBackoff > 0 && retryAfterVal > t.maxBackoff {
-			slog.Warn("Retry-After too large, giving up",
+			slog.WarnContext(req.Context(), "retry-after too large, giving up",
 				"status", resp.StatusCode,
 				"retry_after", retryAfterVal,
 				"max", t.maxBackoff,
@@ -238,7 +238,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 
 		nextBackoff := max(retryAfterVal, t.backoffDuration(attempt+1))
 
-		slog.Warn("HTTP error, retrying",
+		slog.WarnContext(req.Context(), "HTTP error, retrying",
 			"status", resp.StatusCode,
 			"attempt", attempt+1,
 			"elapsed", elapsed,
