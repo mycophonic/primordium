@@ -57,7 +57,8 @@ func platformLock(path string, lockType lockType) (file *os.File, err error) {
 
 	if err = windows.LockFileEx(
 		windows.Handle(file.Fd()),
-		uint32(lockType), reserved, allBytes, allBytes, new(windows.Overlapped)); err != nil {
+		uint32(lockType), reserved, allBytes, allBytes, new(windows.Overlapped),
+	); err != nil {
 		if fileErr := file.Close(); fileErr != nil {
 			err = errors.Join(err, fileErr)
 		}
@@ -78,7 +79,8 @@ func platformTryLock(path string, lockType lockType) (file *os.File, err error) 
 	if err = windows.LockFileEx(
 		windows.Handle(file.Fd()),
 		uint32(lockType)|windows.LOCKFILE_FAIL_IMMEDIATELY,
-		reserved, allBytes, allBytes, new(windows.Overlapped)); err != nil {
+		reserved, allBytes, allBytes, new(windows.Overlapped),
+	); err != nil {
 		closeErr := file.Close()
 
 		// ERROR_LOCK_VIOLATION indicates the lock is held by another process
