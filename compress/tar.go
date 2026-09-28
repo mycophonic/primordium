@@ -67,7 +67,7 @@ func writeTar(writer io.Writer, baseDir, relDir string) error {
 
 		header.Name = relPath
 
-		if err := tarWriter.WriteHeader(header); err != nil {
+		if err = tarWriter.WriteHeader(header); err != nil {
 			return fmt.Errorf("write header: %w", err)
 		}
 

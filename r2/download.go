@@ -70,11 +70,11 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(tempFile), filesystem.DirPermissionsPrivate); err != nil {
+	if err = os.MkdirAll(filepath.Dir(tempFile), filesystem.DirPermissionsPrivate); err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrWriteFailure, err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dataFile), filesystem.DirPermissionsPrivate); err != nil {
+	if err = os.MkdirAll(filepath.Dir(dataFile), filesystem.DirPermissionsPrivate); err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrWriteFailure, err)
 	}
 
@@ -113,7 +113,7 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 
 	// Write the ETag sidecar before starting a fresh download.
 	if offset == 0 {
-		if err := filesystem.WriteFile(tempETag, []byte(remoteETag), filesystem.FilePermissionsPrivate); err != nil {
+		if err = filesystem.WriteFile(tempETag, []byte(remoteETag), filesystem.FilePermissionsPrivate); err != nil {
 			return fmt.Errorf("write etag: %w", err)
 		}
 	}
