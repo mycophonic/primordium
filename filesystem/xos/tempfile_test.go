@@ -109,9 +109,7 @@ func TestCreateTempBadPattern(t *testing.T) {
 					t.Errorf("CreateTemp(..., %#q) succeeded, expected error", tt.pattern)
 				}
 
-				if !errors.Is(err, xos.ErrPatternHasSeparator) {
-					t.Errorf("CreateTemp(..., %#q): %v, expected ErrPatternHasSeparator", tt.pattern, err)
-				}
+				assertPatternRejected(t, err, "createtemp", tt.pattern)
 			} else if err != nil {
 				t.Errorf("CreateTemp(..., %#q): %v", tt.pattern, err)
 			}
@@ -234,12 +232,26 @@ func TestMkdirTempBadPattern(t *testing.T) {
 					t.Errorf("MkdirTemp(..., %#q) succeeded, expected error", tt.pattern)
 				}
 
-				if !errors.Is(err, xos.ErrPatternHasSeparator) {
-					t.Errorf("MkdirTemp(..., %#q): %v, expected ErrPatternHasSeparator", tt.pattern, err)
-				}
+				assertPatternRejected(t, err, "mkdirtemp", tt.pattern)
 			} else if err != nil {
 				t.Errorf("MkdirTemp(..., %#q): %v", tt.pattern, err)
 			}
 		})
+	}
+}
+
+// assertPatternRejected checks that err rejects pattern itself, before any
+// filesystem access: a lookup would report the joined path, not the pattern.
+func assertPatternRejected(t *testing.T, err error, op, pattern string) {
+	t.Helper()
+
+	var pathErr *fs.PathError
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("%s(..., %#q): %v, expected *fs.PathError", op, pattern, err)
+	}
+
+	if pathErr.Op != op || pathErr.Path != pattern {
+		t.Errorf("%s(..., %#q): got op %q path %q, expected the pattern rejected",
+			op, pattern, pathErr.Op, pathErr.Path)
 	}
 }
