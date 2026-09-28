@@ -226,7 +226,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		retryAfterVal = retryAfter(resp.Header)
 
 		if t.maxBackoff > 0 && retryAfterVal > t.maxBackoff {
-			slog.WarnContext(req.Context(), "Retry-After too large, giving up",
+			slog.WarnContext(req.Context(), "retry-after too large, giving up",
 				"status", resp.StatusCode,
 				"retry_after", retryAfterVal,
 				"max", t.maxBackoff,
