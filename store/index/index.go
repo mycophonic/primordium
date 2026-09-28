@@ -162,13 +162,13 @@ func New(path string, opts *Options) (*Index, error) {
 	// If a previous grow was interrupted, rebuild the data file from the
 	// journal before proceeding. The setup lock ensures no other process
 	// can race with recovery.
-	if err := recoverFromJournal(path, idx.journalPath, idx.valSize); err != nil {
+	if err = recoverFromJournal(path, idx.journalPath, idx.valSize); err != nil {
 		return nil, err
 	}
 
 	_, err = xos.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
-		if err := idx.create(initialCap); err != nil {
+		if err = idx.create(initialCap); err != nil {
 			return nil, err
 		}
 	} else if err != nil {
@@ -834,7 +834,7 @@ func (idx *Index) growLocked() error {
 	// Write journal before any data-file modification. If the process
 	// crashes after this point, recoverFromJournal rebuilds the data
 	// file from the journal on next New.
-	if err := writeJournal(idx.journalPath, newCap, idx.valSize, records); err != nil {
+	if err = writeJournal(idx.journalPath, newCap, idx.valSize, records); err != nil {
 		_ = os.Remove(idx.journalPath)
 
 		return err
@@ -845,7 +845,7 @@ func (idx *Index) growLocked() error {
 	// Resize the file. The old mapping remains valid for its original range.
 	// #nosec G115 -- same bound as create; capacity is bounded by available memory
 	newSize := int64(headerSize) + int64(newCap)*idx.recordSize()
-	if err := idx.dataFile.Truncate(newSize); err != nil {
+	if err = idx.dataFile.Truncate(newSize); err != nil {
 		_ = os.Remove(idx.journalPath)
 
 		return fmt.Errorf("%w: truncate: %w", fault.ErrWriteFailure, err)

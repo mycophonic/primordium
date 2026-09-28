@@ -228,7 +228,7 @@ func TestDownload_AlreadyComplete(t *testing.T) {
 	dataDir := t.TempDir()
 
 	// Pre-place the file and etag in dataDir.
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(dataDir, "already-done.bin"),
 		data,
 		filesystem.FilePermissionsPrivate,
@@ -236,7 +236,7 @@ func TestDownload_AlreadyComplete(t *testing.T) {
 		t.Fatalf("write data: %v", err)
 	}
 
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(dataDir, "already-done.bin.etag"),
 		[]byte(info.ETag),
 		filesystem.FilePermissionsPrivate,
@@ -316,7 +316,7 @@ func TestDownload_Resume_PartialTemp(t *testing.T) {
 
 	// Write first half to temp with matching etag.
 	half := len(data) / 2
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-partial.bin"),
 		data[:half],
 		filesystem.FilePermissionsPrivate,
@@ -324,7 +324,7 @@ func TestDownload_Resume_PartialTemp(t *testing.T) {
 		t.Fatalf("write partial: %v", err)
 	}
 
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-partial.bin.etag"),
 		[]byte(info.ETag),
 		filesystem.FilePermissionsPrivate,
@@ -406,7 +406,7 @@ func TestDownload_Resume_Oversized_FreshDownload(t *testing.T) {
 
 	// Write MORE data than the remote object — should discard and re-download.
 	oversized := randomBytes(t, 8192)
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-oversized.bin"),
 		oversized,
 		filesystem.FilePermissionsPrivate,
@@ -414,7 +414,7 @@ func TestDownload_Resume_Oversized_FreshDownload(t *testing.T) {
 		t.Fatalf("write oversized: %v", err)
 	}
 
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-oversized.bin.etag"),
 		[]byte(info.ETag),
 		filesystem.FilePermissionsPrivate,
@@ -454,7 +454,7 @@ func TestDownload_Resume_FullyDownloadedTemp(t *testing.T) {
 
 	// Simulate crash after writing all bytes but before rename:
 	// temp file has full content and matching etag.
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-full.bin"),
 		data,
 		filesystem.FilePermissionsPrivate,
@@ -462,7 +462,7 @@ func TestDownload_Resume_FullyDownloadedTemp(t *testing.T) {
 		t.Fatalf("write full temp: %v", err)
 	}
 
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-full.bin.etag"),
 		[]byte(info.ETag),
 		filesystem.FilePermissionsPrivate,
@@ -486,7 +486,7 @@ func TestDownload_Resume_FullyDownloadedTemp(t *testing.T) {
 	}
 
 	// Temp files must be gone (moved to data).
-	if _, err := xos.Stat(filepath.Join(tempDir, "resume-full.bin")); err == nil {
+	if _, err = xos.Stat(filepath.Join(tempDir, "resume-full.bin")); err == nil {
 		t.Error("temp data file still exists after move")
 	}
 
@@ -546,7 +546,7 @@ func TestDownload_AlreadyComplete_SizeMismatch(t *testing.T) {
 
 	// Pre-place file with correct etag but wrong size — should re-download.
 	wrongData := data[:2048]
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(dataDir, "size-changed.bin"),
 		wrongData,
 		filesystem.FilePermissionsPrivate,
@@ -554,7 +554,7 @@ func TestDownload_AlreadyComplete_SizeMismatch(t *testing.T) {
 		t.Fatalf("write data: %v", err)
 	}
 
-	if err := filesystem.WriteFile(
+	if err = filesystem.WriteFile(
 		filepath.Join(dataDir, "size-changed.bin.etag"),
 		[]byte(info.ETag),
 		filesystem.FilePermissionsPrivate,
@@ -599,7 +599,7 @@ func TestDownload_Idempotent(t *testing.T) {
 	}
 
 	// Second download — should be a no-op (already complete).
-	if err := env.client.Download(context.Background(), "idempotent.bin", tempDir, dataDir); err != nil {
+	if err = env.client.Download(context.Background(), "idempotent.bin", tempDir, dataDir); err != nil {
 		t.Fatalf("second download: %v", err)
 	}
 
@@ -719,11 +719,11 @@ func TestDownload_MoveAtomicity(t *testing.T) {
 	}
 
 	// Verify both files exist.
-	if _, err := xos.Stat(filepath.Join(dataDir, "atomic.bin")); err != nil {
+	if _, err = xos.Stat(filepath.Join(dataDir, "atomic.bin")); err != nil {
 		t.Error("data file missing after download")
 	}
 
-	if _, err := xos.Stat(filepath.Join(dataDir, "atomic.bin.etag")); err != nil {
+	if _, err = xos.Stat(filepath.Join(dataDir, "atomic.bin.etag")); err != nil {
 		t.Error("etag sidecar missing after download")
 	}
 

@@ -270,11 +270,11 @@ func TestVacuumInto(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Close(); err != nil {
+	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := sqlite.VacuumInto(ctx, testDriver, srcPath, destPath); err != nil {
+	if err = sqlite.VacuumInto(ctx, testDriver, srcPath, destPath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -386,11 +386,11 @@ func TestVacuumIntoExistingDest(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := db.Close(); err != nil {
+	if err = db.Close(); err != nil {
 		t.Fatal(err)
 	}
 
-	if err := filesystem.WriteFile(destPath, []byte("existing"), filesystem.FilePermissionsDefault); err != nil {
+	if err = filesystem.WriteFile(destPath, []byte("existing"), filesystem.FilePermissionsDefault); err != nil {
 		t.Fatal(err)
 	}
 

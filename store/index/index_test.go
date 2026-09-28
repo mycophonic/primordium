@@ -145,7 +145,7 @@ func TestGrowReopenPreservesData(t *testing.T) {
 	const n = 200
 	seedIndex(t, idx, n)
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -312,7 +312,7 @@ func TestOpenMaxCapExceededByExistingFile(t *testing.T) {
 		t.Fatalf("expected capacity growth beyond 64, got %d", capVal)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -446,19 +446,19 @@ func TestJournalRecovery(t *testing.T) {
 		records[i] = index.Record{Key: uint64(i), Value: val, Timestamp: int64(i)}
 
 		rec := records[i]
-		if err := idx.Put(rec.Key, rec.Value, rec.Timestamp); err != nil {
+		if err = idx.Put(rec.Key, rec.Value, rec.Timestamp); err != nil {
 			t.Fatalf("put %d: %v", i, err)
 		}
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
 	// Simulate crash: write journal (as growLocked would), then corrupt data file.
 	writeTestJournal(t, journalPath, 128, records)
 
-	if err := xos.Truncate(path, 0); err != nil {
+	if err = xos.Truncate(path, 0); err != nil {
 		t.Fatalf("truncate data file: %v", err)
 	}
 
@@ -527,14 +527,14 @@ func TestJournalRecoveryEmptyTable(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
 	// Write a journal with zero records but a new capacity.
 	writeTestJournal(t, journalPath, 128, nil)
 
-	if err := xos.Truncate(path, 0); err != nil {
+	if err = xos.Truncate(path, 0); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 
@@ -579,16 +579,16 @@ func TestJournalCorruptIgnored(t *testing.T) {
 	}
 
 	val := testValue(100)
-	if err := idx.Put(1, val, 1000); err != nil {
+	if err = idx.Put(1, val, 1000); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
 	// Write a corrupt journal (too short to be valid).
-	if err := filesystem.WriteFile(journalPath, []byte("short"), 0o600); err != nil {
+	if err = filesystem.WriteFile(journalPath, []byte("short"), 0o600); err != nil {
 		t.Fatalf("write corrupt journal: %v", err)
 	}
 
@@ -634,11 +634,11 @@ func TestJournalSizeMismatch(t *testing.T) {
 	}
 
 	val := testValue(42)
-	if err := idx.Put(42, val, 42); err != nil {
+	if err = idx.Put(42, val, 42); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -655,7 +655,7 @@ func TestJournalSizeMismatch(t *testing.T) {
 	binary.BigEndian.PutUint64(buf[8:16], 10) // lies: says 10, only 5 present
 	binary.BigEndian.PutUint16(buf[16:18], valSize)
 
-	if err := filesystem.WriteFile(journalPath, buf, 0o600); err != nil {
+	if err = filesystem.WriteFile(journalPath, buf, 0o600); err != nil {
 		t.Fatalf("write journal: %v", err)
 	}
 
@@ -1315,7 +1315,7 @@ func TestOpenValSizeMismatch(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -1361,7 +1361,7 @@ func TestOpenCorruptMagic(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -1371,11 +1371,11 @@ func TestOpenCorruptMagic(t *testing.T) {
 	}
 
 	// Write garbage magic at offset 0.
-	if _, err := f.WriteAt([]byte{0xDE, 0xAD, 0xBE, 0xEF}, 0); err != nil {
+	if _, err = f.WriteAt([]byte{0xDE, 0xAD, 0xBE, 0xEF}, 0); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Fatalf("close file: %v", err)
 	}
 
@@ -1401,7 +1401,7 @@ func TestOpenCorruptVersion(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -1414,11 +1414,11 @@ func TestOpenCorruptVersion(t *testing.T) {
 	var buf [4]byte
 	binary.BigEndian.PutUint32(buf[:], 99)
 
-	if _, err := f.WriteAt(buf[:], 4); err != nil {
+	if _, err = f.WriteAt(buf[:], 4); err != nil {
 		t.Fatalf("write: %v", err)
 	}
 
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Fatalf("close file: %v", err)
 	}
 
@@ -1446,12 +1446,12 @@ func TestOpenFileTooSmall(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
 	// Truncate data file to less than header size (48 bytes).
-	if err := xos.Truncate(path, 16); err != nil {
+	if err = xos.Truncate(path, 16); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 
@@ -1599,11 +1599,11 @@ func TestStaleWriterRecovery(t *testing.T) {
 	}
 
 	val := testValue(1)
-	if err := idx.Put(1, val, 100); err != nil {
+	if err = idx.Put(1, val, 100); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -1623,11 +1623,11 @@ func TestStaleWriterRecovery(t *testing.T) {
 
 	binary.BigEndian.PutUint64(buf[:], lockWord)
 
-	if _, err := dataFile.WriteAt(buf[:], 40); err != nil {
+	if _, err = dataFile.WriteAt(buf[:], 40); err != nil {
 		t.Fatalf("write lock word: %v", err)
 	}
 
-	if err := dataFile.Close(); err != nil {
+	if err = dataFile.Close(); err != nil {
 		t.Fatalf("close data file: %v", err)
 	}
 
@@ -1702,11 +1702,11 @@ func TestStaleReaderRecovery(t *testing.T) {
 	}
 
 	val := testValue(1)
-	if err := idx.Put(1, val, 100); err != nil {
+	if err = idx.Put(1, val, 100); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 
-	if err := idx.Close(); err != nil {
+	if err = idx.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
 
@@ -1722,11 +1722,11 @@ func TestStaleReaderRecovery(t *testing.T) {
 
 	binary.BigEndian.PutUint64(buf[:], 1) // reader count = 1, no write flag
 
-	if _, err := dataFile.WriteAt(buf[:], 40); err != nil {
+	if _, err = dataFile.WriteAt(buf[:], 40); err != nil {
 		t.Fatalf("write lock word: %v", err)
 	}
 
-	if err := dataFile.Close(); err != nil {
+	if err = dataFile.Close(); err != nil {
 		t.Fatalf("close data file: %v", err)
 	}
 
@@ -1748,7 +1748,7 @@ func TestStaleReaderRecovery(t *testing.T) {
 	}()
 
 	select {
-	case err := <-done:
+	case err = <-done:
 		if err != nil {
 			t.Fatalf("put after stale reader: %v", err)
 		}
@@ -1798,7 +1798,7 @@ func TestNewCreatesParentDirectory(t *testing.T) {
 
 	// Verify the index is functional.
 	val := testValue(42)
-	if err := idx.Put(42, val, 100); err != nil {
+	if err = idx.Put(42, val, 100); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 

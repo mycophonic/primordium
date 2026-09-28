@@ -155,7 +155,7 @@ func size(name string, t *testing.T) int64 {
 	}
 
 	defer func() {
-		if err := file.Close(); err != nil {
+		if err = file.Close(); err != nil {
 			t.Error(err)
 		}
 	}()
@@ -519,7 +519,7 @@ func assertOpenFileKeepsPermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Error(err)
 	}
 
@@ -617,7 +617,7 @@ func TestStatError(t *testing.T) {
 	mustHaveSymlink(t)
 
 	link := "symlink"
-	if err := os.Symlink(path, link); err != nil {
+	if err = os.Symlink(path, link); err != nil {
 		t.Fatal(err)
 	}
 
@@ -695,7 +695,7 @@ func TestStatRelativeSymlink(t *testing.T) {
 	}
 
 	link := filepath.Join(tmpdir, "link")
-	if err := os.Symlink(filepath.Base(target), link); err != nil {
+	if err = os.Symlink(filepath.Base(target), link); err != nil {
 		t.Fatal(err)
 	}
 
@@ -949,7 +949,7 @@ func TestFileRDWRFlags(t *testing.T) {
 				}
 			}
 
-			if _, err := f.Seek(0, 0); err != nil {
+			if _, err = f.Seek(0, 0); err != nil {
 				t.Fatalf("f.Seek: %v", err)
 			}
 
@@ -1132,12 +1132,12 @@ func TestAppendDoesntOverwrite(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := f.WriteString(" world"); err != nil {
+	if _, err = f.WriteString(" world"); err != nil {
 		f.Close()
 		t.Fatal(err)
 	}
 
-	if err := f.Close(); err != nil {
+	if err = f.Close(); err != nil {
 		t.Fatal(err)
 	}
 

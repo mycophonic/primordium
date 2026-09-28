@@ -79,7 +79,7 @@ func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), 
 	}
 
 	// Step 2: Create entry directory
-	if err := os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err != nil {
+	if err = os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err != nil {
 		_ = flock.Unlock(globalLock)
 
 		return "", nil, fmt.Errorf("%w: entry directory: %w", fault.ErrFilesystemFailure, err)
@@ -96,7 +96,7 @@ func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), 
 	_ = flock.Unlock(globalLock)
 
 	// Step 4: Touch lock file, acquire read lock on it
-	if err := touchLockFile(lockPath); err != nil {
+	if err = touchLockFile(lockPath); err != nil {
 		_ = flock.Unlock(dirLock)
 
 		return "", nil, fmt.Errorf("%w: lock file: %w", fault.ErrFilesystemFailure, err)

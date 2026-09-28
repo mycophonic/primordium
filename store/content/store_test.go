@@ -990,7 +990,7 @@ func TestStore_InvalidateTriggersRefetch(t *testing.T) {
 	}
 
 	// Invalidate.
-	if err := cs.Invalidate("invalidate-id"); err != nil {
+	if err = cs.Invalidate("invalidate-id"); err != nil {
 		t.Fatalf("Invalidate() error: %v", err)
 	}
 
@@ -1190,7 +1190,7 @@ func TestStore_AcquireFileColdAndWarm(t *testing.T) {
 		t.Errorf("file content = %q (%v), want %q", got, err, payload)
 	}
 
-	if err := pin.Release(); err != nil {
+	if err = pin.Release(); err != nil {
 		t.Errorf("Release() error: %v", err)
 	}
 
@@ -1233,7 +1233,7 @@ func TestStore_AcquireFileSharesBlobWithAcquire(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	if _, err := io.Copy(io.Discard, reader); err != nil {
+	if _, err = io.Copy(io.Discard, reader); err != nil {
 		t.Fatalf("drain error: %v", err)
 	}
 
@@ -1277,7 +1277,7 @@ func TestStore_DigestlessStagingUsesBLAKE3(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
-	if _, err := io.ReadAll(reader); err != nil {
+	if _, err = io.ReadAll(reader); err != nil {
 		t.Fatalf("ReadAll() error: %v", err)
 	}
 

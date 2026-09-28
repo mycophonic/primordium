@@ -123,7 +123,7 @@ func readCPUModel() string {
 		return ""
 	}
 
-	if err := syscall.RegOpenKeyEx(
+	if err = syscall.RegOpenKeyEx(
 		syscall.HKEY_LOCAL_MACHINE, subkey, 0, syscall.KEY_READ, &hKey,
 	); err != nil {
 		return ""

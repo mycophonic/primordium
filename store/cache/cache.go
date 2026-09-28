@@ -80,7 +80,7 @@ func (c *Cache) Acquire(dgst digest.Digest) (io.ReadCloser, io.WriteCloser, erro
 	}
 
 	// Step 2: Create directory XYZ
-	if err := os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err != nil {
+	if err = os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err != nil {
 		_ = flock.Unlock(globalLock)
 
 		return nil, nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
@@ -112,7 +112,7 @@ func (c *Cache) Acquire(dgst digest.Digest) (io.ReadCloser, io.WriteCloser, erro
 	}
 
 	// Step 4: Touch XYZ/lock, acquire READ lock on it (for GC protection)
-	if err := touchFile(readLockPath); err != nil {
+	if err = touchFile(readLockPath); err != nil {
 		_ = flock.Unlock(dirLock)
 
 		return nil, nil, fmt.Errorf("%w: lock file: %w", fault.ErrFilesystemFailure, err)
@@ -230,7 +230,7 @@ func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 		return nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
 	}
 
-	if err := touchFile(readLockPath); err != nil {
+	if err = touchFile(readLockPath); err != nil {
 		_ = flock.Unlock(dirLock)
 
 		// Same GC race, as Windows surfaces it: the sibling-file lock above

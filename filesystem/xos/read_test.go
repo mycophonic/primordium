@@ -82,7 +82,7 @@ func TestWriteFile(t *testing.T) {
 		"build bigger and better idiot-proof programs, and the Universe trying " +
 		"to produce bigger and better idiots. So far, the Universe is winning."
 
-	if err := xos.WriteFile(f.Name(), []byte(msg), 0o644); err != nil {
+	if err = xos.WriteFile(f.Name(), []byte(msg), 0o644); err != nil {
 		t.Fatalf("WriteFile %s: %v", f.Name(), err)
 	}
 
@@ -151,7 +151,8 @@ func TestReadDir(t *testing.T) {
 
 	f.Close()
 
-	if list, err := xos.ReadDir(filename); list != nil || !errors.Is(err, syscall.ENOTDIR) {
+	var list []os.DirEntry
+	if list, err = xos.ReadDir(filename); list != nil || !errors.Is(err, syscall.ENOTDIR) {
 		t.Fatalf("ReadDir %s: (nil, ENOTDIR) expected, got (%v, %v)", filename, list, err)
 	}
 
@@ -168,11 +169,11 @@ func TestReadDir(t *testing.T) {
 	tf.Close()
 
 	subDir := filepath.Join(dir, "subdir")
-	if err := os.Mkdir(subDir, 0o755); err != nil {
+	if err = os.Mkdir(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	list, err := xos.ReadDir(dir)
+	list, err = xos.ReadDir(dir)
 	if err != nil {
 		t.Fatalf("ReadDir %s: %v", dir, err)
 	}

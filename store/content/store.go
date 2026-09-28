@@ -533,7 +533,7 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 		return nil, nil, fmt.Errorf("%w: staging file: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	if err := os.Remove(file.Name()); err != nil {
+	if err = os.Remove(file.Name()); err != nil {
 		// The unlink-on-create contract above no longer holds for this file:
 		// nothing else will ever remove it, so at least leave a trace.
 		slog.Warn("failed to unlink staging file, it will persist after close",
@@ -551,7 +551,7 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 
 	slog.Debug("content staged, computing digest", "size", written)
 
-	if _, err := file.Seek(0, io.SeekStart); err != nil {
+	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		_ = file.Close()
 
 		return nil, nil, fmt.Errorf("%w: rewind staging file: %w", fault.ErrFilesystemFailure, err)

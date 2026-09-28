@@ -146,8 +146,8 @@ func MkdirTemp(dir, pattern string) (string, error) {
 		}
 
 		if os.IsNotExist(err) {
-			if _, err := os.Stat(dir); os.IsNotExist(err) {
-				return "", err
+			if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+				return "", statErr
 			}
 		}
 
