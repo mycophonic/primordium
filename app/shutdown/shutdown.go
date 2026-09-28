@@ -68,7 +68,7 @@ func SetDefaults(parent context.Context) context.Context {
 
 				os.Exit(0) //revive:disable-line:deep-exit
 			case <-time.After(shutdownTimeout):
-				slog.Error("shutdown timed out, some operations may not have completed cleanly")
+				slog.ErrorContext(ctx, "shutdown timed out, some operations may not have completed cleanly")
 				os.Exit(1) //revive:disable-line:deep-exit
 			}
 		}()
@@ -115,14 +115,14 @@ func Run(ctx context.Context, function func(context.Context) error) {
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				slog.Error("panic", "value", r, "stack", string(debug.Stack()))
+				slog.ErrorContext(ctx, "panic", "value", r, "stack", string(debug.Stack()))
 
 				exitCode = 1
 			}
 		}()
 
 		if err := function(ctx); err != nil {
-			slog.Error("fatal", "error", err)
+			slog.ErrorContext(ctx, "fatal", "error", err)
 
 			exitCode = 1
 		}

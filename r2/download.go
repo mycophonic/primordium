@@ -64,7 +64,7 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 	// Already complete in dataDir?
 	if info, statErr := xos.Stat(dataFile); statErr == nil && info.Size() == remoteSize {
 		if readETag(dataETag) == remoteETag {
-			slog.Info("file already complete", "objectKey", objectKey, "size", remoteSize)
+			slog.InfoContext(ctx, "file already complete", "objectKey", objectKey, "size", remoteSize)
 
 			return nil
 		}
@@ -85,7 +85,7 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 		localETag := readETag(tempETag)
 
 		if localETag != remoteETag {
-			slog.Warn("remote object changed, discarding partial download",
+			slog.WarnContext(ctx, "remote object changed, discarding partial download",
 				"local_etag", localETag, "remote_etag", remoteETag)
 
 			_ = os.Remove(tempFile)
@@ -95,11 +95,11 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 
 			switch {
 			case offset == remoteSize:
-				slog.Info("temp file already complete, moving to data", "objectKey", objectKey)
+				slog.InfoContext(ctx, "temp file already complete, moving to data", "objectKey", objectKey)
 
 				return moveToData(tempFile, tempETag, dataFile, dataETag)
 			case offset > remoteSize:
-				slog.Warn("local file larger than remote, re-downloading",
+				slog.WarnContext(ctx, "local file larger than remote, re-downloading",
 					"local", offset, "remote", remoteSize)
 
 				_ = os.Remove(tempFile)
@@ -119,9 +119,9 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 	}
 
 	if offset > 0 {
-		slog.Info("resuming download", "objectKey", objectKey, "offset", offset, "total", remoteSize)
+		slog.InfoContext(ctx, "resuming download", "objectKey", objectKey, "offset", offset, "total", remoteSize)
 	} else {
-		slog.Info("downloading", "objectKey", objectKey, "size", remoteSize)
+		slog.InfoContext(ctx, "downloading", "objectKey", objectKey, "size", remoteSize)
 	}
 
 	expectedBytes := remoteSize - offset
@@ -222,7 +222,7 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset,
 			}
 
 			if written >= nextLog {
-				slog.Info("download progress",
+				slog.InfoContext(ctx, "download progress",
 					"downloaded", offset+written,
 					"total", total,
 					"percent", (offset+written)*100/total, //nolint:mnd // Percentage.
