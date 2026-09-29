@@ -16,7 +16,11 @@
 
 package transporter
 
-import "time"
+import (
+	"time"
+
+	"github.com/mycophonic/primordium/bytesize"
+)
 
 const (
 	jitterMin   = 0.75 // ±25% jitter: multiplier range [0.75, 1.25].
@@ -30,5 +34,5 @@ const (
 	// progressInterval is the byte interval at which response body reads
 	// are logged. Only responses whose body exceeds this threshold produce
 	// any progress output.
-	progressInterval int64 = 100 * 1024 * 1024 //nolint:mnd // 100 MiB.
+	progressInterval int64 = 100 * bytesize.MiB
 )

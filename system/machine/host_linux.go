@@ -26,6 +26,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/dirs"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -115,8 +116,8 @@ func parseMemInfoLine(line, prefix string) (uint64, bool) {
 		return 0, false
 	}
 
-	//revive:disable-next-line:add-constant // kB to bytes
-	return kilobytes * 1024, true //nolint:mnd
+	// meminfo's "kB" is 1024 bytes, not the SI kilobyte.
+	return kilobytes * bytesize.KiB, true
 }
 
 // readCPUModel returns the first "model name" from /proc/cpuinfo, or empty string on failure.

@@ -16,4 +16,6 @@
 
 package iox
 
-const defaultBufferSize int = 4096
+import "github.com/mycophonic/primordium/bytesize"
+
+const defaultBufferSize int = 4 * bytesize.KiB

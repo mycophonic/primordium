@@ -28,6 +28,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
@@ -60,7 +61,7 @@ const errFmtFetch = "%w: fetch: %w"
 // The curve flattens past 16MiB while the buffer is allocated per concurrent
 // stage call, so this deliberately stops short of the peak: the remaining
 // ~6% costs four times the resident footprint under concurrent fetches.
-const stageBufferSize = 16 << 20
+const stageBufferSize = 16 * bytesize.MiB
 
 // algorithmToID maps digest algorithms to stable numeric identifiers for
 // on-disk index records. These IDs are a persistence contract owned by this

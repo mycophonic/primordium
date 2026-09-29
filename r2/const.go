@@ -16,16 +16,19 @@
 
 package r2
 
+import "github.com/mycophonic/primordium/bytesize"
+
 const (
 	// Download.
 
-	progressBytes = 50 << 20 // Log progress every 50 MB.
+	progressBytes  = 50 * bytesize.MiB // Log progress every 50 MiB.
+	copyBufferSize = 32 * bytesize.KiB
 
 	// Multi-part upload.
 
-	minPartSize      = 5 << 20   // 5 MiB — R2/S3 minimum.
-	defaultPartSize  = 100 << 20 // 100 MiB.
-	maxParts         = 10_000    // S3/R2 maximum.
-	listPartsMaxKeys = 1000      // S3 ListParts page size.
+	minPartSize      = 5 * bytesize.MiB // R2/S3 minimum.
+	defaultPartSize  = 100 * bytesize.MiB
+	maxParts         = 10_000 // S3/R2 maximum.
+	listPartsMaxKeys = 1000   // S3 ListParts page size.
 	stateFileMode    = 0o600
 )
