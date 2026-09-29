@@ -136,7 +136,7 @@ func TestMkdirTemp(t *testing.T) {
 		{"tempfile_test*xyz", "tempfile_test", "xyz"},
 	}
 
-	dir := filepath.Clean(os.TempDir())
+	dir := filepath.Clean(t.TempDir())
 
 	runTestMkdirTemp := func(t *testing.T, pattern, wantRePat string) {
 		t.Helper()

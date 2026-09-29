@@ -190,6 +190,11 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    # Beyond the defaults (t.TempDir, t.Setenv, t.Chdir): os.TempDir and t.Context.
+    usetesting:
+      os-temp-dir: true
+      context-background: true
+      context-todo: true
     # 80 lines for the long-but-flat function, as the v0.6.1 baseline sets it.
     funlen:
       lines: 80
