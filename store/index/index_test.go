@@ -47,7 +47,7 @@ func testValue(seed uint64) []byte {
 	return val
 }
 
-func openTestIndex(t *testing.T, opts *index.Options) (*index.Index, string) {
+func openTestIndex(t *testing.T, opts *index.Options) *index.Index {
 	t.Helper()
 
 	path := filepath.Join(t.TempDir(), "test.idx")
@@ -59,7 +59,7 @@ func openTestIndex(t *testing.T, opts *index.Options) (*index.Index, string) {
 
 	t.Cleanup(func() { assert.Check(t, idx.Close()) })
 
-	return idx, path
+	return idx
 }
 
 // seedIndex inserts n records with key=i, value derived from i*7, timestamp=i.
@@ -107,7 +107,7 @@ func verifyRecords(t *testing.T, idx *index.Index, n uint64) {
 func TestGrowPreservesRecords(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64})
 
 	const n = 200
 	seedIndex(t, idx, n)
@@ -179,7 +179,7 @@ func TestGrowReopenPreservesData(t *testing.T) {
 func TestGrowWithTombstones(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64})
 
 	// Fill to 40 records (below 64*0.70 = 44.8 threshold).
 	for i := range uint64(40) {
@@ -278,7 +278,7 @@ func TestChurn(t *testing.T) {
 		t.Run(fmt.Sprintf("maxcap=%d", maxCap), func(t *testing.T) {
 			t.Parallel()
 
-			idx, _ := openTestIndex(t, &index.Options{InitialCap: 1024, MaxCap: maxCap})
+			idx := openTestIndex(t, &index.Options{InitialCap: 1024, MaxCap: maxCap})
 
 			rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- fixed-seed keys for a repeatable test
 
@@ -339,7 +339,7 @@ func TestChurn(t *testing.T) {
 func TestGrowMaxCapExceeded(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64, MaxCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64, MaxCap: 64})
 
 	// Fill to threshold. 64 * 0.70 = 44.8, so the 45th insert triggers grow.
 	for i := range uint64(44) {
@@ -406,7 +406,7 @@ func TestOpenMaxCapExceededByExistingFile(t *testing.T) {
 func TestGrowForEachConsistency(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64})
 
 	const n = 300
 	seedIndex(t, idx, n)
@@ -766,7 +766,7 @@ func TestJournalSizeMismatch(t *testing.T) {
 func TestConcurrentReadWriteGrow(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64})
 
 	const (
 		numWriters    = 4
@@ -863,7 +863,7 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 func TestConcurrentDeleteDuringGrow(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64})
 
 	// Pre-fill with keys 0..499.
 	const prefill = 500
@@ -972,7 +972,7 @@ func TestConcurrentDeleteDuringGrow(t *testing.T) {
 func TestConcurrentGrowContention(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 16})
+	idx := openTestIndex(t, &index.Options{InitialCap: 16})
 
 	const (
 		numGoroutines = 8
@@ -1036,7 +1036,7 @@ func TestConcurrentGrowContention(t *testing.T) {
 func TestPutGetRoundtrip(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	val := testValue(42)
 	if err := idx.Put(1, val, 1000); err != nil {
@@ -1070,7 +1070,7 @@ func TestPutGetRoundtrip(t *testing.T) {
 func TestPutUpdate(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	val1 := testValue(1)
 	if err := idx.Put(10, val1, 100); err != nil {
@@ -1113,7 +1113,7 @@ func TestPutUpdate(t *testing.T) {
 func TestDeleteThenGet(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	val := testValue(7)
 	if err := idx.Put(5, val, 50); err != nil {
@@ -1153,7 +1153,7 @@ func TestDeleteThenGet(t *testing.T) {
 func TestDeleteNonExistent(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	deleted, err := idx.Delete(999)
 	if err != nil {
@@ -1170,7 +1170,7 @@ func TestDeleteNonExistent(t *testing.T) {
 func TestGetNonExistent(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	_, found, err := idx.Get(12345)
 	if err != nil {
@@ -1187,7 +1187,7 @@ func TestGetNonExistent(t *testing.T) {
 func TestKeyZero(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	val := testValue(0)
 	if err := idx.Put(0, val, 999); err != nil {
@@ -1217,7 +1217,7 @@ func TestKeyZero(t *testing.T) {
 func TestTombstoneReuse(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 64})
+	idx := openTestIndex(t, &index.Options{InitialCap: 64})
 
 	val1 := testValue(1)
 	if err := idx.Put(7, val1, 10); err != nil {
@@ -1262,7 +1262,7 @@ func TestTombstoneReuse(t *testing.T) {
 func TestPutEmptyValue(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	err := idx.Put(1, nil, 1)
 	if err == nil {
@@ -1287,7 +1287,7 @@ func TestPutEmptyValue(t *testing.T) {
 func TestPutOversizedValue(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil) // default valSize = 65
+	idx := openTestIndex(t, nil) // default valSize = 65
 
 	oversized := make([]byte, 66)
 	oversized[0] = 1
@@ -1306,7 +1306,7 @@ func TestPutOversizedValue(t *testing.T) {
 func TestPutExactSizeValue(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil) // default valSize = 65
+	idx := openTestIndex(t, nil) // default valSize = 65
 
 	exact := make([]byte, 65)
 	exact[0] = 1
@@ -1334,7 +1334,7 @@ func TestPutExactSizeValue(t *testing.T) {
 func TestPutShortValueZeroPadded(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil) // default valSize = 65
+	idx := openTestIndex(t, nil) // default valSize = 65
 
 	short := []byte{0x02, 0xAA, 0xBB}
 	if err := idx.Put(1, short, 1); err != nil {
@@ -1550,7 +1550,7 @@ func TestOpenFileTooSmall(t *testing.T) {
 func TestForEachEmptyIndex(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	var visited int
 
@@ -1573,7 +1573,7 @@ func TestForEachEmptyIndex(t *testing.T) {
 func TestForEachEarlyStop(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	for i := range uint64(10) {
 		val := testValue(i)
@@ -1604,7 +1604,7 @@ func TestForEachEarlyStop(t *testing.T) {
 func TestLenCapFreshIndex(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, &index.Options{InitialCap: 256})
+	idx := openTestIndex(t, &index.Options{InitialCap: 256})
 
 	count, err := idx.Len()
 	if err != nil {
@@ -1631,7 +1631,7 @@ func TestLenCapFreshIndex(t *testing.T) {
 func TestSync(t *testing.T) {
 	t.Parallel()
 
-	idx, _ := openTestIndex(t, nil)
+	idx := openTestIndex(t, nil)
 
 	val := testValue(1)
 	if err := idx.Put(1, val, 1); err != nil {
