@@ -805,7 +805,8 @@ type gcCandidate struct {
 	lock *os.File
 }
 
-// GCStats contains statistics from a garbage collection run.
+// GCStats contains statistics from a garbage collection run. Sizes are in
+// bytes.
 type GCStats struct {
 	EntriesFreed int
 	BytesFreed   int64
