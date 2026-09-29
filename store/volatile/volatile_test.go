@@ -110,7 +110,13 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 	var firstPath string
 
 	paths.Range(func(_, value any) bool {
-		p := value.(string)
+		p, ok := value.(string)
+		if !ok {
+			t.Errorf("stored path is %T, want string", value)
+
+			return false
+		}
+
 		if firstPath == "" {
 			firstPath = p
 		} else if p != firstPath {
@@ -173,7 +179,13 @@ func TestVolatile_ConcurrentAcquireDifferentContent(t *testing.T) {
 	seen := make(map[string]bool)
 
 	paths.Range(func(_, value any) bool {
-		p := value.(string)
+		p, ok := value.(string)
+		if !ok {
+			t.Errorf("stored path is %T, want string", value)
+
+			return false
+		}
+
 		if seen[p] {
 			t.Errorf("duplicate path found: %s", p)
 		}
