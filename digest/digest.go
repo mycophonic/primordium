@@ -132,8 +132,11 @@ func (a Algorithm) Hash() hash.Hash {
 
 // Digest represents a content digest with an algorithm and encoded hash.
 type Digest interface {
+	// Algorithm is the algorithm that produced the digest.
 	Algorithm() Algorithm
+	// Encoded is the digest's lowercase hex encoding.
 	Encoded() string
+	// String is the digest as "algorithm:encoded".
 	String() string
 }
 

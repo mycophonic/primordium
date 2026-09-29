@@ -157,10 +157,6 @@ linters:
           - varnamelen
           - dupword
           - dogsled
-      - path: _test.go
-        text: "confusing-results|nested-structs|unchecked-type-assertion|unused-receiver"
-        linters:
-          - revive
       # xos and dirs ARE the wrappers around os.* — they must call the raw functions.
       - path: filesystem/xos/
         linters:
@@ -357,9 +353,34 @@ linters:
       analyze-types: true
 
     revive:
+      # revive is the one style bag because `//revive:disable-next-line:<rule>`
+      # is per rule. Every rule is on; the ones below are off because another
+      # tool makes the same check with a stronger analysis or an auto-fix, or
+      # because the rule is obsolete.
       enable-all-rules: true
       rules:
-        # Rewrites modernize makes, with an auto-fix.
+        # Obsolete since Go 1.22 loop-variable semantics (revive's own note).
+        - name: range-val-address
+          disabled: true
+        - name: range-val-in-closure
+          disabled: true
+        # Correctness twins of govet and staticcheck analyzers, which are
+        # flow-sensitive where revive matches syntax.
+        - name: unhandled-error
+          disabled: true # errcheck, see errcheck above
+        - name: constant-logical-expr
+          disabled: true # staticcheck SA4000
+        - name: unconditional-recursion
+          disabled: true # staticcheck SA5007
+        - name: unreachable-code
+          disabled: true # govet unreachable
+        - name: atomic
+          disabled: true # govet atomic
+        - name: waitgroup-by-value
+          disabled: true # govet copylocks
+        - name: string-of-int
+          disabled: true # govet stringintconv
+        # Rewrites with an auto-fix elsewhere.
         - name: use-any
           disabled: true # modernize any
         - name: use-waitgroup-go
@@ -368,22 +389,49 @@ linters:
           disabled: true # modernize slicessort
         - name: redundant-build-tag
           disabled: true # modernize plusbuild
-        - name: function-length
-          disabled: true # funlen
-        - name: add-constant
-          disabled: true # mnd for numbers, goconst for strings
+        - name: use-errors-new
+          disabled: true # perfsprint errorf
+        - name: errorf
+          disabled: true # staticcheck S1028
+        - name: bool-literal-in-expr
+          disabled: true # staticcheck S1002
+        - name: identical-branches
+          disabled: true # gocritic dupBranchBody
+        - name: empty-lines
+          disabled: true # wsl_v5 leading-whitespace, trailing-whitespace
+        - name: line-length-limit
+          disabled: true # golines
+        # Measures owned by the single-purpose linters (see the doctrine at
+        # the top): their settings are richer and their suppression is
+        # already per linter.
         - name: cognitive-complexity
           disabled: true # gocognit
         - name: cyclomatic
           disabled: true # gocyclo
+        - name: function-length
+          disabled: true # funlen
+        - name: add-constant
+          disabled: true # mnd for numbers, goconst for strings
+        # A boolean parameter that selects behaviour is a design choice this
+        # codebase makes on purpose: 31 suppressions of this rule say so.
+        - name: flag-parameter
+          disabled: true
+        # goimports names a package explicitly when its import path ends in
+        # a version element (`v1 ".../pkg/v1"`), and this rule then calls
+        # that name redundant: the two cannot both be satisfied, and a
+        # directive does not settle it (gci and goimports fight over the
+        # comment's blank line). goimports owns the import form.
+        - name: redundant-import-alias
+          disabled: true
+
         - name: max-public-structs
           arguments: [10]
-
-        - name: line-length-limit
-          # Formatter `golines` takes care of this.
-          disabled: true
-        - name: unhandled-error
-          disabled: true # errcheck, which also sees deferred and go calls
+        # A public interface's methods are the contract; document them.
+        - name: exported
+          arguments: [checkPublicInterface]
+        # A switch may omit default; when present it is the last clause.
+        - name: enforce-switch-style
+          arguments: [allowNoDefault]
 
     depguard:
       rules:
