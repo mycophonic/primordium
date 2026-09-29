@@ -163,7 +163,6 @@ linters:
           - varnamelen
           - dupl
           - dupword
-          - wrapcheck
           - err113
           - dogsled
           - noctx

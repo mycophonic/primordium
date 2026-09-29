@@ -38,7 +38,7 @@ type countingReader struct {
 func (cr *countingReader) Read(p []byte) (int, error) {
 	cr.calls.Add(1)
 
-	return cr.r.Read(p)
+	return cr.r.Read(p) //nolint:wrapcheck // io.EOF must reach the caller as is
 }
 
 func TestReader_BuffersSmallReads(t *testing.T) {

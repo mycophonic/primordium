@@ -128,7 +128,7 @@ func doGet(ctx context.Context, t *testing.T, client *http.Client, url string) (
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	assert.NilError(t, err)
 
-	return client.Do(req)
+	return client.Do(req) //nolint:wrapcheck // the transport's error is what the tests assert
 }
 
 // --- Core retry behavior ---
