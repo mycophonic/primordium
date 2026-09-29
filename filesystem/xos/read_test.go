@@ -170,6 +170,7 @@ func TestReadDir(t *testing.T) {
 	assert.Check(t, tf.Close())
 
 	subDir := filepath.Join(dir, "subdir")
+	// #nosec G301 -- as in the standard library's os tests this file ports
 	if err = os.Mkdir(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

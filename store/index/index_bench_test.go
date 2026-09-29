@@ -163,7 +163,7 @@ func BenchmarkDelete(b *testing.B) {
 	// the refill turns quadratic, and the benchmark runs for minutes while
 	// reporting only the deletes.
 	count := 10_000
-	rng := rand.New(rand.NewPCG(1, 2))
+	rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- fixed-seed keys for a repeatable run
 
 	keys := make([]uint64, count)
 	for i := range keys {

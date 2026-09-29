@@ -277,7 +277,7 @@ func TestChurn(t *testing.T) {
 
 			idx, _ := openTestIndex(t, &index.Options{InitialCap: 1024, MaxCap: maxCap})
 
-			rng := rand.New(rand.NewPCG(1, 2))
+			rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- fixed-seed keys for a repeatable test
 
 			keys := make([]uint64, 100)
 			for i := range keys {
@@ -488,6 +488,7 @@ func writeTestJournal(t *testing.T, path string, newCap uint64, records []index.
 		off := journalHeaderSize + i*journalRecordSize
 		binary.BigEndian.PutUint64(buf[off:off+8], rec.Key)
 		copy(buf[off+8:off+8+valSize], rec.Value)
+		// #nosec G115 -- a timestamp's bit pattern, as the index stores it
 		binary.BigEndian.PutUint64(buf[off+8+valSize:off+8+valSize+8], uint64(rec.Timestamp))
 	}
 
@@ -771,12 +772,12 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 	// Writers: each owns a disjoint key range to avoid update contention.
 	for w := range numWriters {
 		writers.Go(func() {
-			base := uint64(w) * keysPerWriter
+			base := uint64(w) * keysPerWriter // #nosec G115 -- a small writer index
 			for i := range uint64(keysPerWriter) {
 				key := base + i
 				val := testValue(key * 7)
 
-				if err := idx.Put(key, val, int64(key)); err != nil {
+				if err := idx.Put(key, val, int64(key)); err != nil { // #nosec G115 -- a small test key
 					t.Errorf("writer %d put %d: %v", w, key, err)
 
 					return
@@ -799,7 +800,7 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 				default:
 				}
 
-				key := uint64(r) * keysPerWriter
+				key := uint64(r) * keysPerWriter // #nosec G115 -- a small reader index
 
 				_, _, err := idx.Get(key)
 				if err != nil {
@@ -971,12 +972,12 @@ func TestConcurrentGrowContention(t *testing.T) {
 
 	for g := range numGoroutines {
 		wg.Go(func() {
-			base := uint64(g) * keysEach
+			base := uint64(g) * keysEach // #nosec G115 -- a small goroutine index
 			for i := range uint64(keysEach) {
 				key := base + i
 				val := testValue(key)
 
-				if err := idx.Put(key, val, int64(key)); err != nil {
+				if err := idx.Put(key, val, int64(key)); err != nil { // #nosec G115 -- a small test key
 					t.Errorf("goroutine %d put %d: %v", g, key, err)
 
 					return

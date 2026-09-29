@@ -149,6 +149,7 @@ func TestVolatile_ConcurrentAcquireDifferentContent(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
+			// #nosec G115 -- a small goroutine index
 			content := []byte("content-" + string(rune('A'+id%26)) + "-" + string(rune('0'+id)))
 
 			path, release, err := store.Acquire(content)

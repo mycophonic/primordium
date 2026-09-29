@@ -159,17 +159,12 @@ linters:
 
   exclusions:
     rules:
-      # gosec is not delivering value on tests, regularly flagging cmd.Exec calls
-      - path: testutil/
-        linters:
-          - gosec
       - path: _test.go
         linters:
           - varnamelen
           - dupl
           - dupword
           - wrapcheck
-          - gosec
           - err113
           - modernize
           - dogsled
@@ -190,6 +185,9 @@ linters:
 
   settings:
     # Note: default, no changes
+    gosec:
+      excludes:
+        - G104 # unchecked errors are errcheck's
     errorlint:
       # Disable err==target → errors.Is(err, target) auto-rewrite. The fixer
       # has known bugs where it adds the errors.Is() call but fails to add
