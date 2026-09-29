@@ -75,14 +75,14 @@ var (
 
 	// digestSizes maps algorithms to their expected byte lengths.
 	digestSizes = map[Algorithm]int{
-		MD5:        16,
-		SHA1:       20,
-		SHA256:     32,
-		SHA384:     48,
-		SHA512:     64,
-		BLAKE2b256: 32,
-		BLAKE2b512: 64,
-		BLAKE3256:  32,
+		MD5:        crypto.MD5.Size(),
+		SHA1:       crypto.SHA1.Size(),
+		SHA256:     crypto.SHA256.Size(),
+		SHA384:     crypto.SHA384.Size(),
+		SHA512:     crypto.SHA512.Size(),
+		BLAKE2b256: blake2b.Size256,
+		BLAKE2b512: blake2b.Size,
+		BLAKE3256:  blake3Size256,
 	}
 )
 
@@ -104,13 +104,16 @@ func newBLAKE2b512() hash.Hash {
 	return h
 }
 
+// blake3Size256 is the size of a BLAKE3-256 digest, in bytes.
+const blake3Size256 = 32
+
 // newBLAKE3256 returns an unkeyed BLAKE3 hasher with a 256-bit output.
 //
 // This implementation parallelises across goroutines within each Write call,
 // so callers hashing bulk content should feed it large buffers — see
 // stageBufferSize in store/content for the measured trade-off.
 func newBLAKE3256() hash.Hash {
-	return blake3.New(32, nil)
+	return blake3.New(blake3Size256, nil)
 }
 
 // Algorithm represents a digest algorithm identifier.

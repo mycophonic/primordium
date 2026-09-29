@@ -14,7 +14,6 @@
    limitations under the License.
 */
 
-//revive:disable:add-constant
 package simd
 
 // MatVecMul64x32 computes dst = mat × vec, where mat is a 64×32 matrix

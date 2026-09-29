@@ -21,7 +21,7 @@
 // license that can be found in the LICENSE file.
 
 //nolint:wrapcheck,varnamelen // mirrors os.CreateTemp: its errors and names as the standard library has them
-//revive:disable:add-constant,exported
+//revive:disable:exported
 package xos
 
 import (
@@ -29,6 +29,17 @@ import (
 	"math/rand/v2"
 	"os"
 	"strconv"
+)
+
+const (
+	// tempFilePerm and tempDirPerm are CreateTemp's and MkdirTemp's modes,
+	// before umask.
+	tempFilePerm os.FileMode = 0o600
+	tempDirPerm  os.FileMode = 0o700
+
+	// tempAttempts bounds the retries on a name collision, as the standard
+	// library does.
+	tempAttempts = 10000
 )
 
 // A temp-file name suffix, as in Go's os.CreateTemp: the truncation is the
@@ -74,10 +85,10 @@ func CreateTemp(dir, pattern string) (*os.File, error) {
 	for {
 		name := prefix + nextRandom() + suffix
 
-		f, err := OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+		f, err := OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, tempFilePerm)
 		if os.IsExist(err) {
 			//nolint:gocritic // initClause: os.CreateTemp's retry, as the standard library writes it
-			if try++; try < 10000 {
+			if try++; try < tempAttempts {
 				continue
 			}
 
@@ -133,14 +144,14 @@ func MkdirTemp(dir, pattern string) (string, error) {
 	for {
 		name := prefix + nextRandom() + suffix
 
-		err := os.Mkdir(name, 0o700)
+		err := os.Mkdir(name, tempDirPerm)
 		if err == nil {
 			return name, nil
 		}
 
 		if os.IsExist(err) {
 			//nolint:gocritic // initClause: os.CreateTemp's retry, as the standard library writes it
-			if try++; try < 10000 {
+			if try++; try < tempAttempts {
 				continue
 			}
 
