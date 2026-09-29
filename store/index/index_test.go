@@ -21,6 +21,8 @@ import (
 	"bytes"
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"sync"
@@ -168,8 +170,9 @@ func TestGrowReopenPreservesData(t *testing.T) {
 }
 
 // TestGrowWithTombstones triggers a grow via tombstone pressure (deleted
-// records still occupy slots), then verifies tombstones are eliminated
-// and only live records survive.
+// records still occupy slots), then verifies tombstones are eliminated,
+// only live records survive, and the capacity stays put: the live records
+// fit in it.
 func TestGrowWithTombstones(t *testing.T) {
 	t.Parallel()
 
@@ -215,8 +218,8 @@ func TestGrowWithTombstones(t *testing.T) {
 		t.Fatalf("cap: %v", err)
 	}
 
-	if capVal != 128 {
-		t.Fatalf("cap = %d, want 128", capVal)
+	if capVal != 64 {
+		t.Fatalf("cap = %d, want 64", capVal)
 	}
 
 	count, err := idx.Len()
@@ -257,6 +260,72 @@ func TestGrowWithTombstones(t *testing.T) {
 		if !bytes.Equal(rec.Value, wantVal) {
 			t.Fatalf("key %d: value mismatch", key)
 		}
+	}
+}
+
+// TestChurn replaces keys over and over while the live count stays far below
+// the capacity: every Put succeeds, and the capacity does not move, with or
+// without a MaxCap.
+func TestChurn(t *testing.T) {
+	t.Parallel()
+
+	for _, maxCap := range []uint64{0, 1024} {
+		t.Run(fmt.Sprintf("maxcap=%d", maxCap), func(t *testing.T) {
+			t.Parallel()
+
+			idx, _ := openTestIndex(t, &index.Options{InitialCap: 1024, MaxCap: maxCap})
+
+			rng := rand.New(rand.NewPCG(1, 2))
+
+			keys := make([]uint64, 100)
+			for i := range keys {
+				keys[i] = rng.Uint64()
+				if err := idx.Put(keys[i], testValue(keys[i]), 1); err != nil {
+					t.Fatalf("put %d: %v", i, err)
+				}
+			}
+
+			for op := range 20_000 {
+				slot := rng.IntN(len(keys))
+				if _, err := idx.Delete(keys[slot]); err != nil {
+					t.Fatalf("replacement %d: delete: %v", op, err)
+				}
+
+				keys[slot] = rng.Uint64()
+				if err := idx.Put(keys[slot], testValue(keys[slot]), 1); err != nil {
+					t.Fatalf("replacement %d: put: %v", op, err)
+				}
+			}
+
+			capVal, err := idx.Cap()
+			if err != nil {
+				t.Fatalf("cap: %v", err)
+			}
+
+			if capVal != 1024 {
+				t.Fatalf("cap = %d, want 1024", capVal)
+			}
+
+			count, err := idx.Len()
+			if err != nil {
+				t.Fatalf("len: %v", err)
+			}
+
+			if count != uint64(len(keys)) {
+				t.Fatalf("len = %d, want %d", count, len(keys))
+			}
+
+			for _, key := range keys {
+				rec, found, err := idx.Get(key)
+				if err != nil {
+					t.Fatalf("get %d: %v", key, err)
+				}
+
+				if !found || !bytes.Equal(rec.Value, testValue(key)) {
+					t.Fatalf("key %d: lost or changed after churn", key)
+				}
+			}
+		})
 	}
 }
 

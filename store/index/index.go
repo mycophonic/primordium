@@ -805,12 +805,27 @@ func (idx *Index) getUnlocked(key uint64) (Record, bool) {
 	return Record{}, false
 }
 
+// growLocked rebuilds the table without its tombstones, at double the
+// capacity when the live records need it and at the same capacity otherwise.
 func (idx *Index) growLocked() error {
 	hdr := idx.readHeader()
-	newCap := hdr.Capacity * growFactor
+	liveLoad := float64(hdr.Count+1) / float64(hdr.Capacity)
+
+	// Tombstones trip the load limit as surely as live records, but the
+	// rebuild drops them. Doubling for them grows the file without bound under
+	// delete-and-insert churn, and at MaxCap fails a Put on a mostly empty
+	// table.
+	newCap := hdr.Capacity
+	if liveLoad > maxLoadFactor/growFactor {
+		newCap *= growFactor
+	}
 
 	if idx.maxCap != 0 && newCap > idx.maxCap {
-		return fmt.Errorf("%w: grow to %d exceeds max %d", ErrCapacityExceeded, newCap, idx.maxCap)
+		if liveLoad > maxLoadFactor {
+			return fmt.Errorf("%w: grow to %d exceeds max %d", ErrCapacityExceeded, newCap, idx.maxCap)
+		}
+
+		newCap = hdr.Capacity
 	}
 
 	// Collect all live records.
