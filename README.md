@@ -29,3 +29,5 @@ OS specific limitations handling
 - compression wrapper
 - base sqlite struct with tailored pragmas
 - store primitives (ref-counting, content-addressable, mmap index, volatile store)
+- byte multiples as constants (KB, KiB, ...)
+- human-readable byte sizes, formatted and parsed ("2.746MB", "17MiB")
