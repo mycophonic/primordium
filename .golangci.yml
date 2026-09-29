@@ -151,7 +151,6 @@ linters:
     - loggercheck # better dealt with by specialized libraries
     - nakedret # provided by revive
     - predeclared # provided by revive
-    - unparam # provided by revive
 
   exclusions:
     rules:

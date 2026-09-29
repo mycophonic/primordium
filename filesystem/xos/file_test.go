@@ -266,6 +266,8 @@ func smallReaddirnames(file *os.File, length int, t *testing.T) []string {
 }
 
 // writeFile is a simplified version of the stdlib helper (no Root parameter).
+//
+//nolint:unparam // the standard library's helper, its signature kept
 func writeFile(t *testing.T, fname string, flag int, text string) string {
 	t.Helper()
 
