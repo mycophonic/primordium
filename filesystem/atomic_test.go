@@ -94,6 +94,7 @@ func TestWriteFileEmpty(t *testing.T) {
 }
 
 func TestWriteFilePermissions(t *testing.T) {
+	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	if runtime.GOOS == "windows" {
 		t.Skip("file permissions not fully supported on Windows")
 	}

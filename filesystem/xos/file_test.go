@@ -107,6 +107,7 @@ var sysdir = func() *sysDir { //nolint:gochecknoglobals // Test fixture.
 				"libpowermanager.so",
 			},
 		}
+	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	case "windows":
 		return &sysDir{
 			os.Getenv("SystemRoot") + "\\system32\\drivers\\etc",
@@ -667,6 +668,7 @@ func TestStatDirWithTrailingSlash(t *testing.T) {
 }
 
 func TestStatDirModeExec(t *testing.T) {
+	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	if runtime.GOOS == "wasip1" {
 		t.Skip("Chmod is not supported on " + runtime.GOOS)
 	}

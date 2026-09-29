@@ -102,6 +102,7 @@ func TestReadOnlyWriteFile(t *testing.T) {
 		t.Skip("Root can write to read-only files anyway, so skip the read-only test.")
 	}
 
+	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	if runtime.GOOS == "wasip1" {
 		t.Skip("no support for file permissions on " + runtime.GOOS)
 	}

@@ -70,18 +70,23 @@ func TestGetFormatterInvalidKind(t *testing.T) {
 // testData returns a Data struct with nested maps, slices, and scalars.
 func testData() *format.Data {
 	return &format.Data{
+		//nolint:goconst // fixture data, each test's own
 		Object: "/music/track.flac",
 		Meta: map[string]any{
+			//nolint:goconst // fixture data, each test's own
 			"loudness": "-14.0 LUFS",
+			//nolint:goconst // fixture data, each test's own
 			"duration": 245.3,
 			"format": map[string]any{
+				//nolint:goconst // fixture data, each test's own
 				"codec":       "flac",
 				"sample_rate": 44100,
 			},
 			"streams": []any{
 				map[string]any{
 					"channels": 2,
-					"bitrate":  "1411 kbps",
+					//nolint:goconst // fixture data, each test's own
+					"bitrate": "1411 kbps",
 				},
 			},
 		},
@@ -125,6 +130,7 @@ func TestJSONEmptyMeta(t *testing.T) {
 
 	f := &format.JSON{}
 
+	//nolint:goconst // fixture data, each test's own
 	if err := f.PrintAll([]*format.Data{{Object: "test.wav"}}, &buf); err != nil {
 		t.Fatalf("PrintAll: %v", err)
 	}
@@ -269,6 +275,7 @@ func TestMarkdownTopLevelScalars(t *testing.T) {
 	f := &format.Markdown{}
 
 	data := &format.Data{
+		//nolint:goconst // fixture data, each test's own
 		Object: "track.flac",
 		Meta: map[string]any{
 			"loudness": "-14.0 LUFS",
