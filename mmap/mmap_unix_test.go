@@ -27,6 +27,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/mmap"
@@ -47,12 +48,12 @@ func createTempFile(t *testing.T, size int) *os.File {
 func TestMapFile_WriteReadRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	f := createTempFile(t, 4096)
+	f := createTempFile(t, 4*bytesize.KiB)
 	defer f.Close()
 
-	data, mapping, err := mmap.MapFile(f, 4096)
+	data, mapping, err := mmap.MapFile(f, 4*bytesize.KiB)
 	assert.NilError(t, err)
-	assert.Assert(t, len(data) == 4096)
+	assert.Assert(t, len(data) == 4*bytesize.KiB)
 
 	// Write through the mapping.
 	copy(data, []byte("hello mmap"))
@@ -138,21 +139,21 @@ func TestSyncFile_EmptySlice(t *testing.T) {
 func TestMapFile_MultipleRegionsIndependent(t *testing.T) {
 	t.Parallel()
 
-	f := createTempFile(t, 8192)
+	f := createTempFile(t, 8*bytesize.KiB)
 	defer f.Close()
 
-	data1, mapping1, err := mmap.MapFile(f, 8192)
+	data1, mapping1, err := mmap.MapFile(f, 8*bytesize.KiB)
 	assert.NilError(t, err)
 
-	data2, mapping2, err := mmap.MapFile(f, 8192)
+	data2, mapping2, err := mmap.MapFile(f, 8*bytesize.KiB)
 	assert.NilError(t, err)
 
 	// Write through one mapping, read through the other.
-	copy(data1[4096:], []byte("shared"))
+	copy(data1[4*bytesize.KiB:], []byte("shared"))
 
 	assert.NilError(t, mmap.SyncFile(data1, f))
 
-	assert.Equal(t, string(data2[4096:4096+6]), "shared")
+	assert.Equal(t, string(data2[4*bytesize.KiB:4*bytesize.KiB+6]), "shared")
 
 	assert.NilError(t, mmap.UnmapFile(data1, mapping1))
 	assert.NilError(t, mmap.UnmapFile(data2, mapping2))

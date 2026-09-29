@@ -38,6 +38,7 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
@@ -1166,8 +1167,8 @@ func TestTruncate(t *testing.T) {
 	checkSize(t, f, 13)
 	xos.Truncate(f.Name(), 10)
 	checkSize(t, f, 10)
-	xos.Truncate(f.Name(), 1024)
-	checkSize(t, f, 1024)
+	xos.Truncate(f.Name(), bytesize.KiB)
+	checkSize(t, f, bytesize.KiB)
 	xos.Truncate(f.Name(), 0)
 	checkSize(t, f, 0)
 
@@ -1187,8 +1188,8 @@ func TestFTruncate(t *testing.T) {
 	checkSize(t, f, 13)
 	f.Truncate(10)
 	checkSize(t, f, 10)
-	f.Truncate(1024)
-	checkSize(t, f, 1024)
+	f.Truncate(bytesize.KiB)
+	checkSize(t, f, bytesize.KiB)
 	f.Truncate(0)
 	checkSize(t, f, 0)
 

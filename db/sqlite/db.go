@@ -23,6 +23,8 @@ import (
 	"fmt"
 	"math"
 	"strings"
+
+	"github.com/mycophonic/primordium/bytesize"
 )
 
 // Pragmas holds SQLite PRAGMA statements and connection pool settings
@@ -36,6 +38,17 @@ type Pragmas struct {
 	MaxConns   uint // 0 = database/sql default (unlimited).
 }
 
+// sizePragma sets pragma to size bytes.
+func sizePragma(pragma string, size int64) string {
+	return fmt.Sprintf("PRAGMA %s = %d", pragma, size)
+}
+
+// cacheSizePragma sets the page cache to size bytes. The value is negated on
+// purpose: a positive cache_size counts pages, a negative one counts KiB.
+func cacheSizePragma(size int64) string {
+	return fmt.Sprintf("PRAGMA cache_size = -%d", size/bytesize.KiB)
+}
+
 // PragmasReadOnly configures SQLite for pure read performance.
 //
 //nolint:gochecknoglobals
@@ -44,7 +57,7 @@ var PragmasReadOnly = Pragmas{
 	Statements: []string{
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = NORMAL",
-		"PRAGMA cache_size = -64000", // 64 MB
+		cacheSizePragma(64_000 * bytesize.KiB),
 		"PRAGMA busy_timeout = 5000",
 	},
 }
@@ -60,7 +73,7 @@ var PragmasReadWrite = Pragmas{
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = FULL",
 		"PRAGMA foreign_keys = ON",
-		"PRAGMA cache_size = -64000", // 64 MB
+		cacheSizePragma(64_000 * bytesize.KiB),
 		"PRAGMA busy_timeout = 5000",
 	},
 }
@@ -72,7 +85,7 @@ var PragmasReadWrite = Pragmas{
 // Pins the connection pool to a single connection so that all subsequent
 // operations (imports, indexing) share the same pragmas.
 //
-// Requires up to 4 GB RAM for the page cache and 8 GB address space for mmap.
+// Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
 //
 //nolint:gochecknoglobals
 var PragmasImport = Pragmas{
@@ -81,16 +94,16 @@ var PragmasImport = Pragmas{
 		// page_size and auto_vacuum must precede any pragma that writes
 		// (e.g. journal_mode). Reordering these below journal_mode will
 		// silently leave them at their defaults.
-		"PRAGMA page_size = 16384",  // 16 KB
+		sizePragma("page_size", 16*bytesize.KiB),
 		"PRAGMA auto_vacuum = NONE", // no page reclamation overhead
 		"PRAGMA foreign_keys = OFF",
 		"PRAGMA journal_mode = OFF",
 		"PRAGMA synchronous = OFF",
 		"PRAGMA locking_mode = EXCLUSIVE",
 		"PRAGMA temp_store = MEMORY",
-		"PRAGMA threads = 8",            // parallel sorting for CREATE INDEX
-		"PRAGMA cache_size = -4194304",  // 4 GB
-		"PRAGMA mmap_size = 8589934592", // 8 GB
+		"PRAGMA threads = 8", // parallel sorting for CREATE INDEX
+		cacheSizePragma(4 * bytesize.GiB),
+		sizePragma("mmap_size", 8*bytesize.GiB),
 	},
 }
 
@@ -98,7 +111,7 @@ var PragmasImport = Pragmas{
 // Opening a WAL-mode database with journal_mode=OFF implicitly checkpoints the
 // existing WAL, so no separate wal_checkpoint call is needed afterward.
 //
-// Requires up to 4 GB RAM for the page cache and 8 GB address space for mmap.
+// Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
 //
 //nolint:gochecknoglobals
 var PragmasVacuum = Pragmas{
@@ -108,8 +121,8 @@ var PragmasVacuum = Pragmas{
 		"PRAGMA synchronous = OFF",
 		"PRAGMA locking_mode = EXCLUSIVE",
 		"PRAGMA temp_store = MEMORY",
-		"PRAGMA cache_size = -4194304",  // 4 GB
-		"PRAGMA mmap_size = 8589934592", // 8 GB
+		cacheSizePragma(4 * bytesize.GiB),
+		sizePragma("mmap_size", 8*bytesize.GiB),
 	},
 }
 

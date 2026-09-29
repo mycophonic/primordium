@@ -97,7 +97,7 @@ func TestStat_Exists(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 1024)
+	data := randomBytes(t, bytesize.KiB)
 	env.putObject(t, "stat-test.bin", data)
 
 	info, err := env.client.Stat(t.Context(), "stat-test.bin")
@@ -216,7 +216,7 @@ func TestDownload_AlreadyComplete(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 2048)
+	data := randomBytes(t, 2*bytesize.KiB)
 	env.putObject(t, "already-done.bin", data)
 
 	// Get the real etag.
@@ -261,7 +261,7 @@ func TestDownload_AlreadyComplete_ETagMismatch(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 2048)
+	data := randomBytes(t, 2*bytesize.KiB)
 	env.putObject(t, "etag-changed.bin", data)
 
 	tempDir := t.TempDir()
@@ -352,7 +352,7 @@ func TestDownload_Resume_ETagMismatch_FreshDownload(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 8192)
+	data := randomBytes(t, 8*bytesize.KiB)
 	env.putObject(t, "resume-mismatch.bin", data)
 
 	tempDir := t.TempDir()
@@ -361,7 +361,7 @@ func TestDownload_Resume_ETagMismatch_FreshDownload(t *testing.T) {
 	// Write partial temp with WRONG etag — should discard and download fresh.
 	if err := filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-mismatch.bin"),
-		data[:1024],
+		data[:bytesize.KiB],
 		filesystem.FilePermissionsPrivate,
 	); err != nil {
 		t.Fatalf("write partial: %v", err)
@@ -394,7 +394,7 @@ func TestDownload_Resume_Oversized_FreshDownload(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 4096)
+	data := randomBytes(t, 4*bytesize.KiB)
 	env.putObject(t, "resume-oversized.bin", data)
 
 	info, err := env.client.Stat(t.Context(), "resume-oversized.bin")
@@ -406,7 +406,7 @@ func TestDownload_Resume_Oversized_FreshDownload(t *testing.T) {
 	dataDir := t.TempDir()
 
 	// Write MORE data than the remote object — should discard and re-download.
-	oversized := randomBytes(t, 8192)
+	oversized := randomBytes(t, 8*bytesize.KiB)
 	if err = filesystem.WriteFile(
 		filepath.Join(tempDir, "resume-oversized.bin"),
 		oversized,
@@ -534,7 +534,7 @@ func TestDownload_AlreadyComplete_SizeMismatch(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 4096)
+	data := randomBytes(t, 4*bytesize.KiB)
 	env.putObject(t, "size-changed.bin", data)
 
 	info, err := env.client.Stat(t.Context(), "size-changed.bin")
@@ -546,7 +546,7 @@ func TestDownload_AlreadyComplete_SizeMismatch(t *testing.T) {
 	dataDir := t.TempDir()
 
 	// Pre-place file with correct etag but wrong size — should re-download.
-	wrongData := data[:2048]
+	wrongData := data[:2*bytesize.KiB]
 	if err = filesystem.WriteFile(
 		filepath.Join(dataDir, "size-changed.bin"),
 		wrongData,
@@ -582,7 +582,7 @@ func TestDownload_Idempotent(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 8192)
+	data := randomBytes(t, 8*bytesize.KiB)
 	env.putObject(t, "idempotent.bin", data)
 
 	tempDir := t.TempDir()
@@ -646,7 +646,7 @@ func TestDownload_HierarchicalKey(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 2048)
+	data := randomBytes(t, 2*bytesize.KiB)
 	env.putObject(t, "audio/tracks/song.bin", data)
 
 	tempDir := t.TempDir()
@@ -705,7 +705,7 @@ func TestDownload_MoveAtomicity(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 4096)
+	data := randomBytes(t, 4*bytesize.KiB)
 	env.putObject(t, "atomic.bin", data)
 
 	tempDir := t.TempDir()
