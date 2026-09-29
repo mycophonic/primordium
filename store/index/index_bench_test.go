@@ -20,6 +20,7 @@ package index_test
 import (
 	"encoding/binary"
 	"fmt"
+	"math/rand/v2"
 	"path/filepath"
 	"testing"
 
@@ -155,11 +156,21 @@ func BenchmarkGetMiss(b *testing.B) {
 func BenchmarkDelete(b *testing.B) {
 	idx := openIndex(b)
 
-	// Pre-fill.
+	// Keys are spread, as hashed keys are. Sequential keys fill one unbroken
+	// probe run, and every untimed refill Put below would walk it to its end:
+	// the refill turns quadratic, and the benchmark runs for minutes while
+	// reporting only the deletes.
 	count := 10_000
-	for i := range count {
-		val := benchValue(uint64(i))
-		if err := idx.Put(uint64(i), val, int64(i)); err != nil {
+	rng := rand.New(rand.NewPCG(1, 2))
+
+	keys := make([]uint64, count)
+	for i := range keys {
+		keys[i] = rng.Uint64()
+	}
+
+	for i, key := range keys {
+		val := benchValue(key)
+		if err := idx.Put(key, val, int64(i)); err != nil {
 			b.Fatalf("seed %d: %v", i, err)
 		}
 	}
@@ -167,15 +178,15 @@ func BenchmarkDelete(b *testing.B) {
 	b.ResetTimer()
 
 	for i := range b.N {
-		key := uint64(i % count)
+		key := keys[i%count]
 
 		// Re-insert if already deleted so we always have something to delete.
 		if i > 0 && i%count == 0 {
 			b.StopTimer()
 
-			for j := range count {
-				val := benchValue(uint64(j))
-				if err := idx.Put(uint64(j), val, int64(j)); err != nil {
+			for j := range keys {
+				val := benchValue(keys[j])
+				if err := idx.Put(keys[j], val, int64(j)); err != nil {
 					b.Fatalf("refill %d: %v", j, err)
 				}
 			}
