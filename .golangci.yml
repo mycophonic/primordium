@@ -147,7 +147,6 @@ linters:
     - errname # provided by revive
     - forcetypeassert # provided by revive
     - funlen # provided by revive
-    - gocognit # provided by revive
     - gomodguard # we use depguard instead
     - lll # provided by golines
     - loggercheck # better dealt with by specialized libraries
@@ -169,7 +168,7 @@ linters:
           - noctx
           - perfsprint
       - path: _test.go
-        text: "add-constant|cognitive-complexity|confusing-results|nested-structs|unchecked-type-assertion|unhandled-error|unused-receiver"
+        text: "add-constant|confusing-results|nested-structs|unchecked-type-assertion|unhandled-error|unused-receiver"
         linters:
           - revive
       # xos and dirs ARE the wrappers around os.* — they must call the raw functions.
@@ -182,6 +181,9 @@ linters:
 
   settings:
     # Note: default, no changes
+    # Sonar's default for cognitive complexity, as the v0.6.1 baseline sets it.
+    gocognit:
+      min-complexity: 15
     # A string repeated three times or more; format strings are patterns, not values.
     goconst:
       min-occurrences: 3
@@ -292,7 +294,7 @@ linters:
               allowStrs: '"","%w: %q","%w: %w","%w: %s"," ","-","`","\n",":","@",".","%s:%s"'
               ignoreFuncs: 'slog[.].*'
         - name: cognitive-complexity
-          arguments: [30]
+          disabled: true # gocognit
         - name: cyclomatic
           arguments: [30]
         - name: max-public-structs
