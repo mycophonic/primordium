@@ -33,7 +33,7 @@ const testDriver = "sqlite"
 func openTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, err := sqlite.OpenWithDriver(ctx, testDriver, ":memory:", sqlite.PragmasReadWrite)
 	if err != nil {
@@ -52,7 +52,7 @@ func openTestDB(t *testing.T) *sqlite.DB {
 func TestOpen(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	db, err := sqlite.OpenWithDriver(ctx, testDriver, ":memory:", sqlite.PragmasReadOnly)
 	if err != nil {
@@ -71,7 +71,7 @@ func TestOpen(t *testing.T) {
 func TestOpenInvalidDriver(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	_, err := sqlite.OpenWithDriver(ctx, "nonexistent_driver", ":memory:", sqlite.Pragmas{})
 	if err == nil {
@@ -86,7 +86,7 @@ func TestOpenInvalidDriver(t *testing.T) {
 func TestOpenFailingPragma(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pragmas := sqlite.Pragmas{
 		Statements: []string{"NOT VALID SQL"},
@@ -105,7 +105,7 @@ func TestOpenFailingPragma(t *testing.T) {
 func TestOpenMaxConns(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	pragmas := sqlite.Pragmas{MaxConns: 3}
 
@@ -124,7 +124,7 @@ func TestOpenMaxConns(t *testing.T) {
 func TestSetGetMetadata(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	if err := db.SetMetadata(ctx, "version", "42"); err != nil {
@@ -144,7 +144,7 @@ func TestSetGetMetadata(t *testing.T) {
 func TestSetMetadataOverwrite(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	if err := db.SetMetadata(ctx, "key", "first"); err != nil {
@@ -168,7 +168,7 @@ func TestSetMetadataOverwrite(t *testing.T) {
 func TestGetMetadataMissing(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	got, err := db.GetMetadata(ctx, "nonexistent")
@@ -184,7 +184,7 @@ func TestGetMetadataMissing(t *testing.T) {
 func TestExecStatements(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	err := db.ExecStatements(ctx, `
@@ -209,7 +209,7 @@ func TestExecStatements(t *testing.T) {
 func TestExecStatementsAtomicity(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	if err := db.ExecStatements(ctx, "CREATE TABLE items (id INTEGER PRIMARY KEY)"); err != nil {
@@ -238,7 +238,7 @@ func TestExecStatementsAtomicity(t *testing.T) {
 func TestExecStatementsEmpty(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	if err := db.ExecStatements(ctx, ""); err != nil {
@@ -249,7 +249,7 @@ func TestExecStatementsEmpty(t *testing.T) {
 func TestVacuumInto(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 
 	srcPath := filepath.Join(dir, "source.db")
@@ -300,7 +300,7 @@ func TestVacuumInto(t *testing.T) {
 func TestSetMetadataNoTable(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Open without creating the metadata table.
 	db, err := sqlite.OpenWithDriver(ctx, testDriver, ":memory:", sqlite.Pragmas{})
@@ -323,7 +323,7 @@ func TestSetMetadataNoTable(t *testing.T) {
 func TestGetMetadataNoTable(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Open without creating the metadata table.
 	db, err := sqlite.OpenWithDriver(ctx, testDriver, ":memory:", sqlite.Pragmas{})
@@ -346,7 +346,7 @@ func TestGetMetadataNoTable(t *testing.T) {
 func TestExecStatementsWhitespace(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	db := openTestDB(t)
 
 	if err := db.ExecStatements(ctx, "   \t\n  "); err != nil {
@@ -359,7 +359,7 @@ func TestExecStatementsCancelledContext(t *testing.T) {
 
 	db := openTestDB(t)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
 	err := db.ExecStatements(ctx, "CREATE TABLE t (id INTEGER)")
@@ -375,7 +375,7 @@ func TestExecStatementsCancelledContext(t *testing.T) {
 func TestVacuumIntoExistingDest(t *testing.T) {
 	t.Parallel()
 
-	ctx := context.Background()
+	ctx := t.Context()
 	dir := t.TempDir()
 
 	srcPath := filepath.Join(dir, "source.db")
