@@ -75,7 +75,7 @@ func TestMapFile_PersistsAfterUnmap(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "persist-test")
 
-	f, err := xos.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644) //nolint:mnd
+	f, err := xos.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	assert.NilError(t, err)
 	assert.NilError(t, f.Truncate(64))
 

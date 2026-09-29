@@ -456,7 +456,7 @@ func (idx *Index) recordSize() int64 {
 func ensureLockFile(path string) error {
 	lockFile, err := xos.OpenFile(path, os.O_CREATE|os.O_RDWR, filesystem.FilePermissionsPrivate)
 	if err != nil {
-		//nolint:wrapcheck
+		//nolint:wrapcheck // *os.PathError already names the file
 		return err
 	}
 

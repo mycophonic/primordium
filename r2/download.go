@@ -225,7 +225,7 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset,
 				slog.InfoContext(ctx, "download progress",
 					"downloaded", offset+written,
 					"total", total,
-					"percent", (offset+written)*100/total, //nolint:mnd // Percentage.
+					"percent", (offset+written)*100/total,
 				)
 
 				nextLog += int64(progressBytes)

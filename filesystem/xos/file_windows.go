@@ -40,7 +40,7 @@ import (
 // Used instead of windows.CreateFile so we can capture GetLastError even for
 // successful calls (needed to detect ERROR_ALREADY_EXISTS from OPEN_ALWAYS).
 //
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // a lazily bound system procedure
 var procCreateFileW = windows.NewLazySystemDLL("kernel32.dll").
 	NewProc("CreateFileW")
 
@@ -51,7 +51,7 @@ const (
 	opOpen = "open"
 
 	// ownerWrite is the Unix owner-write permission bit, used to map to FILE_ATTRIBUTE_READONLY.
-	ownerWrite os.FileMode = 0o200 //nolint:mnd // Standard Unix permission bit.
+	ownerWrite os.FileMode = 0o200
 )
 
 // appendAccess combines the file access rights Go sets for O_APPEND on Windows:

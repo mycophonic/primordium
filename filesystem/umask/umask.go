@@ -21,7 +21,7 @@ import (
 	"sync"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // the umask is process-wide state
 var (
 	mutex       sync.Mutex
 	getOnce     sync.Once

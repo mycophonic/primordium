@@ -186,6 +186,11 @@ linters:
     gosec:
       excludes:
         - G104 # unchecked errors are errcheck's
+    # A suppression names its linter and its reason, and suppresses something.
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
     errorlint:
       # Disable err==target → errors.Is(err, target) auto-rewrite. The fixer
       # has known bugs where it adds the errors.Is() call but fails to add

@@ -41,7 +41,7 @@ type memoryStatusEx struct {
 	availExtendedVirtual uint64
 }
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // lazily bound system procedures
 var (
 	modkernel32              = syscall.NewLazyDLL("kernel32.dll")
 	procGetDiskFreeSpaceEx   = modkernel32.NewProc("GetDiskFreeSpaceExW")
@@ -150,7 +150,7 @@ func readCPUModel() string {
 	}
 
 	// Read the value.
-	buf := make([]uint16, dataSize/2) //nolint:mnd // bytes to uint16 elements
+	buf := make([]uint16, dataSize/2) // bytes to uint16 elements
 
 	if err := syscall.RegQueryValueEx(
 		hKey,

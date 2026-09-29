@@ -22,7 +22,7 @@ import (
 	"golang.org/x/crypto/ssh"
 )
 
-//nolint:gochecknoglobals
+//nolint:gochecknoglobals // read-only algorithm lists
 var (
 	// defaultKeyExchanges provides modern key exchanges only (Curve25519-based).
 	defaultKeyExchanges = []string{

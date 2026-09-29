@@ -48,7 +48,7 @@ var (
 	RetryStatusCodes []int
 )
 
-//nolint:gochecknoinits
+//nolint:gochecknoinits // derives the exported list from the reason table once
 func init() {
 	RetryStatusCodes = make([]int, 0, len(retryReasons))
 	for code := range retryReasons {

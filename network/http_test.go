@@ -240,7 +240,7 @@ func TestNewTransport_TimeoutConfiguration(t *testing.T) {
 	}
 }
 
-//nolint:paralleltest
+//nolint:paralleltest // mutates the process-wide default transport
 func TestSetDefaults_ConfiguresDefaultTransport(t *testing.T) {
 	// Not parallel - modifies global state (already done in TestMain)
 	transport, ok := http.DefaultTransport.(*network.RoundTripper)
