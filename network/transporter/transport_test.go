@@ -125,7 +125,7 @@ func newClient(t *testing.T, opts transporter.Options) *http.Client {
 func doGet(ctx context.Context, t *testing.T, client *http.Client, url string) (*http.Response, error) {
 	t.Helper()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	assert.NilError(t, err)
 
 	return client.Do(req)
@@ -611,7 +611,7 @@ func receivedUserAgent(t *testing.T, opts transporter.Options, sent string) stri
 	})
 	client := newClient(t, opts)
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, back.url, nil)
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, back.url, http.NoBody)
 	assert.NilError(t, err)
 
 	if sent != "" {

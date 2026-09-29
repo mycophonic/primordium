@@ -274,7 +274,7 @@ func writeFile(t *testing.T, fname string, flag int, text string) string {
 		t.Fatalf("OpenFile: %v", err)
 	}
 
-	n, err := io.WriteString(f, text)
+	n, err := f.WriteString(text)
 	if err != nil {
 		t.Fatalf("WriteString: %d, %v", n, err)
 	}
@@ -1392,7 +1392,7 @@ func TestWriteAt(t *testing.T) {
 		t.Fatalf("WriteAt 7: %d, %v", n, err)
 	}
 
-	n, err = io.WriteString(f, "!") // test that WriteAt doesn't change the file offset
+	n, err = f.WriteString("!") // test that WriteAt doesn't change the file offset
 	if err != nil || n != 1 {
 		t.Fatal(err)
 	}
@@ -1423,7 +1423,7 @@ func TestWriteAtConcurrent(t *testing.T) {
 				t.Errorf("WriteAt %d: %d, %v", i, n, err)
 			}
 
-			n, err = io.WriteString(f, "!") // test that WriteAt doesn't change the file offset
+			n, err = f.WriteString("!") // test that WriteAt doesn't change the file offset
 			if err != nil || n != 1 {
 				t.Error(err)
 			}

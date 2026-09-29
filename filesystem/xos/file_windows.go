@@ -70,7 +70,7 @@ func Open(path string) (*os.File, error) {
 // includes FILE_SHARE_DELETE so that concurrent rename or deletion by
 // other handles is permitted.
 func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
-	if len(path) == 0 {
+	if path == "" {
 		return nil, &os.PathError{Op: opOpen, Path: path, Err: windows.ERROR_FILE_NOT_FOUND}
 	}
 
