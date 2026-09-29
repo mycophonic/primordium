@@ -157,7 +157,8 @@ func New(path string, opts *Options) (*Index, error) {
 		return nil, fmt.Errorf("%w: lock: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	defer flock.Unlock(setupLock)
+	// Unlock closes the lock file whatever happens, which releases the lock.
+	defer func() { _ = flock.Unlock(setupLock) }()
 
 	// If a previous grow was interrupted, rebuild the data file from the
 	// journal before proceeding. The setup lock ensures no other process
@@ -497,7 +498,7 @@ func (idx *Index) create(capacity uint64) error {
 	if err != nil {
 		return fmt.Errorf("%w: create data file: %w", fault.ErrFilesystemFailure, err)
 	}
-	defer file.Close() // Data synced; close error is not actionable.
+	defer func() { _ = file.Close() }() // data synced; a close error is not actionable
 
 	// #nosec G115 -- capacity is bounded by available memory; overflow requires >3.6×10^17 buckets
 	size := int64(headerSize) + int64(capacity)*idx.recordSize()
@@ -550,7 +551,7 @@ func writeJournal(path string, newCap uint64, valSize int, records []Record) err
 	if err != nil {
 		return fmt.Errorf("%w: create journal: %w", fault.ErrFilesystemFailure, err)
 	}
-	defer file.Close() // Data synced; close error is not actionable.
+	defer func() { _ = file.Close() }() // data synced; a close error is not actionable
 
 	if _, err := file.Write(buf); err != nil {
 		return fmt.Errorf("%w: write journal: %w", fault.ErrWriteFailure, err)
@@ -685,7 +686,7 @@ func recoverFromJournal(dataPath, journalPath string, valSize int) error {
 	if err != nil {
 		return fmt.Errorf("%w: create recovered data file: %w", fault.ErrFilesystemFailure, err)
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }() // data synced; a close error is not actionable
 
 	if _, err := file.Write(buf); err != nil {
 		return fmt.Errorf("%w: write recovered data: %w", fault.ErrWriteFailure, err)
@@ -844,7 +845,8 @@ func (idx *Index) growLocked() error {
 		return fmt.Errorf("%w: lock for grow: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	defer flock.Unlock(setupLock)
+	// Unlock closes the lock file whatever happens, which releases the lock.
+	defer func() { _ = flock.Unlock(setupLock) }()
 
 	// Write journal before any data-file modification. If the process
 	// crashes after this point, recoverFromJournal rebuilds the data

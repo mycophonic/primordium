@@ -24,6 +24,8 @@ import (
 	"path/filepath"
 	"testing"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/store/index"
 )
 
@@ -46,7 +48,7 @@ func openIndex(b *testing.B) *index.Index {
 		b.Fatalf("open: %v", err)
 	}
 
-	b.Cleanup(func() { idx.Close() })
+	b.Cleanup(func() { assert.Check(b, idx.Close()) })
 
 	return idx
 }
@@ -265,7 +267,7 @@ func BenchmarkGrowth(b *testing.B) {
 
 				b.StopTimer()
 
-				idx.Close()
+				assert.Check(b, idx.Close())
 			}
 		})
 	}

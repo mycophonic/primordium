@@ -22,6 +22,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"gotest.tools/v3/assert"
+
 	"github.com/mycophonic/primordium/network"
 )
 
@@ -56,7 +58,7 @@ func TestRoundTripper_InjectsAuthHeader(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { assert.Check(t, resp.Body.Close()) }()
 
 	if capturedHeader != "Bearer test-token-123" {
 		t.Errorf("Authorization header = %q, want %q", capturedHeader, "Bearer test-token-123")
@@ -87,7 +89,7 @@ func TestRoundTripper_NoAuthWhenTokenEmpty(t *testing.T) {
 		t.Fatalf("request failed: %v", err)
 	}
 
-	defer resp.Body.Close()
+	defer func() { assert.Check(t, resp.Body.Close()) }()
 
 	if capturedHeader != "" {
 		t.Errorf("Authorization header = %q, want empty", capturedHeader)
@@ -117,7 +119,7 @@ func TestRoundTripper_LogsRetryableStatus(t *testing.T) {
 				t.Fatalf("request failed: %v", err)
 			}
 
-			defer resp.Body.Close()
+			defer func() { assert.Check(t, resp.Body.Close()) }()
 
 			// RoundTripper should return the response, not error
 			if resp.StatusCode != status {

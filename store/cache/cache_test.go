@@ -25,6 +25,9 @@ import (
 	"testing"
 	"time"
 
+	"gotest.tools/v3/assert"
+	"gotest.tools/v3/assert/cmp"
+
 	"github.com/mycophonic/primordium/bytesize"
 	dgst "github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
@@ -78,7 +81,7 @@ func TestCache_WriteAndRead(t *testing.T) {
 		defer wg.Done()
 
 		readData, readErr = io.ReadAll(reader)
-		reader.Close()
+		assert.Check(t, reader.Close())
 	}()
 
 	// Write content
@@ -113,14 +116,14 @@ func TestCache_WriteAndRead(t *testing.T) {
 
 	if writer != nil {
 		t.Error("expected nil writer for existing content")
-		writer.Close()
+		assert.Check(t, writer.Close())
 	}
 
 	if reader == nil {
 		t.Fatal("expected reader for existing content")
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
@@ -155,8 +158,9 @@ func TestCache_ReadNotExists(t *testing.T) {
 		t.Fatal("expected reader for non-existent content (connected to writer)")
 	}
 
-	reader.Close()
-	writer.Close()
+	assert.Check(t, reader.Close())
+	// Nothing was written: the commit refuses the empty content.
+	assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 }
 
 func TestCache_WriteDigestMismatch(t *testing.T) {
@@ -187,7 +191,7 @@ func TestCache_WriteDigestMismatch(t *testing.T) {
 		defer wg.Done()
 
 		_, readErr = io.ReadAll(reader)
-		reader.Close()
+		assert.Check(t, reader.Close())
 	}()
 
 	_, _ = writer.Write(content)
@@ -215,11 +219,12 @@ func TestCache_WriteDigestMismatch(t *testing.T) {
 	}
 
 	if reader != nil {
-		reader.Close()
+		assert.Check(t, reader.Close())
 	}
 
 	if writer != nil {
-		writer.Close()
+		// Nothing was written: the commit refuses the empty content.
+		assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 	}
 }
 
@@ -241,8 +246,11 @@ func TestCache_WriteAlreadyExists(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		io.ReadAll(reader1)
-		reader1.Close()
+		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+			t.Errorf("draining reader1: %v", drainErr)
+		}
+
+		assert.Check(t, reader1.Close())
 	}()
 
 	_, _ = writer1.Write(content)
@@ -258,14 +266,14 @@ func TestCache_WriteAlreadyExists(t *testing.T) {
 
 	if writer2 != nil {
 		t.Error("expected nil writer for existing content")
-		writer2.Close()
+		assert.Check(t, writer2.Close())
 	}
 
 	if reader2 == nil {
 		t.Fatal("expected reader for existing content")
 	}
 
-	reader2.Close()
+	assert.Check(t, reader2.Close())
 }
 
 func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
@@ -316,7 +324,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 				t.Errorf("writer's reader content length = %d, want %d", len(data), len(content))
 			}
 
-			reader.Close()
+			assert.Check(t, reader.Close())
 		}()
 
 		// Write in chunks to simulate slow transfer
@@ -360,7 +368,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 		// Should get reader for in-progress write, no writer
 		if writer != nil {
 			t.Error("expected nil writer for in-progress content")
-			writer.Close()
+			assert.Check(t, writer.Close())
 		}
 
 		if reader == nil {
@@ -369,7 +377,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 			return
 		}
 
-		defer reader.Close()
+		defer func() { assert.Check(t, reader.Close()) }()
 
 		data, err := io.ReadAll(reader)
 		if err != nil {
@@ -421,7 +429,7 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 			defer wg.Done()
 
 			_, _ = io.ReadAll(reader)
-			reader.Close()
+			assert.Check(t, reader.Close())
 		}()
 
 		time.Sleep(50 * time.Millisecond) // Give reader time to start
@@ -451,14 +459,16 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 		}
 
 		if writer != nil {
-			writer.Close()
+			// Arrived after the failed write cleared the entry: this writer is
+			// abandoned empty, and the commit refuses the empty content.
+			assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 		}
 
 		if reader == nil {
 			return
 		}
 
-		defer reader.Close()
+		defer func() { assert.Check(t, reader.Close()) }()
 
 		_, err = io.ReadAll(reader)
 		if err == nil {
@@ -489,8 +499,11 @@ func TestCache_MultipleReadersComplete(t *testing.T) {
 	go func() {
 		defer setupWg.Done()
 
-		io.ReadAll(reader1)
-		reader1.Close()
+		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+			t.Errorf("draining reader1: %v", drainErr)
+		}
+
+		assert.Check(t, reader1.Close())
 	}()
 
 	_, _ = writer1.Write(content)
@@ -518,7 +531,7 @@ func TestCache_MultipleReadersComplete(t *testing.T) {
 
 			if w != nil {
 				t.Errorf("reader %d: expected nil writer", id)
-				w.Close()
+				assert.Check(t, w.Close())
 			}
 
 			if r == nil {
@@ -527,7 +540,7 @@ func TestCache_MultipleReadersComplete(t *testing.T) {
 				return
 			}
 
-			defer r.Close()
+			defer func() { assert.Check(t, r.Close()) }()
 
 			data, err := io.ReadAll(r)
 			if err != nil {
@@ -574,7 +587,7 @@ func TestCache_LargeContent(t *testing.T) {
 		defer wg.Done()
 
 		writeData, _ = io.ReadAll(reader1)
-		reader1.Close()
+		assert.Check(t, reader1.Close())
 	}()
 
 	_, err = writer1.Write(content)
@@ -600,10 +613,10 @@ func TestCache_LargeContent(t *testing.T) {
 
 	if writer2 != nil {
 		t.Error("expected nil writer for cached content")
-		writer2.Close()
+		assert.Check(t, writer2.Close())
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	data, err := io.ReadAll(reader2)
 	if err != nil {
@@ -636,8 +649,11 @@ func TestCache_EmptyContent(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		io.ReadAll(reader1)
-		reader1.Close()
+		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+			t.Errorf("draining reader1: %v", drainErr)
+		}
+
+		assert.Check(t, reader1.Close())
 	}()
 
 	if err = writer1.Close(); err != nil {
@@ -654,10 +670,10 @@ func TestCache_EmptyContent(t *testing.T) {
 
 	if writer2 != nil {
 		t.Error("expected nil writer for cached content")
-		writer2.Close()
+		assert.Check(t, writer2.Close())
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	data, err := io.ReadAll(reader2)
 	if err != nil {
@@ -712,7 +728,7 @@ func TestCache_SequentialWriteThenRead(t *testing.T) {
 		t.Fatalf("ReadAll() error: %v", err)
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	if !bytes.Equal(data, content) {
 		t.Errorf("Read content = %q, want %q", data, content)
@@ -752,7 +768,7 @@ func TestCache_SequentialWriteThenReadMismatch(t *testing.T) {
 		t.Errorf("ReadAll() error = %v, want ErrWriteFailure", err)
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 }
 
 // TestCache_ConcurrentWritersRace tests multiple goroutines racing to write the same digest.
@@ -812,7 +828,7 @@ func TestCache_ConcurrentWritersRace(t *testing.T) {
 					defer wg.Done()
 					// Read from my connected reader
 					data, _ := io.ReadAll(reader)
-					reader.Close()
+					assert.Check(t, reader.Close())
 
 					results <- struct {
 						gotWriter bool
@@ -826,7 +842,7 @@ func TestCache_ConcurrentWritersRace(t *testing.T) {
 			} else {
 				// I'm a reader only
 				data, err := io.ReadAll(reader)
-				reader.Close()
+				assert.Check(t, reader.Close())
 
 				results <- struct {
 					gotWriter bool
@@ -917,8 +933,11 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			io.ReadAll(reader)
-			reader.Close()
+			if _, drainErr := io.ReadAll(reader); drainErr != nil {
+				t.Errorf("draining reader: %v", drainErr)
+			}
+
+			assert.Check(t, reader.Close())
 		}()
 
 		// Write in small chunks
@@ -969,8 +988,9 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 			}
 
 			if writer != nil {
-				// This can happen if we're very fast - that's ok, just close it
-				writer.Close()
+				// Arrived before the writer: this one is abandoned empty, and the
+				// commit refuses the empty content.
+				assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 			}
 
 			if reader == nil {
@@ -979,7 +999,7 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 				return
 			}
 
-			defer reader.Close()
+			defer func() { assert.Check(t, reader.Close()) }()
 
 			data, err := io.ReadAll(reader)
 			if err != nil {
@@ -1021,8 +1041,11 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		io.ReadAll(initReader)
-		initReader.Close()
+		if _, drainErr := io.ReadAll(initReader); drainErr != nil {
+			t.Errorf("draining initReader: %v", drainErr)
+		}
+
+		assert.Check(t, initReader.Close())
 	}()
 
 	_, _ = writer.Write(content)
@@ -1049,7 +1072,7 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 
 			if iterWriter != nil {
 				t.Errorf("iteration %d: unexpected writer for cached content", id)
-				iterWriter.Close()
+				assert.Check(t, iterWriter.Close())
 			}
 
 			if iterReader == nil {
@@ -1066,7 +1089,7 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 				t.Errorf("iteration %d: Read() error: %v", id, iterErr)
 			}
 
-			iterReader.Close()
+			assert.Check(t, iterReader.Close())
 		}(i)
 	}
 
@@ -1080,10 +1103,10 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 
 	if writer != nil {
 		t.Error("final: unexpected writer")
-		writer.Close()
+		assert.Check(t, writer.Close())
 	}
 
-	defer reader.Close()
+	defer func() { assert.Check(t, reader.Close()) }()
 
 	data, err := io.ReadAll(reader)
 	if err != nil {
@@ -1127,7 +1150,7 @@ func TestCache_WriterAbandonmentNoWrite(t *testing.T) {
 		t.Errorf("expected empty data, got %d bytes", len(data))
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	// Case 2: Acquire for non-empty content, close without writing (hash mismatch)
 	reader, writer, err = blobCache.Acquire(nonEmptyDigest)
@@ -1147,7 +1170,7 @@ func TestCache_WriterAbandonmentNoWrite(t *testing.T) {
 		t.Errorf("ReadAll() without write: error = %v, want ErrWriteFailure", err)
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	// Verify cache is not corrupted - should get writer again
 	reader, writer, err = blobCache.Acquire(nonEmptyDigest)
@@ -1159,10 +1182,11 @@ func TestCache_WriterAbandonmentNoWrite(t *testing.T) {
 		t.Error("expected writer after failed write")
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	if writer != nil {
-		writer.Close()
+		// Nothing was written: the commit refuses the empty content.
+		assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 	}
 }
 
@@ -1201,7 +1225,7 @@ func TestCache_PartialWriteAbandon(t *testing.T) {
 		t.Errorf("ReadAll() partial: error = %v, want ErrWriteFailure", err)
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	// Cache should allow retry
 	reader, writer, err = blobCache.Acquire(digest)
@@ -1213,10 +1237,11 @@ func TestCache_PartialWriteAbandon(t *testing.T) {
 		t.Error("expected writer after partial write failure")
 	}
 
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	if writer != nil {
-		writer.Close()
+		// Nothing was written: the commit refuses the empty content.
+		assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 	}
 }
 
@@ -1256,7 +1281,7 @@ func TestCache_MultipleConcurrentDigests(t *testing.T) {
 
 			if writer == nil {
 				t.Errorf("digest %d: expected writer", idx)
-				reader.Close()
+				assert.Check(t, reader.Close())
 
 				return
 			}
@@ -1270,7 +1295,7 @@ func TestCache_MultipleConcurrentDigests(t *testing.T) {
 
 			go func() {
 				readData, readErr = io.ReadAll(reader)
-				reader.Close()
+				assert.Check(t, reader.Close())
 				close(done)
 			}()
 
@@ -1309,11 +1334,11 @@ func TestCache_MultipleConcurrentDigests(t *testing.T) {
 
 		if writer != nil {
 			t.Errorf("verify digest %d: unexpected writer", i)
-			writer.Close()
+			assert.Check(t, writer.Close())
 		}
 
 		data, err := io.ReadAll(reader)
-		reader.Close()
+		assert.Check(t, reader.Close())
 
 		if err != nil {
 			t.Errorf("verify digest %d: ReadAll() error: %v", i, err)
@@ -1369,8 +1394,11 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			io.ReadAll(reader)
-			reader.Close()
+			if _, drainErr := io.ReadAll(reader); drainErr != nil {
+				t.Errorf("draining reader: %v", drainErr)
+			}
+
+			assert.Check(t, reader.Close())
 		}()
 
 		// Write slowly
@@ -1414,7 +1442,9 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 			}
 
 			if writer != nil {
-				writer.Close()
+				// Arrived before the writer: this one is abandoned empty, and the
+				// commit refuses the empty content.
+				assert.Check(t, cmp.ErrorIs(writer.Close(), fault.ErrHashMismatch))
 			}
 
 			if reader == nil {
@@ -1424,7 +1454,7 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 			}
 
 			data, err := io.ReadAll(reader)
-			reader.Close()
+			assert.Check(t, reader.Close())
 
 			if err != nil {
 				t.Errorf("reader %d: ReadAll() error: %v", id, err)
@@ -1464,8 +1494,11 @@ func TestCache_GC_UnderQuota(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		io.ReadAll(reader1)
-		reader1.Close()
+		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+			t.Errorf("draining reader1: %v", drainErr)
+		}
+
+		assert.Check(t, reader1.Close())
 	}()
 
 	_, _ = writer.Write(content)
@@ -1498,7 +1531,7 @@ func TestCache_GC_UnderQuota(t *testing.T) {
 		t.Fatalf("Acquire() after GC error: %v", err)
 	}
 
-	defer reader2.Close()
+	defer func() { assert.Check(t, reader2.Close()) }()
 
 	data, err := io.ReadAll(reader2)
 	if err != nil {
@@ -1538,8 +1571,11 @@ func TestCache_GC_OverQuota(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		io.ReadAll(reader1)
-		reader1.Close()
+		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
+			t.Errorf("draining reader1: %v", drainErr)
+		}
+
+		assert.Check(t, reader1.Close())
 	}()
 
 	_, _ = writer1.Write(content1)
@@ -1628,7 +1664,7 @@ func TestCache_GC_PreservesInUseEntries(t *testing.T) {
 	}
 
 	// Now close the reader
-	reader.Close()
+	assert.Check(t, reader.Close())
 
 	// Verify data was correct
 	if !bytes.Equal(readData, content) {
@@ -1665,8 +1701,11 @@ func TestCache_GC_StatsAccuracy(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			io.ReadAll(reader)
-			reader.Close()
+			if _, drainErr := io.ReadAll(reader); drainErr != nil {
+				t.Errorf("draining reader: %v", drainErr)
+			}
+
+			assert.Check(t, reader.Close())
 		}()
 
 		_, _ = writer.Write(content)
@@ -1739,13 +1778,16 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 			go func() {
 				defer wg.Done()
 
-				io.ReadAll(reader)
-				reader.Close()
+				if _, drainErr := io.ReadAll(reader); drainErr != nil {
+					t.Errorf("draining reader: %v", drainErr)
+				}
+
+				assert.Check(t, reader.Close())
 			}()
 
 			if writer != nil {
 				_, _ = writer.Write(content)
-				writer.Close()
+				assert.Check(t, writer.Close())
 			}
 		}(i)
 	}
@@ -1793,8 +1835,11 @@ func TestCache_Exists(t *testing.T) {
 	go func() {
 		defer wg.Done()
 
-		io.ReadAll(reader)
-		reader.Close()
+		if _, drainErr := io.ReadAll(reader); drainErr != nil {
+			t.Errorf("draining reader: %v", drainErr)
+		}
+
+		assert.Check(t, reader.Close())
 	}()
 
 	_, _ = writer.Write(content)

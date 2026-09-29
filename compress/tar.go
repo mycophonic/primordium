@@ -80,7 +80,7 @@ func writeTar(writer io.Writer, baseDir, relDir string) error {
 			return fmt.Errorf("open file: %w", err)
 		}
 
-		defer file.Close()
+		defer func() { _ = file.Close() }() // read-only: a close error carries nothing
 
 		if _, err := io.Copy(tarWriter, file); err != nil {
 			return fmt.Errorf("copy file: %w", err)

@@ -142,7 +142,7 @@ func Truncate(path string, size int64) error {
 		return err
 	}
 
-	defer file.Close()
+	defer func() { _ = file.Close() }() // as os.Truncate: the truncate's error is the result
 
 	return file.Truncate(size)
 }

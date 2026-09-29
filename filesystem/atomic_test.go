@@ -257,7 +257,9 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 
 	t.Cleanup(func() {
 		// Restore permissions so TempDir cleanup works.
-		os.Chmod(roDir, 0o755)
+		if chmodErr := os.Chmod(roDir, 0o755); chmodErr != nil {
+			t.Error(chmodErr)
+		}
 	})
 
 	err := filesystem.WriteFile(roTarget, []byte("should fail"), filesystem.FilePermissionsDefault)
@@ -273,7 +275,9 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 	// Since roDir is read-only, CreateTemp should have failed — so no temp
 	// file. But if it somehow succeeded (e.g. race), verify no leak.
 	// Restore permissions to read the directory.
-	os.Chmod(roDir, 0o755)
+	if chmodErr := os.Chmod(roDir, 0o755); chmodErr != nil {
+		t.Fatal(chmodErr)
+	}
 
 	entries, err := xos.ReadDir(roDir)
 	if err != nil {

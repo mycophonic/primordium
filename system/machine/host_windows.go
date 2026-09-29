@@ -129,7 +129,7 @@ func readCPUModel() string {
 		return ""
 	}
 
-	defer syscall.RegCloseKey(hKey)
+	defer func() { _ = syscall.RegCloseKey(hKey) }() // a read-only key: a close error carries nothing
 
 	valueName, err := syscall.UTF16PtrFromString("ProcessorNameString")
 	if err != nil {

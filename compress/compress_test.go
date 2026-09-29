@@ -28,6 +28,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 	"github.com/klauspost/pgzip"
 	"github.com/pierrec/lz4/v4"
+	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/compress"
 	_ "github.com/mycophonic/primordium/compress/bzip2"
@@ -49,7 +50,7 @@ func TestCompressDecompress_Roundtrip(t *testing.T) {
 		t.Fatalf("Compress: %v", err)
 	}
 
-	defer compressed.Close()
+	defer func() { assert.Check(t, compressed.Close()) }()
 
 	decompressed, err := compress.Decompress(compressed)
 	if err != nil {
@@ -77,14 +78,15 @@ func TestDecompress_LZ4(t *testing.T) {
 
 	lw := lz4.NewWriter(&buf)
 
-	lw.Write([]byte(testPayload))
-	lw.Close()
+	_, writeErr := lw.Write([]byte(testPayload))
+	assert.NilError(t, writeErr)
+	assert.Check(t, lw.Close())
 
 	rc, err := compress.Decompress(&buf)
 	if err != nil {
 		t.Fatalf("Decompress: %v", err)
 	}
-	defer rc.Close()
+	defer func() { assert.Check(t, rc.Close()) }()
 
 	got, _ := io.ReadAll(rc)
 	if string(got) != testPayload {
@@ -102,14 +104,15 @@ func TestDecompress_Zstd(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	enc.Write([]byte(testPayload))
-	enc.Close()
+	_, writeErr := enc.Write([]byte(testPayload))
+	assert.NilError(t, writeErr)
+	assert.Check(t, enc.Close())
 
 	rc, err := compress.Decompress(&buf)
 	if err != nil {
 		t.Fatalf("Decompress: %v", err)
 	}
-	defer rc.Close()
+	defer func() { assert.Check(t, rc.Close()) }()
 
 	got, _ := io.ReadAll(rc)
 	if string(got) != testPayload {
@@ -124,14 +127,15 @@ func TestDecompress_Gzip(t *testing.T) {
 
 	gw := pgzip.NewWriter(&buf)
 
-	gw.Write([]byte(testPayload))
-	gw.Close()
+	_, writeErr := gw.Write([]byte(testPayload))
+	assert.NilError(t, writeErr)
+	assert.Check(t, gw.Close())
 
 	rc, err := compress.Decompress(&buf)
 	if err != nil {
 		t.Fatalf("Decompress: %v", err)
 	}
-	defer rc.Close()
+	defer func() { assert.Check(t, rc.Close()) }()
 
 	got, _ := io.ReadAll(rc)
 	if string(got) != testPayload {
@@ -149,14 +153,15 @@ func TestDecompress_XZ(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	xw.Write([]byte(testPayload))
-	xw.Close()
+	_, writeErr := xw.Write([]byte(testPayload))
+	assert.NilError(t, writeErr)
+	assert.Check(t, xw.Close())
 
 	rc, err := compress.Decompress(&buf)
 	if err != nil {
 		t.Fatalf("Decompress: %v", err)
 	}
-	defer rc.Close()
+	defer func() { assert.Check(t, rc.Close()) }()
 
 	got, _ := io.ReadAll(rc)
 	if string(got) != testPayload {
@@ -183,7 +188,7 @@ func TestDecompress_Bzip2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Decompress: %v", err)
 	}
-	defer rc.Close()
+	defer func() { assert.Check(t, rc.Close()) }()
 
 	got, err := io.ReadAll(rc)
 	if err != nil {
@@ -224,7 +229,7 @@ func TestCompress_ReaderError(t *testing.T) {
 		t.Fatalf("Compress: %v", err)
 	}
 
-	defer compressed.Close()
+	defer func() { assert.Check(t, compressed.Close()) }()
 
 	_, err = io.ReadAll(compressed)
 	if err == nil {

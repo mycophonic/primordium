@@ -59,8 +59,7 @@ func MapFile(file *os.File, size int) ([]byte, Mapping, error) {
 		uintptr(size),
 	)
 	if err != nil {
-		//revive:disable-next-line:unhandled-error // best-effort cleanup on failure path
-		syscall.CloseHandle(handle) // #nosec G104 -- best-effort cleanup
+		_ = syscall.CloseHandle(handle) // best-effort cleanup on the failure path
 
 		return nil, Mapping{}, fmt.Errorf("%w: MapViewOfFile: %w", fault.ErrSystemFailure, err)
 	}
