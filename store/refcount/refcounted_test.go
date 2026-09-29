@@ -394,6 +394,7 @@ func TestLocker_ConcurrentAcquireAndRelease(t *testing.T) {
 	}
 }
 
+//nolint:gocognit // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestLocker_StressConcurrentKeys(t *testing.T) {
 	t.Parallel()
 

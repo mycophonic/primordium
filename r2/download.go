@@ -56,74 +56,111 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 	remoteSize := remoteInfo.Size
 	remoteETag := remoteInfo.ETag
 
-	tempFile := filepath.Join(tempDir, objectKey)
-	tempETag := filepath.Join(tempDir, objectKey+".etag")
-	dataFile := filepath.Join(dataDir, objectKey)
-	dataETag := filepath.Join(dataDir, objectKey+".etag")
+	paths := downloadPaths{
+		tempFile: filepath.Join(tempDir, objectKey),
+		tempETag: filepath.Join(tempDir, objectKey+".etag"),
+		dataFile: filepath.Join(dataDir, objectKey),
+		dataETag: filepath.Join(dataDir, objectKey+".etag"),
+	}
 
 	// Already complete in dataDir?
-	if info, statErr := xos.Stat(dataFile); statErr == nil && info.Size() == remoteSize {
-		if readETag(dataETag) == remoteETag {
+	if info, statErr := xos.Stat(paths.dataFile); statErr == nil && info.Size() == remoteSize {
+		if readETag(paths.dataETag) == remoteETag {
 			slog.InfoContext(ctx, "file already complete", "object_key", objectKey, "size", remoteSize)
 
 			return nil
 		}
 	}
 
-	if err = os.MkdirAll(filepath.Dir(tempFile), filesystem.DirPermissionsPrivate); err != nil {
+	if err = os.MkdirAll(filepath.Dir(paths.tempFile), filesystem.DirPermissionsPrivate); err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrWriteFailure, err)
 	}
 
-	if err = os.MkdirAll(filepath.Dir(dataFile), filesystem.DirPermissionsPrivate); err != nil {
+	if err = os.MkdirAll(filepath.Dir(paths.dataFile), filesystem.DirPermissionsPrivate); err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrWriteFailure, err)
 	}
 
-	// Check tempDir for a resumable partial download.
-	var offset int64
+	offset, complete := resumeOffset(ctx, paths, remoteSize, remoteETag)
+	if complete {
+		slog.InfoContext(ctx, "temp file already complete, moving to data", "object_key", objectKey)
 
-	if info, statErr := xos.Stat(tempFile); statErr == nil {
-		localETag := readETag(tempETag)
-
-		if localETag != remoteETag {
-			slog.WarnContext(ctx, "remote object changed, discarding partial download",
-				"local_etag", localETag, "remote_etag", remoteETag)
-
-			_ = os.Remove(tempFile)
-			_ = os.Remove(tempETag)
-		} else {
-			offset = info.Size()
-
-			switch {
-			case offset == remoteSize:
-				slog.InfoContext(ctx, "temp file already complete, moving to data", "object_key", objectKey)
-
-				return moveToData(tempFile, tempETag, dataFile, dataETag)
-			case offset > remoteSize:
-				slog.WarnContext(ctx, "local file larger than remote, re-downloading",
-					"local", offset, "remote", remoteSize)
-
-				_ = os.Remove(tempFile)
-				_ = os.Remove(tempETag)
-
-				offset = 0
-			default:
-			}
-		}
-	}
-
-	// Write the ETag sidecar before starting a fresh download.
-	if offset == 0 {
-		if err = filesystem.WriteFile(tempETag, []byte(remoteETag), filesystem.FilePermissionsPrivate); err != nil {
-			return fmt.Errorf("write etag: %w", err)
-		}
+		return paths.moveToData()
 	}
 
 	if offset > 0 {
 		slog.InfoContext(ctx, "resuming download", "object_key", objectKey, "offset", offset, "total", remoteSize)
 	} else {
+		// Write the ETag sidecar before starting a fresh download.
+		err = filesystem.WriteFile(paths.tempETag, []byte(remoteETag), filesystem.FilePermissionsPrivate)
+		if err != nil {
+			return fmt.Errorf("write etag: %w", err)
+		}
+
 		slog.InfoContext(ctx, "downloading", "object_key", objectKey, "size", remoteSize)
 	}
 
+	if err = cli.fetchInto(ctx, objectKey, paths.tempFile, offset, remoteSize); err != nil {
+		return err
+	}
+
+	return paths.moveToData()
+}
+
+// downloadPaths are a download's data file and ETag sidecar, in the temp
+// directory while in progress and in the data directory once complete.
+type downloadPaths struct {
+	tempFile, tempETag, dataFile, dataETag string
+}
+
+// resumeOffset decides where a download starts from what the temp
+// directory holds: at the end of a partial file of the same remote
+// version, or at zero, discarding a partial file of another version or
+// one larger than the remote object. complete reports a temp file that
+// already holds the whole object.
+func resumeOffset(
+	ctx context.Context,
+	paths downloadPaths,
+	remoteSize int64,
+	remoteETag string,
+) (offset int64, complete bool) {
+	info, statErr := xos.Stat(paths.tempFile)
+	if statErr != nil {
+		return 0, false
+	}
+
+	localETag := readETag(paths.tempETag)
+	if localETag != remoteETag {
+		slog.WarnContext(ctx, "remote object changed, discarding partial download",
+			"local_etag", localETag, "remote_etag", remoteETag)
+
+		_ = os.Remove(paths.tempFile)
+		_ = os.Remove(paths.tempETag)
+
+		return 0, false
+	}
+
+	offset = info.Size()
+
+	switch {
+	case offset == remoteSize:
+		return offset, true
+	case offset > remoteSize:
+		slog.WarnContext(ctx, "local file larger than remote, re-downloading",
+			"local", offset, "remote", remoteSize)
+
+		_ = os.Remove(paths.tempFile)
+		_ = os.Remove(paths.tempETag)
+
+		return 0, false
+	default:
+		return offset, false
+	}
+}
+
+// fetchInto reads the object from offset to its end into the temp file,
+// appending to a partial one or truncating for a fresh download, then
+// checks the file holds the whole object.
+func (cli *Client) fetchInto(ctx context.Context, objectKey, tempFile string, offset, remoteSize int64) error {
 	expectedBytes := remoteSize - offset
 
 	body, contentLength, err := cli.read(ctx, objectKey, offset)
@@ -164,15 +201,15 @@ func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir str
 		return fmt.Errorf("%w: size mismatch: got %d, expected %d", fault.ErrReadFailure, totalSize, remoteSize)
 	}
 
-	return moveToData(tempFile, tempETag, dataFile, dataETag)
+	return nil
 }
 
-func moveToData(tempFile, tempETag, dataFile, dataETag string) error {
-	if err := os.Rename(tempFile, dataFile); err != nil {
+func (paths downloadPaths) moveToData() error {
+	if err := os.Rename(paths.tempFile, paths.dataFile); err != nil {
 		return fmt.Errorf("move data file: %w", err)
 	}
 
-	if err := os.Rename(tempETag, dataETag); err != nil {
+	if err := os.Rename(paths.tempETag, paths.dataETag); err != nil {
 		return fmt.Errorf("move etag file: %w", err)
 	}
 
@@ -205,20 +242,11 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset,
 
 		bytesRead, readErr := src.Read(buf)
 		if bytesRead > 0 {
-			bytesWritten, writeErr := dst.Write(buf[:bytesRead])
-			if bytesWritten > 0 {
-				written += int64(bytesWritten)
-			}
+			bytesWritten, writeErr := writeChunk(dst, buf[:bytesRead])
+			written += int64(bytesWritten)
 
 			if writeErr != nil {
-				return written, fmt.Errorf("write: %w", writeErr)
-			}
-
-			if bytesWritten != bytesRead {
-				return written, fmt.Errorf(
-					"%w: short write: %d of %d bytes",
-					fault.ErrWriteFailure, bytesWritten, bytesRead,
-				)
+				return written, writeErr
 			}
 
 			if written >= nextLog {
@@ -232,16 +260,36 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset,
 			}
 		}
 
-		if readErr != nil {
-			if readErr == io.EOF {
-				break
-			}
+		if readErr == io.EOF {
+			break
+		}
 
+		if readErr != nil {
 			return written, fmt.Errorf("read: %w", readErr)
 		}
 	}
 
 	return written, nil
+}
+
+// writeChunk writes chunk to dst whole: a write error, or a short write the
+// writer did not report, fails it. The count is what dst accepted.
+func writeChunk(dst io.Writer, chunk []byte) (int, error) {
+	bytesWritten, err := dst.Write(chunk)
+	bytesWritten = max(bytesWritten, 0)
+
+	if err != nil {
+		return bytesWritten, fmt.Errorf("write: %w", err)
+	}
+
+	if bytesWritten != len(chunk) {
+		return bytesWritten, fmt.Errorf(
+			"%w: short write: %d of %d bytes",
+			fault.ErrWriteFailure, bytesWritten, len(chunk),
+		)
+	}
+
+	return bytesWritten, nil
 }
 
 // read returns a reader for the object starting at offset.

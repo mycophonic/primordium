@@ -85,17 +85,7 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 
 	handle, alreadyExists, err := createFileShareDelete(pathp, access, createmode, attrs)
 	if err != nil {
-		// Map ERROR_ACCESS_DENIED to EISDIR when the target is a directory
-		// opened without FILE_FLAG_BACKUP_SEMANTICS (i.e., for writing).
-		if errors.Is(err, windows.ERROR_ACCESS_DENIED) &&
-			attrs&windows.FILE_FLAG_BACKUP_SEMANTICS == 0 {
-			fa, faErr := windows.GetFileAttributes(pathp)
-			if faErr == nil && fa&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
-				err = syscall.EISDIR
-			}
-		}
-
-		return nil, &os.PathError{Op: opOpen, Path: path, Err: err}
+		return nil, &os.PathError{Op: opOpen, Path: path, Err: openError(pathp, attrs, err)}
 	}
 
 	// Truncate after open on the raw handle, matching Go's O_TRUNC handling.
@@ -104,22 +94,10 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	// ERROR_ALREADY_EXISTS from OPEN_ALWAYS.
 	if flag&os.O_TRUNC != 0 &&
 		(createmode == windows.OPEN_EXISTING || (createmode == windows.OPEN_ALWAYS && alreadyExists)) {
-		if truncErr := windows.SetEndOfFile(handle); truncErr != nil {
-			// Silently ignore truncation failure on pipes and character devices,
-			// matching Go's internal syscall.Open behavior.
-			if errors.Is(truncErr, windows.ERROR_INVALID_PARAMETER) {
-				ft, ftErr := windows.GetFileType(handle)
-				if ftErr == nil && (ft == windows.FILE_TYPE_PIPE || ft == windows.FILE_TYPE_CHAR) {
-					truncErr = nil
-				}
-			}
+		if truncErr := truncateOpened(handle); truncErr != nil {
+			_ = windows.CloseHandle(handle) // best-effort cleanup on the failure path
 
-			if truncErr != nil {
-				// #nosec G104 -- best-effort cleanup
-				windows.CloseHandle(handle) //nolint:errcheck // Best-effort cleanup.
-
-				return nil, &os.PathError{Op: opOpen, Path: path, Err: truncErr}
-			}
+			return nil, &os.PathError{Op: opOpen, Path: path, Err: truncErr}
 		}
 	}
 
@@ -129,6 +107,41 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	// is still correct for Write — only WriteAt behavior differs. This is an
 	// inherent limitation of os.NewFile; there is no public API to set appendMode.
 	return os.NewFile(uintptr(handle), path), nil
+}
+
+// openError maps a failed open's error as Go's syscall.Open does:
+// ERROR_ACCESS_DENIED on a directory opened without
+// FILE_FLAG_BACKUP_SEMANTICS (for writing) is EISDIR.
+func openError(pathp *uint16, attrs uint32, err error) error {
+	if !errors.Is(err, windows.ERROR_ACCESS_DENIED) || attrs&windows.FILE_FLAG_BACKUP_SEMANTICS != 0 {
+		return err
+	}
+
+	fa, faErr := windows.GetFileAttributes(pathp)
+	if faErr == nil && fa&windows.FILE_ATTRIBUTE_DIRECTORY != 0 {
+		return syscall.EISDIR
+	}
+
+	return err
+}
+
+// truncateOpened empties the file behind a freshly opened handle. A pipe or
+// a character device refuses truncation, and is left as is, as Go's
+// syscall.Open does.
+//
+//nolint:wrapcheck // OpenFile wraps it in *os.PathError, as os.OpenFile does
+func truncateOpened(handle windows.Handle) error {
+	err := windows.SetEndOfFile(handle)
+	if err == nil || !errors.Is(err, windows.ERROR_INVALID_PARAMETER) {
+		return err
+	}
+
+	ft, ftErr := windows.GetFileType(handle)
+	if ftErr == nil && (ft == windows.FILE_TYPE_PIPE || ft == windows.FILE_TYPE_CHAR) {
+		return nil
+	}
+
+	return err
 }
 
 // Truncate changes the size of the named file.

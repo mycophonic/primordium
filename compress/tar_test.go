@@ -32,6 +32,7 @@ import (
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
+//nolint:gocognit // one scenario in order: the complexity is the check after each step
 func TestTar(t *testing.T) {
 	t.Parallel()
 

@@ -383,14 +383,11 @@ func (cli *Client) listParts(ctx context.Context, key, uploadID string) ([]compl
 
 	for {
 		input := &s3.ListPartsInput{
-			Bucket:   aws.String(cli.bucket),
-			Key:      aws.String(key),
-			UploadId: aws.String(uploadID),
-			MaxParts: aws.Int32(listPartsMaxKeys),
-		}
-
-		if marker != nil {
-			input.PartNumberMarker = marker
+			Bucket:           aws.String(cli.bucket),
+			Key:              aws.String(key),
+			UploadId:         aws.String(uploadID),
+			MaxParts:         aws.Int32(listPartsMaxKeys),
+			PartNumberMarker: marker,
 		}
 
 		resp, err := cli.under.ListParts(ctx, input)
@@ -403,15 +400,7 @@ func (cli *Client) listParts(ctx context.Context, key, uploadID string) ([]compl
 			return nil, mapErr(err)
 		}
 
-		for idx := range resp.Parts {
-			part := resp.Parts[idx]
-			if part.PartNumber != nil && part.ETag != nil {
-				result = append(result, completedPart{
-					Number: *part.PartNumber,
-					ETag:   *part.ETag,
-				})
-			}
-		}
+		result = appendCompletedParts(result, resp.Parts)
 
 		if resp.IsTruncated == nil || !*resp.IsTruncated {
 			break
@@ -421,6 +410,22 @@ func (cli *Client) listParts(ctx context.Context, key, uploadID string) ([]compl
 	}
 
 	return result, nil
+}
+
+// appendCompletedParts appends the parts of one listing page that carry
+// both a number and an ETag.
+func appendCompletedParts(result []completedPart, parts []types.Part) []completedPart {
+	for idx := range parts {
+		part := parts[idx]
+		if part.PartNumber != nil && part.ETag != nil {
+			result = append(result, completedPart{
+				Number: *part.PartNumber,
+				ETag:   *part.ETag,
+			})
+		}
+	}
+
+	return result
 }
 
 // --- state persistence ---
