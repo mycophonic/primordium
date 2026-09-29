@@ -143,6 +143,8 @@ type digest struct {
 }
 
 // New creates a Digest from an algorithm and raw hash bytes.
+//
+//nolint:iface // a nil Digest means none, and callers pass nil for that
 func New(alg Algorithm, raw []byte) (Digest, error) {
 	size, ok := digestSizes[alg]
 	if !ok {
@@ -160,6 +162,8 @@ func New(alg Algorithm, raw []byte) (Digest, error) {
 }
 
 // FromString parses a digest string in the format "algorithm:encoded".
+//
+//nolint:iface // a nil Digest means none, and callers pass nil for that
 func FromString(dgst string) (Digest, error) {
 	before, after, ok := strings.Cut(dgst, ":")
 
