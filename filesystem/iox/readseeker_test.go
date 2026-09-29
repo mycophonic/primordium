@@ -38,13 +38,13 @@ type countingReadSeeker struct {
 func (c *countingReadSeeker) Read(p []byte) (int, error) {
 	c.readCalls.Add(1)
 
-	return c.r.Read(p)
+	return c.r.Read(p) //nolint:wrapcheck // io.EOF must reach the caller as is
 }
 
 func (c *countingReadSeeker) Seek(offset int64, whence int) (int64, error) {
 	c.seekCalls.Add(1)
 
-	return c.r.Seek(offset, whence)
+	return c.r.Seek(offset, whence) //nolint:wrapcheck // io.EOF must reach the caller as is
 }
 
 func TestReadSeeker_BuffersSmallReads(t *testing.T) {

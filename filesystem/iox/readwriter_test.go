@@ -33,11 +33,11 @@ type memReadWriter struct {
 }
 
 func (m *memReadWriter) Read(p []byte) (int, error) {
-	return m.readBuf.Read(p)
+	return m.readBuf.Read(p) //nolint:wrapcheck // io.EOF must reach the caller as is
 }
 
 func (m *memReadWriter) Write(p []byte) (int, error) {
-	return m.writeBuf.Write(p)
+	return m.writeBuf.Write(p) //nolint:wrapcheck // io.EOF must reach the caller as is
 }
 
 func TestReadWriter_ReadAndWrite(t *testing.T) {

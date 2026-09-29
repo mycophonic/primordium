@@ -164,7 +164,6 @@ linters:
           - varnamelen
           - dupl
           - dupword
-          - wrapcheck
           - err113
           - modernize
           - dogsled
