@@ -163,7 +163,6 @@ linters:
           - dupl
           - dupword
           - dogsled
-          - noctx
           - perfsprint
       - path: _test.go
         text: "add-constant|confusing-results|nested-structs|unchecked-type-assertion|unhandled-error|unused-receiver"
