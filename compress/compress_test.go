@@ -178,7 +178,7 @@ func TestDecompress_Bzip2(t *testing.T) {
 		t.Skip("bzip2 binary not available")
 	}
 
-	cmd := exec.Command("bzip2")
+	cmd := exec.CommandContext(t.Context(), "bzip2")
 	cmd.Stdin = bytes.NewReader([]byte(testPayload))
 
 	bz2Data, err := cmd.Output()

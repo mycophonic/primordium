@@ -34,7 +34,7 @@ import (
 func startSleepProcess(t *testing.T) (*os.Process, <-chan struct{}) {
 	t.Helper()
 
-	cmd := exec.Command("sleep", "300")
+	cmd := exec.CommandContext(t.Context(), "sleep", "300")
 	assert.NilError(t, cmd.Start())
 
 	exited := make(chan struct{})
@@ -75,7 +75,7 @@ func TestStopProcess_GracefulShutdown(t *testing.T) {
 func TestStopProcess_AlreadyExited(t *testing.T) {
 	t.Parallel()
 
-	cmd := exec.Command("true")
+	cmd := exec.CommandContext(t.Context(), "true")
 	assert.NilError(t, cmd.Start())
 
 	exited := make(chan struct{})
@@ -97,7 +97,7 @@ func TestStopProcess_EscalatesToKill(t *testing.T) {
 	t.Parallel()
 
 	// Use a shell that traps SIGTERM and ignores it, forcing escalation to SIGKILL.
-	cmd := exec.Command("sh", "-c", "trap '' TERM; sleep 300")
+	cmd := exec.CommandContext(t.Context(), "sh", "-c", "trap '' TERM; sleep 300")
 	assert.NilError(t, cmd.Start())
 
 	exited := make(chan struct{})
