@@ -161,7 +161,6 @@ linters:
       - path: _test.go
         linters:
           - varnamelen
-          - dupl
           - dupword
           - err113
           - dogsled
