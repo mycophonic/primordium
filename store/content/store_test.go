@@ -35,6 +35,15 @@ import (
 	"github.com/mycophonic/primordium/store/content"
 )
 
+var (
+	errNetworkTimeout       = errors.New("network timeout")
+	errConnectionRefused    = errors.New("connection refused")
+	errTemporaryFailure     = errors.New("temporary failure")
+	errConnectionReset      = errors.New("connection reset")
+	errBrokenPipe           = errors.New("broken pipe")
+	errNotStoredUnderBLAKE3 = errors.New("fetch called: blob was not stored under its BLAKE3 digest")
+)
+
 // computeDigest returns a digest for the given content (SHA256).
 func computeDigest(data []byte) digest.Digest {
 	hash := sha256.Sum256(data)
@@ -300,9 +309,8 @@ func TestStore_FetchFailsWithoutDigest(t *testing.T) {
 	t.Parallel()
 
 	cs := newStore(t)
-	fetchErr := errors.New("network timeout")
 
-	_, _, err := cs.Acquire("https://example.com/down", nil, failingFetch(fetchErr))
+	_, _, err := cs.Acquire("https://example.com/down", nil, failingFetch(errNetworkTimeout))
 	if err == nil {
 		t.Fatal("Acquire() should fail when fetch fails")
 	}
@@ -317,9 +325,8 @@ func TestStore_FetchFailsWithDigest(t *testing.T) {
 
 	cs := newStore(t)
 	dgst := computeDigest([]byte("whatever"))
-	fetchErr := errors.New("connection refused")
 
-	_, _, err := cs.Acquire("https://example.com/down", dgst, failingFetch(fetchErr))
+	_, _, err := cs.Acquire("https://example.com/down", dgst, failingFetch(errConnectionRefused))
 	if err == nil {
 		t.Fatal("Acquire() should fail when fetch fails")
 	}
@@ -334,10 +341,9 @@ func TestStore_FetchFailureDoesNotPoison(t *testing.T) {
 
 	cs := newStore(t)
 	data := []byte("eventually available content")
-	fetchErr := errors.New("temporary failure")
 
 	// First attempt — fetch fails.
-	_, _, err := cs.Acquire("https://example.com/flaky", nil, failingFetch(fetchErr))
+	_, _, err := cs.Acquire("https://example.com/flaky", nil, failingFetch(errTemporaryFailure))
 	if err == nil {
 		t.Fatal("first Acquire() should fail")
 	}
@@ -580,7 +586,7 @@ func TestStore_TruncatedFetchWithoutDigest(t *testing.T) {
 		return io.NopCloser(&truncatedReader{
 			data:     []byte("partial data that will be cut short after a few bytes"),
 			failAt:   10,
-			failWith: errors.New("connection reset"),
+			failWith: errConnectionReset,
 		}), nil
 	})
 
@@ -605,7 +611,7 @@ func TestStore_TruncatedFetchWithDigest(t *testing.T) {
 		return io.NopCloser(&truncatedReader{
 			data:     fullContent,
 			failAt:   10,
-			failWith: errors.New("connection reset"),
+			failWith: errConnectionReset,
 		}), nil
 	})
 
@@ -636,7 +642,7 @@ func TestStore_TruncatedFetchDoesNotPoison(t *testing.T) {
 		return io.NopCloser(&truncatedReader{
 			data:     data,
 			failAt:   5,
-			failWith: errors.New("broken pipe"),
+			failWith: errBrokenPipe,
 		}), nil
 	})
 
@@ -1312,9 +1318,7 @@ func TestStore_DigestlessStagingUsesBLAKE3(t *testing.T) {
 		t.Fatalf("digest.New() error: %v", err)
 	}
 
-	sentinel := errors.New("fetch called: blob was not stored under its BLAKE3 digest")
-
-	second, _, err := cs.Acquire("https://example.com/other.bin", want, failingFetch(sentinel))
+	second, _, err := cs.Acquire("https://example.com/other.bin", want, failingFetch(errNotStoredUnderBLAKE3))
 	if err != nil {
 		t.Fatalf("re-acquire by BLAKE3 digest: %v", err)
 	}

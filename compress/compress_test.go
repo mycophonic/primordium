@@ -38,6 +38,8 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
+var errBoom = errors.New("boom")
+
 const testPayload = "the quick brown fox jumps over the lazy dog"
 
 func TestCompressDecompress_Roundtrip(t *testing.T) {
@@ -221,7 +223,6 @@ func TestDecompress_EmptyInput(t *testing.T) {
 func TestCompress_ReaderError(t *testing.T) {
 	t.Parallel()
 
-	errBoom := errors.New("boom")
 	failing := &failingReader{err: errBoom}
 
 	compressed, err := compress.Compress(failing)
