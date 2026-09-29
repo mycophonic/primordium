@@ -13,7 +13,7 @@ issues:
 linters:
   default: all
   enable:
-    # These are the default set of golangci (errcheck is disabled, see below)
+    # These are the default set of golangci
     - govet # Vet examines Go source code and reports suspicious constructs. It is roughly the same as 'go vet' and uses its passes.
     - ineffassign # Detects when assignments to existing variables are not used.
     - staticcheck # It's the set of rules from staticcheck.
@@ -142,7 +142,6 @@ linters:
 
     # Duplicates
     - cyclop # provided by revive
-    - errcheck # provided by revive
     - errname # provided by revive
     - forcetypeassert # provided by revive
     - gomodguard # we use depguard instead
@@ -159,7 +158,7 @@ linters:
           - dupword
           - dogsled
       - path: _test.go
-        text: "confusing-results|nested-structs|unchecked-type-assertion|unhandled-error|unused-receiver"
+        text: "confusing-results|nested-structs|unchecked-type-assertion|unused-receiver"
         linters:
           - revive
       # xos and dirs ARE the wrappers around os.* — they must call the raw functions.
@@ -180,6 +179,17 @@ linters:
     reassign:
       patterns:
         - ".*"
+    # errcheck owns unchecked errors, as in the v0.6.1 baseline: revive's
+    # unhandled-error cannot see a `defer f.Close()` or a `go f()`. `_ = f()`
+    # is a reviewed discard, and the Fprint family writes where a failure has
+    # no better handler than the exit.
+    errcheck:
+      check-type-assertions: false
+      check-blank: false
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
     # 80 lines for the long-but-flat function, as the v0.6.1 baseline sets it.
     funlen:
       lines: 80
@@ -368,13 +378,7 @@ linters:
           # Formatter `golines` takes care of this.
           disabled: true
         - name: unhandled-error
-          arguments:
-            - "fmt.Print"
-            - "fmt.Println"
-            - "fmt.Printf"
-            - "fmt.Fprint"
-            - "fmt.Fprintln"
-            - "fmt.Fprintf"
+          disabled: true # errcheck, which also sees deferred and go calls
 
     depguard:
       rules:
