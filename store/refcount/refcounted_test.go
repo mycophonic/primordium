@@ -31,6 +31,8 @@ import (
 	"github.com/mycophonic/primordium/store/refcount"
 )
 
+var errFactory = errors.New("factory failed")
+
 func TestLocker_InvalidKey(t *testing.T) {
 	t.Parallel()
 
@@ -223,17 +225,15 @@ func TestLocker_FactoryError(t *testing.T) {
 	dir := t.TempDir()
 	locker := refcount.New(dir)
 
-	factoryErr := errors.New("factory failed")
-
 	_, _, err := locker.Acquire("fail-key", func(_ string) (string, func(), error) {
-		return "", nil, factoryErr
+		return "", nil, errFactory
 	})
 	if err == nil {
 		t.Error("expected error from factory")
 	}
 
-	if !errors.Is(err, factoryErr) {
-		t.Errorf("error = %v, want %v", err, factoryErr)
+	if !errors.Is(err, errFactory) {
+		t.Errorf("error = %v, want %v", err, errFactory)
 	}
 }
 

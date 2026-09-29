@@ -162,7 +162,6 @@ linters:
           - varnamelen
           - dupl
           - dupword
-          - err113
           - dogsled
           - noctx
           - perfsprint

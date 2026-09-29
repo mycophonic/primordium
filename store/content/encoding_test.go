@@ -28,6 +28,8 @@ import (
 	"github.com/mycophonic/primordium/store/index"
 )
 
+var errDigestNotResolved = errors.New("persisted digest was not resolved")
+
 // TestIndexRecordAlgorithmIDs pins the on-disk algorithm IDs. Index records
 // persist a digest as [algID:1][raw digest], so changing or reassigning an ID
 // silently corrupts every existing index. Do not update the expected values
@@ -74,7 +76,7 @@ func TestIndexRecordAlgorithmIDs(t *testing.T) {
 
 			// Reading the record back must resolve the persisted digest: a hit
 			// without fetching proves the ID decodes to the same algorithm.
-			acquire(t, root, nil, failingFetch(errors.New("persisted digest was not resolved")))
+			acquire(t, root, nil, failingFetch(errDigestNotResolved))
 		})
 	}
 }
