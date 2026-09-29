@@ -76,6 +76,7 @@ func CreateTemp(dir, pattern string) (*os.File, error) {
 
 		f, err := OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 		if os.IsExist(err) {
+			//nolint:gocritic // initClause: os.CreateTemp's retry, as the standard library writes it
 			if try++; try < 10000 {
 				continue
 			}
@@ -138,6 +139,7 @@ func MkdirTemp(dir, pattern string) (string, error) {
 		}
 
 		if os.IsExist(err) {
+			//nolint:gocritic // initClause: os.CreateTemp's retry, as the standard library writes it
 			if try++; try < 10000 {
 				continue
 			}
@@ -156,7 +158,7 @@ func MkdirTemp(dir, pattern string) (string, error) {
 }
 
 func joinPath(dir, name string) string {
-	if len(dir) > 0 && os.IsPathSeparator(dir[len(dir)-1]) {
+	if dir != "" && os.IsPathSeparator(dir[len(dir)-1]) {
 		return dir + name
 	}
 

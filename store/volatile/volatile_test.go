@@ -17,6 +17,7 @@
 package volatile_test
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"sync"
@@ -73,7 +74,7 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 			data, err := xos.ReadFile(path)
 			if err != nil {
 				t.Errorf("goroutine %d: failed to read file: %v", id, err)
-			} else if string(data) != string(content) {
+			} else if !bytes.Equal(data, content) {
 				t.Errorf("goroutine %d: content mismatch: got %q, want %q", id, data, content)
 			}
 
@@ -285,7 +286,7 @@ func TestVolatile_RapidAcquireRelease(t *testing.T) {
 				data, err := xos.ReadFile(path)
 				if err != nil {
 					t.Errorf("goroutine %d cycle %d: read failed: %v", id, cycle, err)
-				} else if string(data) != string(content) {
+				} else if !bytes.Equal(data, content) {
 					t.Errorf("goroutine %d cycle %d: content mismatch", id, cycle)
 				}
 
@@ -351,7 +352,7 @@ func TestVolatile_AcquireAfterFullRelease(t *testing.T) {
 		t.Fatalf("failed to read file: %v", err)
 	}
 
-	if string(data) != string(content) {
+	if !bytes.Equal(data, content) {
 		t.Errorf("content mismatch: got %q, want %q", data, content)
 	}
 }
@@ -498,7 +499,7 @@ func TestVolatile_DifferentAlgorithms(t *testing.T) {
 			t.Fatalf("read with %s failed: %v", alg, err)
 		}
 
-		if string(data) != string(content) {
+		if !bytes.Equal(data, content) {
 			t.Errorf("content mismatch with %s", alg)
 		}
 

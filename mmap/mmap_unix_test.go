@@ -56,7 +56,7 @@ func TestMapFile_WriteReadRoundTrip(t *testing.T) {
 	assert.Assert(t, len(data) == 4*bytesize.KiB)
 
 	// Write through the mapping.
-	copy(data, []byte("hello mmap"))
+	copy(data, "hello mmap")
 
 	// Sync to disk.
 	assert.NilError(t, mmap.SyncFile(data, f))
@@ -82,7 +82,7 @@ func TestMapFile_PersistsAfterUnmap(t *testing.T) {
 	data, mapping, err := mmap.MapFile(f, 64)
 	assert.NilError(t, err)
 
-	copy(data, []byte("persistent"))
+	copy(data, "persistent")
 
 	assert.NilError(t, mmap.SyncFile(data, f))
 	assert.NilError(t, mmap.UnmapFile(data, mapping))
@@ -149,7 +149,7 @@ func TestMapFile_MultipleRegionsIndependent(t *testing.T) {
 	assert.NilError(t, err)
 
 	// Write through one mapping, read through the other.
-	copy(data1[4*bytesize.KiB:], []byte("shared"))
+	copy(data1[4*bytesize.KiB:], "shared")
 
 	assert.NilError(t, mmap.SyncFile(data1, f))
 
