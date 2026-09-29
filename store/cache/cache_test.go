@@ -922,7 +922,7 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 		}()
 
 		// Write in small chunks
-		chunkSize := 4096
+		chunkSize := 4 * bytesize.KiB
 
 		for i := 0; i < len(content); i += chunkSize {
 			end := min(i+chunkSize, len(content))

@@ -75,7 +75,7 @@ func TestUpload_SinglePart(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 1024)
+	data := randomBytes(t, bytesize.KiB)
 	source := bytes.NewReader(data)
 
 	stateDir := t.TempDir()
@@ -267,7 +267,7 @@ func TestUpload_SmallPartSize_NormalisedToDefault(t *testing.T) {
 
 	// PartSize below minimum — should be normalised to default (100 MiB).
 	// A 1 KiB file with 100 MiB part size = 1 part.
-	data := randomBytes(t, 1024)
+	data := randomBytes(t, bytesize.KiB)
 	source := bytes.NewReader(data)
 
 	stateDir := t.TempDir()
@@ -345,7 +345,7 @@ func TestUpload_OverwritesExistingObject(t *testing.T) {
 	env := setup(t)
 
 	// Upload first version.
-	dataV1 := randomBytes(t, 1024)
+	dataV1 := randomBytes(t, bytesize.KiB)
 	sourceV1 := bytes.NewReader(dataV1)
 
 	stateDir := t.TempDir()
@@ -362,7 +362,7 @@ func TestUpload_OverwritesExistingObject(t *testing.T) {
 	}
 
 	// Upload second version (different content, same key).
-	dataV2 := randomBytes(t, 2048)
+	dataV2 := randomBytes(t, 2*bytesize.KiB)
 	sourceV2 := bytes.NewReader(dataV2)
 
 	err = env.client.Upload(
@@ -399,7 +399,7 @@ func TestUpload_RejectsPathTraversal(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 1024)
+	data := randomBytes(t, bytesize.KiB)
 
 	tests := []struct {
 		name string

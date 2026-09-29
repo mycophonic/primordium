@@ -24,6 +24,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/filesystem/iox"
 )
 
@@ -79,7 +80,7 @@ func TestReadSeeker_ReadsAllData(t *testing.T) {
 func TestReadSeeker_LargeReadBypassesBuffer(t *testing.T) {
 	t.Parallel()
 
-	data := bytes.Repeat([]byte("x"), 8192)
+	data := bytes.Repeat([]byte("x"), 8*bytesize.KiB)
 	crs := &countingReadSeeker{r: bytes.NewReader(data)}
 	rs := iox.NewReadSeekerWithSize(crs, 64)
 

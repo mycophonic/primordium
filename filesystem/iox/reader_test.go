@@ -25,6 +25,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/filesystem/iox"
 )
 
@@ -43,7 +44,7 @@ func (cr *countingReader) Read(p []byte) (int, error) {
 func TestReader_BuffersSmallReads(t *testing.T) {
 	t.Parallel()
 
-	data := strings.Repeat("x", 8192)
+	data := strings.Repeat("x", 8*bytesize.KiB)
 	cr := &countingReader{r: strings.NewReader(data)}
 	reader := iox.NewReader(cr)
 

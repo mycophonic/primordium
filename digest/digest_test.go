@@ -423,7 +423,7 @@ func TestBLAKE3256_ChunkedWriteEquivalence(t *testing.T) {
 	oneShot.Write(input)
 	want := hex.EncodeToString(oneShot.Sum(nil))
 
-	for _, chunk := range []int{1, 63, 1024, 1025, 32 * bytesize.KiB, bytesize.MiB} {
+	for _, chunk := range []int{1, 63, bytesize.KiB, bytesize.KiB + 1, 32 * bytesize.KiB, bytesize.MiB} {
 		t.Run(fmt.Sprintf("chunk%d", chunk), func(t *testing.T) {
 			t.Parallel()
 

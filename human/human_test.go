@@ -28,9 +28,9 @@ import (
 )
 
 func ExampleDecimalSize() {
-	fmt.Println(human.DecimalSize(1000))
-	fmt.Println(human.DecimalSize(1024))
-	fmt.Println(human.DecimalSize(1048576))
+	fmt.Println(human.DecimalSize(bytesize.KB))
+	fmt.Println(human.DecimalSize(bytesize.KiB))
+	fmt.Println(human.DecimalSize(bytesize.MiB))
 	fmt.Println(human.DecimalSize(3.42 * bytesize.GB))
 	// Output:
 	// 1kB
@@ -40,7 +40,7 @@ func ExampleDecimalSize() {
 }
 
 func ExampleBinarySize() {
-	fmt.Println(human.BinarySize(1024))
+	fmt.Println(human.BinarySize(bytesize.KiB))
 	fmt.Println(human.BinarySize(2 * bytesize.MiB))
 	fmt.Println(human.BinarySize(3.42 * bytesize.GiB))
 	// Output:
@@ -69,10 +69,10 @@ func TestDecimalSize(t *testing.T) {
 		want string
 	}{
 		{0, "0B"},
-		{1000, "1kB"},
-		{1024, "1.024kB"},
-		{1000000, "1MB"},
-		{1048576, "1.049MB"},
+		{bytesize.KB, "1kB"},
+		{bytesize.KiB, "1.024kB"},
+		{bytesize.MB, "1MB"},
+		{bytesize.MiB, "1.049MB"},
 		{2 * bytesize.MB, "2MB"},
 		{3.42 * bytesize.GB, "3.42GB"},
 		{5.372 * bytesize.TB, "5.372TB"},
@@ -86,19 +86,19 @@ func TestDecimalSize(t *testing.T) {
 func TestDecimalSizeWithPrecision(t *testing.T) {
 	t.Parallel()
 
-	assert.Equal(t, human.DecimalSizeWithPrecision(1048576, 3), "1.05MB")
-	assert.Equal(t, human.DecimalSizeWithPrecision(1048576, 6), "1.04858MB")
-	assert.Equal(t, human.DecimalSizeWithPrecision(1000, 1), "1kB")
+	assert.Equal(t, human.DecimalSizeWithPrecision(bytesize.MiB, 3), "1.05MB")
+	assert.Equal(t, human.DecimalSizeWithPrecision(bytesize.MiB, 6), "1.04858MB")
+	assert.Equal(t, human.DecimalSizeWithPrecision(bytesize.KB, 1), "1kB")
 }
 
 func TestBinarySizeWithPrecision(t *testing.T) {
 	t.Parallel()
 
-	// 1000000 bytes are 976.5625KiB.
-	assert.Equal(t, human.BinarySizeWithPrecision(1000000, 3), "977KiB")
-	assert.Equal(t, human.BinarySizeWithPrecision(1000000, 4), "976.6KiB")
-	assert.Equal(t, human.BinarySizeWithPrecision(1536, 2), "1.5KiB")
-	assert.Equal(t, human.BinarySizeWithPrecision(1024, 1), "1KiB")
+	// 1 MB is 976.5625KiB.
+	assert.Equal(t, human.BinarySizeWithPrecision(bytesize.MB, 3), "977KiB")
+	assert.Equal(t, human.BinarySizeWithPrecision(bytesize.MB, 4), "976.6KiB")
+	assert.Equal(t, human.BinarySizeWithPrecision(1.5*bytesize.KiB, 2), "1.5KiB")
+	assert.Equal(t, human.BinarySizeWithPrecision(bytesize.KiB, 1), "1KiB")
 }
 
 func TestBinarySize(t *testing.T) {
@@ -109,8 +109,8 @@ func TestBinarySize(t *testing.T) {
 		want string
 	}{
 		{0, "0B"},
-		{1024, "1KiB"},
-		{1024 * 1024, "1MiB"},
+		{bytesize.KiB, "1KiB"},
+		{bytesize.MiB, "1MiB"},
 		{2 * bytesize.MiB, "2MiB"},
 		{3.42 * bytesize.GiB, "3.42GiB"},
 		{5.372 * bytesize.TiB, "5.372TiB"},
@@ -225,7 +225,7 @@ func TestParseSizeReadsFormattedSizes(t *testing.T) {
 	t.Parallel()
 
 	for _, size := range []float64{
-		0, 1, 999, 1000, 1024, 1536, 123456, 2 * bytesize.MiB, 3.42 * bytesize.GB, 5.372 * bytesize.TiB, 7 * bytesize.EB,
+		0, 1, 999, bytesize.KB, bytesize.KiB, 1.5 * bytesize.KiB, 123456, 2 * bytesize.MiB, 3.42 * bytesize.GB, 5.372 * bytesize.TiB, 7 * bytesize.EB,
 	} {
 		for _, formatted := range []string{human.DecimalSize(size), human.BinarySize(size)} {
 			got, err := human.ParseSize(formatted)
