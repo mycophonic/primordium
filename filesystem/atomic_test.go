@@ -224,7 +224,7 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 	// Create a subdirectory, write a file, then make the subdir read-only
 	// so rename into it will fail.
 	sub := filepath.Join(dir, "readonly")
-	if err := os.Mkdir(sub, 0o755); err != nil {
+	if err := os.Mkdir(sub, filesystem.DirPermissionsPrivate); err != nil {
 		t.Fatal(err)
 	}
 
@@ -244,20 +244,22 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 	// Use a different approach: write to a path where the parent is writable
 	// (so CreateTemp succeeds) but the final target is on a read-only path.
 	roDir := filepath.Join(dir, "ro-target")
-	if err := os.Mkdir(roDir, 0o755); err != nil {
+	if err := os.Mkdir(roDir, filesystem.DirPermissionsPrivate); err != nil {
 		t.Fatal(err)
 	}
 
 	roTarget := filepath.Join(roDir, "file.txt")
 
 	// Make the target directory read-only so rename fails.
+	// #nosec G302 -- the read-only directory under test keeps its read and search bits
 	if err := os.Chmod(roDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Cleanup(func() {
 		// Restore permissions so TempDir cleanup works.
-		if chmodErr := os.Chmod(roDir, 0o755); chmodErr != nil {
+		// #nosec G302 -- a directory needs its search bit; G302 judges every chmod as a file's
+		if chmodErr := os.Chmod(roDir, filesystem.DirPermissionsPrivate); chmodErr != nil {
 			t.Error(chmodErr)
 		}
 	})
@@ -275,7 +277,8 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 	// Since roDir is read-only, CreateTemp should have failed — so no temp
 	// file. But if it somehow succeeded (e.g. race), verify no leak.
 	// Restore permissions to read the directory.
-	if chmodErr := os.Chmod(roDir, 0o755); chmodErr != nil {
+	// #nosec G302 -- a directory needs its search bit; G302 judges every chmod as a file's
+	if chmodErr := os.Chmod(roDir, filesystem.DirPermissionsPrivate); chmodErr != nil {
 		t.Fatal(chmodErr)
 	}
 

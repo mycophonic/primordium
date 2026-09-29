@@ -40,7 +40,7 @@ func TestTar(t *testing.T) {
 	relDir := "mydir"
 	srcDir := filepath.Join(baseDir, relDir)
 
-	if err := os.MkdirAll(filepath.Join(srcDir, "sub"), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(srcDir, "sub"), filesystem.DirPermissionsPrivate); err != nil {
 		t.Fatal(err)
 	}
 
@@ -190,7 +190,7 @@ func TestTar_Roundtrip(t *testing.T) {
 	relDir := "data"
 	srcDir := filepath.Join(baseDir, relDir)
 
-	if err := os.MkdirAll(srcDir, 0o755); err != nil {
+	if err := os.MkdirAll(srcDir, filesystem.DirPermissionsPrivate); err != nil {
 		t.Fatal(err)
 	}
 
@@ -251,7 +251,7 @@ func TestTar_EmptyDirectory(t *testing.T) {
 	baseDir := t.TempDir()
 	relDir := "empty"
 
-	if err := os.MkdirAll(filepath.Join(baseDir, relDir), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(baseDir, relDir), filesystem.DirPermissionsPrivate); err != nil {
 		t.Fatal(err)
 	}
 

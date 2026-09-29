@@ -1761,7 +1761,7 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 
 			content := make([]byte, 1000+idx*100)
 			for j := range content {
-				content[j] = byte(idx)
+				content[j] = byte(idx) // #nosec G115 -- a small goroutine index as fill
 			}
 
 			digest := computeDigest(content)

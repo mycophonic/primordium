@@ -720,8 +720,9 @@ func TestStore_ConcurrentDifferentIdentifiers(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			data := []byte("content for identifier " + string(rune('A'+id)))
-			identifier := "id-" + string(rune('A'+id))
+			letter := string(rune('A' + id)) // #nosec G115 -- a small goroutine index
+			data := []byte("content for identifier " + letter)
+			identifier := "id-" + letter
 
 			reader, _, err := cs.Acquire(identifier, nil, fetchFunc(data))
 			if err != nil {
