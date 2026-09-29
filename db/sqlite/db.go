@@ -57,7 +57,7 @@ var PragmasReadOnly = Pragmas{
 	Statements: []string{
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = NORMAL",
-		cacheSizePragma(64_000 * bytesize.KiB),
+		cacheSizePragma(64 * bytesize.MiB),
 		"PRAGMA busy_timeout = 5000",
 	},
 }
@@ -73,7 +73,7 @@ var PragmasReadWrite = Pragmas{
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = FULL",
 		"PRAGMA foreign_keys = ON",
-		cacheSizePragma(64_000 * bytesize.KiB),
+		cacheSizePragma(64 * bytesize.MiB),
 		"PRAGMA busy_timeout = 5000",
 	},
 }
