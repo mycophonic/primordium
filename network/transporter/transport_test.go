@@ -33,6 +33,7 @@ import (
 
 	"gotest.tools/v3/assert"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/network/transporter"
 )
@@ -876,7 +877,7 @@ func TestBackoffCappedByMaxBackoff(t *testing.T) {
 func TestResponseBodyPassthrough(t *testing.T) {
 	t.Parallel()
 
-	data := bytes.Repeat([]byte("x"), 64*1024)
+	data := bytes.Repeat([]byte("x"), 64*bytesize.KiB)
 
 	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
 		w.Header().Set("Content-Length", strconv.Itoa(len(data)))

@@ -30,6 +30,7 @@ import (
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -154,7 +155,7 @@ func TestDownload_Success(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 64*1024)
+	data := randomBytes(t, 64*bytesize.KiB)
 	env.putObject(t, "dl-success.bin", data)
 
 	tempDir := t.TempDir()
@@ -303,7 +304,7 @@ func TestDownload_Resume_PartialTemp(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 32*1024)
+	data := randomBytes(t, 32*bytesize.KiB)
 	env.putObject(t, "resume-partial.bin", data)
 
 	info, err := env.client.Stat(context.Background(), "resume-partial.bin")
@@ -441,7 +442,7 @@ func TestDownload_Resume_FullyDownloadedTemp(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 16*1024)
+	data := randomBytes(t, 16*bytesize.KiB)
 	env.putObject(t, "resume-full.bin", data)
 
 	info, err := env.client.Stat(context.Background(), "resume-full.bin")
@@ -507,7 +508,7 @@ func TestDownload_ContextCanceled(t *testing.T) {
 	env := setup(t)
 
 	// Use a large-enough object so the download doesn't finish before cancellation.
-	data := randomBytes(t, 256*1024)
+	data := randomBytes(t, 256*bytesize.KiB)
 	env.putObject(t, "cancel-me.bin", data)
 
 	ctx, cancel := context.WithCancel(context.Background())

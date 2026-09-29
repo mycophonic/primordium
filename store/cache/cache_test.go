@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mycophonic/primordium/bytesize"
 	dgst "github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -274,7 +275,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 	blobCache := cache.New(root, 0)
 
 	// Large content to ensure write takes time
-	content := make([]byte, 1024*1024) // 1MB
+	content := make([]byte, bytesize.MiB)
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
@@ -319,7 +320,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 		}()
 
 		// Write in chunks to simulate slow transfer
-		chunkSize := 64 * 1024
+		chunkSize := 64 * bytesize.KiB
 
 		for i := 0; i < len(content); i += chunkSize {
 			end := min(i+chunkSize, len(content))
@@ -550,8 +551,7 @@ func TestCache_LargeContent(t *testing.T) {
 	root := t.TempDir()
 	blobCache := cache.New(root, 0)
 
-	// 10MB content
-	content := make([]byte, 10*1024*1024)
+	content := make([]byte, 10*bytesize.MiB)
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
@@ -883,7 +883,7 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 	blobCache := cache.New(root, 0)
 
 	// Use large content to ensure write takes time
-	content := make([]byte, 512*1024) // 512KB
+	content := make([]byte, 512*bytesize.KiB)
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
@@ -1335,7 +1335,7 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 	blobCache := cache.New(root, 0)
 
 	// Large content
-	content := make([]byte, 1024*1024) // 1MB
+	content := make([]byte, bytesize.MiB)
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
@@ -1374,7 +1374,7 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 		}()
 
 		// Write slowly
-		chunkSize := 16 * 1024
+		chunkSize := 16 * bytesize.KiB
 
 		for i := 0; i < len(content); i += chunkSize {
 			end := min(i+chunkSize, len(content))
@@ -1446,8 +1446,7 @@ func TestCache_GC_UnderQuota(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	// 1MB quota
-	blobCache := cache.New(root, 1024*1024)
+	blobCache := cache.New(root, bytesize.MiB)
 
 	// Write small content - well under quota
 	content := []byte("small content")
@@ -1710,7 +1709,7 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
-	blobCache := cache.New(root, 1024*1024) // 1MB quota
+	blobCache := cache.New(root, bytesize.MiB)
 
 	var wg sync.WaitGroup
 

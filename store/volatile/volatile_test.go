@@ -24,6 +24,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/volatile"
@@ -384,8 +385,7 @@ func TestVolatile_LargeContent(t *testing.T) {
 	root := t.TempDir()
 	store := volatile.New(root, digest.SHA256)
 
-	// 1MB of content
-	content := make([]byte, 1024*1024)
+	content := make([]byte, bytesize.MiB)
 	for i := range content {
 		content[i] = byte(i % 256)
 	}
