@@ -20,7 +20,7 @@
 
 // Adapted from Go stdlib src/os/os_test.go for xos package testing.
 
-//nolint:paralleltest,tparallel,thelper,gocognit,funlen // Ported stdlib tests; preserving original structure.
+//nolint:paralleltest,tparallel,thelper,gocognit,funlen,gocyclo // Ported stdlib tests; preserving original structure.
 package xos_test
 
 import (

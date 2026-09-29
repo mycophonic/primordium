@@ -142,7 +142,6 @@ linters:
 
     # Duplicates
     - cyclop # provided by revive
-    - gocyclo # provided by revive
     - errcheck # provided by revive
     - errname # provided by revive
     - forcetypeassert # provided by revive
@@ -175,6 +174,9 @@ linters:
 
   settings:
     # Note: default, no changes
+    # Cyclomatic follows cognitive complexity's 15, as the v0.6.1 baseline sets it.
+    gocyclo:
+      min-complexity: 15
     # 80 lines for the long-but-flat function, as the v0.6.1 baseline sets it.
     funlen:
       lines: 80
@@ -350,7 +352,7 @@ linters:
         - name: cognitive-complexity
           disabled: true # gocognit
         - name: cyclomatic
-          arguments: [30]
+          disabled: true # gocyclo
         - name: max-public-structs
           arguments: [10]
 
