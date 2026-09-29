@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -291,8 +292,7 @@ func TestWriteFileLargeData(t *testing.T) {
 
 	path := filepath.Join(t.TempDir(), "large.bin")
 
-	// 1 MiB of data.
-	data := make([]byte, 1<<20)
+	data := make([]byte, bytesize.MiB)
 	for i := range data {
 		data[i] = byte(i)
 	}

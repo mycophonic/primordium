@@ -192,7 +192,7 @@ func readETag(path string) string {
 
 // copyWithProgress copies from src to dst, logging progress periodically.
 func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset, total int64) (int64, error) {
-	buf := make([]byte, 32<<10) //nolint:mnd // 32 KB buffer.
+	buf := make([]byte, copyBufferSize)
 
 	var written int64
 

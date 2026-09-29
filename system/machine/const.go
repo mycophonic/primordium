@@ -16,11 +16,11 @@
 
 package machine
 
-const (
-	gb = 1 << 30
+import "github.com/mycophonic/primordium/bytesize"
 
+const (
 	lowMaxCores         = 4
 	highMinCores        = 9
-	lowMaxRAM    uint64 = 8 * gb
-	highMinRAM   uint64 = 32 * gb
+	lowMaxRAM    uint64 = 8 * bytesize.GiB
+	highMinRAM   uint64 = 32 * bytesize.GiB
 )

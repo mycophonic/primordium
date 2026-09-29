@@ -23,6 +23,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/r2"
@@ -87,7 +88,7 @@ func TestUpload_SinglePart(t *testing.T) {
 		source,
 		int64(len(data)),
 		r2.MultipartOptions{
-			PartSize: 5 << 20,
+			PartSize: 5 * bytesize.MiB,
 			StateDir: stateDir,
 		},
 	)
@@ -125,8 +126,8 @@ func TestUpload_MultiPart(t *testing.T) {
 	env := setup(t)
 
 	// 5 MiB minimum part size, 12 MiB total → 3 parts (5 + 5 + 2).
-	partSize := int64(5 << 20)
-	totalSize := int64(12 << 20)
+	partSize := int64(5 * bytesize.MiB)
+	totalSize := int64(12 * bytesize.MiB)
 
 	data := randomBytes(t, int(totalSize))
 	source := bytes.NewReader(data)
@@ -172,8 +173,8 @@ func TestUpload_ConcurrentWorkers(t *testing.T) {
 	env := setup(t)
 
 	// 4 parts with 4 concurrent workers.
-	partSize := int64(5 << 20)
-	totalSize := int64(20 << 20)
+	partSize := int64(5 * bytesize.MiB)
+	totalSize := int64(20 * bytesize.MiB)
 
 	data := randomBytes(t, int(totalSize))
 	source := bytes.NewReader(data)
@@ -219,8 +220,8 @@ func TestUpload_ExactPartBoundary(t *testing.T) {
 	env := setup(t)
 
 	// Exactly 2 full parts, no remainder.
-	partSize := int64(5 << 20)
-	totalSize := int64(10 << 20)
+	partSize := int64(5 * bytesize.MiB)
+	totalSize := int64(10 * bytesize.MiB)
 
 	data := randomBytes(t, int(totalSize))
 	source := bytes.NewReader(data)
@@ -306,7 +307,7 @@ func TestUpload_StateCleanedUpOnSuccess(t *testing.T) {
 	t.Parallel()
 
 	env := setup(t)
-	data := randomBytes(t, 5<<20+1) // Just over 1 part.
+	data := randomBytes(t, 5*bytesize.MiB+1) // Just over 1 part.
 	source := bytes.NewReader(data)
 
 	stateDir := t.TempDir()
@@ -317,7 +318,7 @@ func TestUpload_StateCleanedUpOnSuccess(t *testing.T) {
 		source,
 		int64(len(data)),
 		r2.MultipartOptions{
-			PartSize: 5 << 20,
+			PartSize: 5 * bytesize.MiB,
 			StateDir: stateDir,
 		},
 	)

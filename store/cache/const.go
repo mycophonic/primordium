@@ -16,7 +16,11 @@
 
 package cache
 
-import "time"
+import (
+	"time"
+
+	"github.com/mycophonic/primordium/bytesize"
+)
 
 const (
 	cacheDataFile     = "data"
@@ -25,8 +29,8 @@ const (
 	cacheWriteLock    = "lock.write"
 	cachePollInterval = 10 * time.Millisecond
 
-	// DefaultCacheQuota is the default disk space quota for the cache (50GB).
-	DefaultCacheQuota = 50 << 30
+	// DefaultCacheQuota is the default disk space quota for the cache (50 GiB).
+	DefaultCacheQuota = 50 * bytesize.GiB
 
 	errFmtEntryDir = "%w: entry directory: %w"
 

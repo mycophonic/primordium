@@ -23,6 +23,7 @@ import (
 	"regexp"
 	"testing"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 )
@@ -413,7 +414,7 @@ func TestBLAKE3256_OfficialVectors(t *testing.T) {
 func TestBLAKE3256_ChunkedWriteEquivalence(t *testing.T) {
 	t.Parallel()
 
-	input := make([]byte, 1<<20+12345)
+	input := make([]byte, bytesize.MiB+12345)
 	for i := range input {
 		input[i] = byte(i % 251)
 	}
@@ -422,7 +423,7 @@ func TestBLAKE3256_ChunkedWriteEquivalence(t *testing.T) {
 	oneShot.Write(input)
 	want := hex.EncodeToString(oneShot.Sum(nil))
 
-	for _, chunk := range []int{1, 63, 1024, 1025, 32 << 10, 1 << 20} {
+	for _, chunk := range []int{1, 63, 1024, 1025, 32 * bytesize.KiB, bytesize.MiB} {
 		t.Run(fmt.Sprintf("chunk%d", chunk), func(t *testing.T) {
 			t.Parallel()
 

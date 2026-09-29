@@ -16,4 +16,6 @@
 
 package compress
 
-const inputBufSize = 256 * 1024 //nolint:mnd // 256KB — amortizes syscalls for all formats.
+import "github.com/mycophonic/primordium/bytesize"
+
+const inputBufSize = 256 * bytesize.KiB // Amortizes syscalls for all formats.

@@ -26,6 +26,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -499,8 +500,7 @@ func TestStore_LargeContent(t *testing.T) {
 
 	cs := newStore(t)
 
-	// 5MB content.
-	data := make([]byte, 5*1024*1024)
+	data := make([]byte, 5*bytesize.MiB)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
@@ -537,7 +537,7 @@ func TestStore_LargeContentWithDigest(t *testing.T) {
 
 	cs := newStore(t)
 
-	data := make([]byte, 5*1024*1024)
+	data := make([]byte, 5*bytesize.MiB)
 	for i := range data {
 		data[i] = byte(i % 256)
 	}
@@ -854,8 +854,8 @@ func TestStore_VeryLongIdentifier(t *testing.T) {
 	cs := newStore(t)
 	data := []byte("content for long identifier")
 
-	// 10KB identifier — hashIdentifier hashes to uint64, so this is safe.
-	longID := string(make([]byte, 10240))
+	// A long identifier — hashIdentifier hashes to uint64, so this is safe.
+	longID := string(make([]byte, 10*bytesize.KiB))
 
 	reader, _, err := cs.Acquire(longID, nil, fetchFunc(data))
 	if err != nil {
