@@ -171,13 +171,12 @@ linters:
           - wrapcheck
           - gosec
           - err113
-          - modernize
           - dogsled
           - noctx
           - perfsprint
           - depguard
       - path: _test.go
-        text: "add-constant|cognitive-complexity|confusing-results|nested-structs|use-waitgroup-go|unchecked-type-assertion|unhandled-error|unused-receiver"
+        text: "add-constant|cognitive-complexity|confusing-results|nested-structs|unchecked-type-assertion|unhandled-error|unused-receiver"
         linters:
           - revive
       # xos and dirs ARE the wrappers around os.* — they must call the raw functions.
@@ -269,6 +268,15 @@ linters:
     revive:
       enable-all-rules: true
       rules:
+        # Rewrites modernize makes, with an auto-fix.
+        - name: use-any
+          disabled: true # modernize any
+        - name: use-waitgroup-go
+          disabled: true # modernize waitgroupgo
+        - name: use-slices-sort
+          disabled: true # modernize slicessort
+        - name: redundant-build-tag
+          disabled: true # modernize plusbuild
         - name: function-length
           arguments: [100, 0]
         - name: add-constant

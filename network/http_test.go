@@ -20,6 +20,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -160,15 +161,7 @@ func TestRetryStatusCodes_ContainsExpectedCodes(t *testing.T) {
 	}
 
 	for _, code := range expected {
-		found := false
-
-		for _, rc := range network.RetryStatusCodes {
-			if rc == code {
-				found = true
-
-				break
-			}
-		}
+		found := slices.Contains(network.RetryStatusCodes, code)
 
 		if !found {
 			t.Errorf("RetryStatusCodes missing %d (%s)", code, http.StatusText(code))

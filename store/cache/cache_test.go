@@ -75,14 +75,10 @@ func TestCache_WriteAndRead(t *testing.T) {
 
 	var readErr error
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		readData, readErr = io.ReadAll(reader)
 		assert.Check(t, reader.Close())
-	}()
+	})
 
 	// Write content
 	n, err := writer.Write(content)
@@ -185,14 +181,10 @@ func TestCache_WriteDigestMismatch(t *testing.T) {
 
 	var readErr error
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		_, readErr = io.ReadAll(reader)
 		assert.Check(t, reader.Close())
-	}()
+	})
 
 	_, _ = writer.Write(content)
 
@@ -241,17 +233,13 @@ func TestCache_WriteAlreadyExists(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
 			t.Errorf("draining reader1: %v", drainErr)
 		}
 
 		assert.Check(t, reader1.Close())
-	}()
+	})
 
 	_, _ = writer1.Write(content)
 	_ = writer1.Close()
@@ -295,11 +283,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 	writerStarted := make(chan struct{})
 
 	// Writer goroutine
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		reader, writer, err := blobCache.Acquire(digest)
 		if err != nil {
 			t.Errorf("Acquire() error: %v", err)
@@ -310,11 +294,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 		close(writerStarted)
 
 		// Read from pipe in background
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			data, err := io.ReadAll(reader)
 			if err != nil {
 				t.Errorf("writer's reader ReadAll() error: %v", err)
@@ -325,7 +305,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 			}
 
 			assert.Check(t, reader.Close())
-		}()
+		})
 
 		// Write in chunks to simulate slow transfer
 		chunkSize := 64 * bytesize.KiB
@@ -346,18 +326,14 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 		if err := writer.Close(); err != nil {
 			t.Errorf("writer.Close() error: %v", err)
 		}
-	}()
+	})
 
 	// Wait for writer to start
 	<-writerStarted
 	time.Sleep(50 * time.Millisecond) // Give writer time to create file
 
 	// Reader goroutine - reads while write is in progress (from another process perspective)
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		reader, writer, err := blobCache.Acquire(digest)
 		if err != nil {
 			t.Errorf("Acquire() error: %v", err)
@@ -389,7 +365,7 @@ func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 		if !bytes.Equal(data, content) {
 			t.Errorf("Read content length = %d, want %d", len(data), len(content))
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -408,11 +384,7 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 	writerStarted := make(chan struct{})
 
 	// Writer goroutine - will fail due to digest mismatch
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		reader, writer, err := blobCache.Acquire(wrongDigest)
 		if err != nil {
 			t.Errorf("Acquire() error: %v", err)
@@ -423,14 +395,10 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 		close(writerStarted)
 
 		// Read in background
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			_, _ = io.ReadAll(reader)
 			assert.Check(t, reader.Close())
-		}()
+		})
 
 		time.Sleep(50 * time.Millisecond) // Give reader time to start
 
@@ -440,18 +408,14 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 		if !errors.Is(err, fault.ErrHashMismatch) {
 			t.Errorf("writer.Close() error = %v, want ErrHashMismatch", err)
 		}
-	}()
+	})
 
 	// Wait for writer to start
 	<-writerStarted
 	time.Sleep(20 * time.Millisecond)
 
 	// Reader goroutine - should get error when write fails
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		reader, writer, err := blobCache.Acquire(wrongDigest)
 		if err != nil {
 			// Might not exist yet, that's ok
@@ -476,7 +440,7 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 		} else if !errors.Is(err, fault.ErrWriteFailure) {
 			t.Errorf("ReadAll() error = %v, want ErrWriteFailure", err)
 		}
-	}()
+	})
 
 	wg.Wait()
 }
@@ -494,17 +458,13 @@ func TestCache_MultipleReadersComplete(t *testing.T) {
 
 	var setupWg sync.WaitGroup
 
-	setupWg.Add(1)
-
-	go func() {
-		defer setupWg.Done()
-
+	setupWg.Go(func() {
 		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
 			t.Errorf("draining reader1: %v", drainErr)
 		}
 
 		assert.Check(t, reader1.Close())
-	}()
+	})
 
 	_, _ = writer1.Write(content)
 	_ = writer1.Close()
@@ -581,14 +541,10 @@ func TestCache_LargeContent(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		writeData, _ = io.ReadAll(reader1)
 		assert.Check(t, reader1.Close())
-	}()
+	})
 
 	_, err = writer1.Write(content)
 	if err != nil {
@@ -644,17 +600,13 @@ func TestCache_EmptyContent(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
 			t.Errorf("draining reader1: %v", drainErr)
 		}
 
 		assert.Check(t, reader1.Close())
-	}()
+	})
 
 	if err = writer1.Close(); err != nil {
 		t.Fatalf("writer.Close() error: %v", err)
@@ -822,10 +774,7 @@ func TestCache_ConcurrentWritersRace(t *testing.T) {
 
 			if gotWriter {
 				// I'm the writer - write content
-				wg.Add(1)
-
-				go func() {
-					defer wg.Done()
+				wg.Go(func() {
 					// Read from my connected reader
 					data, _ := io.ReadAll(reader)
 					assert.Check(t, reader.Close())
@@ -835,7 +784,7 @@ func TestCache_ConcurrentWritersRace(t *testing.T) {
 						readData  []byte
 						err       error
 					}{true, data, nil}
-				}()
+				})
 
 				_, _ = writer.Write(content)
 				_ = writer.Close()
@@ -912,10 +861,7 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 	writerDone := make(chan struct{})
 
 	// Writer goroutine
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer close(writerDone)
 
 		reader, writer, err := blobCache.Acquire(digest)
@@ -928,17 +874,13 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 		close(writerStarted)
 
 		// Reader in background
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			if _, drainErr := io.ReadAll(reader); drainErr != nil {
 				t.Errorf("draining reader: %v", drainErr)
 			}
 
 			assert.Check(t, reader.Close())
-		}()
+		})
 
 		// Write in small chunks
 		chunkSize := 4 * bytesize.KiB
@@ -959,7 +901,7 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 		if err := writer.Close(); err != nil {
 			t.Errorf("writer.Close() error: %v", err)
 		}
-	}()
+	})
 
 	// Wait for writer to start
 	<-writerStarted
@@ -1036,17 +978,13 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 
 	initReader := reader
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		if _, drainErr := io.ReadAll(initReader); drainErr != nil {
 			t.Errorf("draining initReader: %v", drainErr)
 		}
 
 		assert.Check(t, initReader.Close())
-	}()
+	})
 
 	_, _ = writer.Write(content)
 
@@ -1374,11 +1312,7 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 	writerStarted := make(chan struct{})
 
 	// Writer
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		reader, writer, err := blobCache.Acquire(digest)
 		if err != nil {
 			t.Errorf("writer Acquire() error: %v", err)
@@ -1389,17 +1323,13 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 		close(writerStarted)
 
 		// Drain reader
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			if _, drainErr := io.ReadAll(reader); drainErr != nil {
 				t.Errorf("draining reader: %v", drainErr)
 			}
 
 			assert.Check(t, reader.Close())
-		}()
+		})
 
 		// Write slowly
 		chunkSize := 16 * bytesize.KiB
@@ -1420,7 +1350,7 @@ func TestCache_StressReadersWhileWriting(t *testing.T) {
 		if err := writer.Close(); err != nil {
 			t.Errorf("writer.Close() error: %v", err)
 		}
-	}()
+	})
 
 	<-writerStarted
 
@@ -1489,17 +1419,13 @@ func TestCache_GC_UnderQuota(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
 			t.Errorf("draining reader1: %v", drainErr)
 		}
 
 		assert.Check(t, reader1.Close())
-	}()
+	})
 
 	_, _ = writer.Write(content)
 
@@ -1566,17 +1492,13 @@ func TestCache_GC_OverQuota(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		if _, drainErr := io.ReadAll(reader1); drainErr != nil {
 			t.Errorf("draining reader1: %v", drainErr)
 		}
 
 		assert.Check(t, reader1.Close())
-	}()
+	})
 
 	_, _ = writer1.Write(content1)
 
@@ -1629,14 +1551,10 @@ func TestCache_GC_PreservesInUseEntries(t *testing.T) {
 
 	var readWg sync.WaitGroup
 
-	readWg.Add(1)
-
-	go func() {
-		defer readWg.Done()
-
+	readWg.Go(func() {
 		readData, _ = io.ReadAll(reader)
 		// Don't close reader - keep it open
-	}()
+	})
 
 	_, _ = writer.Write(content)
 
@@ -1696,17 +1614,13 @@ func TestCache_GC_StatsAccuracy(t *testing.T) {
 			t.Fatalf("Acquire() error: %v", err)
 		}
 
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			if _, drainErr := io.ReadAll(reader); drainErr != nil {
 				t.Errorf("draining reader: %v", drainErr)
 			}
 
 			assert.Check(t, reader.Close())
-		}()
+		})
 
 		_, _ = writer.Write(content)
 
@@ -1773,17 +1687,13 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 				return
 			}
 
-			wg.Add(1)
-
-			go func() {
-				defer wg.Done()
-
+			wg.Go(func() {
 				if _, drainErr := io.ReadAll(reader); drainErr != nil {
 					t.Errorf("draining reader: %v", drainErr)
 				}
 
 				assert.Check(t, reader.Close())
-			}()
+			})
 
 			if writer != nil {
 				_, _ = writer.Write(content)
@@ -1794,16 +1704,12 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 
 	// Run GC concurrently
 	for range 3 {
-		wg.Add(1)
-
-		go func() {
-			defer wg.Done()
-
+		wg.Go(func() {
 			_, err := blobCache.GarbageCollect()
 			if err != nil {
 				t.Errorf("GarbageCollect() error: %v", err)
 			}
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -1830,17 +1736,13 @@ func TestCache_Exists(t *testing.T) {
 
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-
-	go func() {
-		defer wg.Done()
-
+	wg.Go(func() {
 		if _, drainErr := io.ReadAll(reader); drainErr != nil {
 			t.Errorf("draining reader: %v", drainErr)
 		}
 
 		assert.Check(t, reader.Close())
-	}()
+	})
 
 	_, _ = writer.Write(content)
 
