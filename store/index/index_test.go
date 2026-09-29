@@ -175,7 +175,7 @@ func TestGrowReopenPreservesData(t *testing.T) {
 // only live records survive, and the capacity stays put: the live records
 // fit in it.
 //
-//nolint:gocognit,funlen // one scenario in order: the complexity is the check after each step
+//nolint:gocognit,funlen,gocyclo // one scenario in order: the complexity is the check after each step
 func TestGrowWithTombstones(t *testing.T) {
 	t.Parallel()
 
@@ -503,7 +503,7 @@ func writeTestJournal(t *testing.T, path string, newCap uint64, records []index.
 // TestJournalRecovery simulates a crash mid-grow by leaving a journal file
 // and corrupting the data file, then verifies New recovers from the journal.
 //
-//nolint:gocognit,funlen // one scenario in order: the complexity is the check after each step
+//nolint:gocognit,funlen,gocyclo // one scenario in order: the complexity is the check after each step
 func TestJournalRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -859,7 +859,7 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 // TestConcurrentDeleteDuringGrow exercises concurrent Delete, Put, and
 // ForEach while grow operations are being triggered.
 //
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
+//nolint:gocognit,funlen,gocyclo // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestConcurrentDeleteDuringGrow(t *testing.T) {
 	t.Parallel()
 
@@ -1761,7 +1761,7 @@ func TestStaleWriterRecovery(t *testing.T) {
 // that no alive PIDs are registered in the lock file and CAS-reset the
 // stale count to acquire the write lock.
 //
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
+//nolint:gocognit,funlen,gocyclo // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestStaleReaderRecovery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping under -short")
