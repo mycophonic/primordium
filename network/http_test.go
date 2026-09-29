@@ -17,7 +17,6 @@
 package network_test
 
 import (
-	"context"
 	"crypto/tls"
 	"net/http"
 	"net/http/httptest"
@@ -50,7 +49,7 @@ func TestRoundTripper_InjectsAuthHeader(t *testing.T) {
 
 	client := &http.Client{Transport: rt}
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -81,7 +80,7 @@ func TestRoundTripper_NoAuthWhenTokenEmpty(t *testing.T) {
 
 	client := &http.Client{Transport: rt}
 
-	req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -111,7 +110,7 @@ func TestRoundTripper_LogsRetryableStatus(t *testing.T) {
 			rt := network.NewTransport()
 			client := &http.Client{Transport: rt}
 
-			req, _ := http.NewRequestWithContext(context.Background(), http.MethodGet, server.URL, nil)
+			req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL, nil)
 
 			resp, err := client.Do(req)
 			if err != nil {

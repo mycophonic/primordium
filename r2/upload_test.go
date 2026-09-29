@@ -19,7 +19,6 @@ package r2_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -35,7 +34,7 @@ func TestUpload_ZeroSize(t *testing.T) {
 	env := setup(t)
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"zero.bin",
 		bytes.NewReader(nil),
 		0,
@@ -56,7 +55,7 @@ func TestUpload_NegativeSize(t *testing.T) {
 	env := setup(t)
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"negative.bin",
 		bytes.NewReader(nil),
 		-1,
@@ -83,7 +82,7 @@ func TestUpload_SinglePart(t *testing.T) {
 	dataDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"single-part.bin",
 		source,
 		int64(len(data)),
@@ -105,7 +104,7 @@ func TestUpload_SinglePart(t *testing.T) {
 	}
 
 	// Verify content round-trips through download.
-	err = env.client.Download(context.Background(), "single-part.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "single-part.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -137,7 +136,7 @@ func TestUpload_MultiPart(t *testing.T) {
 	dataDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"multi-part.bin",
 		source,
 		totalSize,
@@ -152,7 +151,7 @@ func TestUpload_MultiPart(t *testing.T) {
 	}
 
 	// Verify round-trip.
-	err = env.client.Download(context.Background(), "multi-part.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "multi-part.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -184,7 +183,7 @@ func TestUpload_ConcurrentWorkers(t *testing.T) {
 	dataDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"concurrent.bin",
 		source,
 		totalSize,
@@ -199,7 +198,7 @@ func TestUpload_ConcurrentWorkers(t *testing.T) {
 	}
 
 	// Verify content is correct despite concurrent uploads.
-	err = env.client.Download(context.Background(), "concurrent.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "concurrent.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -231,7 +230,7 @@ func TestUpload_ExactPartBoundary(t *testing.T) {
 	dataDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"exact-boundary.bin",
 		source,
 		totalSize,
@@ -245,7 +244,7 @@ func TestUpload_ExactPartBoundary(t *testing.T) {
 		t.Fatalf("Upload: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "exact-boundary.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "exact-boundary.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -275,7 +274,7 @@ func TestUpload_SmallPartSize_NormalisedToDefault(t *testing.T) {
 	dataDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"small-partsize.bin",
 		source,
 		int64(len(data)),
@@ -288,7 +287,7 @@ func TestUpload_SmallPartSize_NormalisedToDefault(t *testing.T) {
 		t.Fatalf("Upload: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "small-partsize.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "small-partsize.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -313,7 +312,7 @@ func TestUpload_StateCleanedUpOnSuccess(t *testing.T) {
 	stateDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"state-cleanup.bin",
 		source,
 		int64(len(data)),
@@ -351,7 +350,7 @@ func TestUpload_OverwritesExistingObject(t *testing.T) {
 	stateDir := t.TempDir()
 
 	err := env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"overwrite.bin",
 		sourceV1,
 		int64(len(dataV1)),
@@ -366,7 +365,7 @@ func TestUpload_OverwritesExistingObject(t *testing.T) {
 	sourceV2 := bytes.NewReader(dataV2)
 
 	err = env.client.Upload(
-		context.Background(),
+		t.Context(),
 		"overwrite.bin",
 		sourceV2,
 		int64(len(dataV2)),
@@ -380,7 +379,7 @@ func TestUpload_OverwritesExistingObject(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := t.TempDir()
 
-	err = env.client.Download(context.Background(), "overwrite.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "overwrite.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -415,7 +414,7 @@ func TestUpload_RejectsPathTraversal(t *testing.T) {
 			t.Parallel()
 
 			err := env.client.Upload(
-				context.Background(),
+				t.Context(),
 				tc.key,
 				bytes.NewReader(data),
 				int64(len(data)),

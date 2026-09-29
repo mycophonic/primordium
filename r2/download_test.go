@@ -99,7 +99,7 @@ func TestStat_Exists(t *testing.T) {
 	data := randomBytes(t, 1024)
 	env.putObject(t, "stat-test.bin", data)
 
-	info, err := env.client.Stat(context.Background(), "stat-test.bin")
+	info, err := env.client.Stat(t.Context(), "stat-test.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestStat_NotFound(t *testing.T) {
 
 	env := setup(t)
 
-	info, err := env.client.Stat(context.Background(), "does-not-exist.bin")
+	info, err := env.client.Stat(t.Context(), "does-not-exist.bin")
 	if !errors.Is(err, fault.ErrNotFound) {
 		t.Fatalf("Stat should return fault.ErrNotFound for missing object, got: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestStat_ETagHasNoQuotes(t *testing.T) {
 	env := setup(t)
 	env.putObject(t, "etag-test.bin", []byte("content"))
 
-	info, err := env.client.Stat(context.Background(), "etag-test.bin")
+	info, err := env.client.Stat(t.Context(), "etag-test.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestDownload_Success(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := t.TempDir()
 
-	err := env.client.Download(context.Background(), "dl-success.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "dl-success.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestDownload_NotFound(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := t.TempDir()
 
-	err := env.client.Download(context.Background(), "ghost.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "ghost.bin", tempDir, dataDir)
 	if err == nil {
 		t.Fatal("Download should fail for non-existent object")
 	}
@@ -219,7 +219,7 @@ func TestDownload_AlreadyComplete(t *testing.T) {
 	env.putObject(t, "already-done.bin", data)
 
 	// Get the real etag.
-	info, err := env.client.Stat(context.Background(), "already-done.bin")
+	info, err := env.client.Stat(t.Context(), "already-done.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -244,7 +244,7 @@ func TestDownload_AlreadyComplete(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "already-done.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "already-done.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download should succeed for already-complete file, got: %v", err)
 	}
@@ -283,7 +283,7 @@ func TestDownload_AlreadyComplete_ETagMismatch(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err := env.client.Download(context.Background(), "etag-changed.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "etag-changed.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestDownload_Resume_PartialTemp(t *testing.T) {
 	data := randomBytes(t, 32*1024)
 	env.putObject(t, "resume-partial.bin", data)
 
-	info, err := env.client.Stat(context.Background(), "resume-partial.bin")
+	info, err := env.client.Stat(t.Context(), "resume-partial.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestDownload_Resume_PartialTemp(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "resume-partial.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "resume-partial.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download (resume): %v", err)
 	}
@@ -374,7 +374,7 @@ func TestDownload_Resume_ETagMismatch_FreshDownload(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err := env.client.Download(context.Background(), "resume-mismatch.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "resume-mismatch.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -396,7 +396,7 @@ func TestDownload_Resume_Oversized_FreshDownload(t *testing.T) {
 	data := randomBytes(t, 4096)
 	env.putObject(t, "resume-oversized.bin", data)
 
-	info, err := env.client.Stat(context.Background(), "resume-oversized.bin")
+	info, err := env.client.Stat(t.Context(), "resume-oversized.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestDownload_Resume_Oversized_FreshDownload(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "resume-oversized.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "resume-oversized.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestDownload_Resume_FullyDownloadedTemp(t *testing.T) {
 	data := randomBytes(t, 16*1024)
 	env.putObject(t, "resume-full.bin", data)
 
-	info, err := env.client.Stat(context.Background(), "resume-full.bin")
+	info, err := env.client.Stat(t.Context(), "resume-full.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -470,7 +470,7 @@ func TestDownload_Resume_FullyDownloadedTemp(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "resume-full.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "resume-full.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -510,7 +510,7 @@ func TestDownload_ContextCanceled(t *testing.T) {
 	data := randomBytes(t, 256*1024)
 	env.putObject(t, "cancel-me.bin", data)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	cancel() // Cancel immediately.
 
 	tempDir := t.TempDir()
@@ -536,7 +536,7 @@ func TestDownload_AlreadyComplete_SizeMismatch(t *testing.T) {
 	data := randomBytes(t, 4096)
 	env.putObject(t, "size-changed.bin", data)
 
-	info, err := env.client.Stat(context.Background(), "size-changed.bin")
+	info, err := env.client.Stat(t.Context(), "size-changed.bin")
 	if err != nil {
 		t.Fatalf("Stat: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestDownload_AlreadyComplete_SizeMismatch(t *testing.T) {
 		t.Fatalf("write etag: %v", err)
 	}
 
-	err = env.client.Download(context.Background(), "size-changed.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "size-changed.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -588,7 +588,7 @@ func TestDownload_Idempotent(t *testing.T) {
 	dataDir := t.TempDir()
 
 	// First download.
-	if err := env.client.Download(context.Background(), "idempotent.bin", tempDir, dataDir); err != nil {
+	if err := env.client.Download(t.Context(), "idempotent.bin", tempDir, dataDir); err != nil {
 		t.Fatalf("first download: %v", err)
 	}
 
@@ -599,7 +599,7 @@ func TestDownload_Idempotent(t *testing.T) {
 	}
 
 	// Second download — should be a no-op (already complete).
-	if err = env.client.Download(context.Background(), "idempotent.bin", tempDir, dataDir); err != nil {
+	if err = env.client.Download(t.Context(), "idempotent.bin", tempDir, dataDir); err != nil {
 		t.Fatalf("second download: %v", err)
 	}
 
@@ -626,7 +626,7 @@ func TestDownload_CreatesDirectories(t *testing.T) {
 	dataDir := filepath.Join(baseDir, "nested", "data")
 
 	// Neither directory exists yet.
-	err := env.client.Download(context.Background(), "mkdir-test.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "mkdir-test.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -651,7 +651,7 @@ func TestDownload_HierarchicalKey(t *testing.T) {
 	tempDir := t.TempDir()
 	dataDir := t.TempDir()
 
-	err := env.client.Download(context.Background(), "audio/tracks/song.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "audio/tracks/song.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestDownload_RejectsPathTraversal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			err := env.client.Download(context.Background(), tc.key, tempDir, dataDir)
+			err := env.client.Download(t.Context(), tc.key, tempDir, dataDir)
 			if err == nil {
 				t.Fatalf("expected error for key %q, got nil", tc.key)
 			}
@@ -713,7 +713,7 @@ func TestDownload_MoveAtomicity(t *testing.T) {
 	// Make dataDir read-only so the rename of the etag fails.
 	// First download succeeds writing to temp. The data rename might succeed
 	// but the etag rename fails. On retry, the data should self-heal.
-	err := env.client.Download(context.Background(), "atomic.bin", tempDir, dataDir)
+	err := env.client.Download(t.Context(), "atomic.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("Download: %v", err)
 	}
@@ -731,7 +731,7 @@ func TestDownload_MoveAtomicity(t *testing.T) {
 	_ = os.Remove(filepath.Join(dataDir, "atomic.bin.etag"))
 
 	// Re-download should self-heal: detects missing etag, re-downloads.
-	err = env.client.Download(context.Background(), "atomic.bin", tempDir, dataDir)
+	err = env.client.Download(t.Context(), "atomic.bin", tempDir, dataDir)
 	if err != nil {
 		t.Fatalf("self-healing download: %v", err)
 	}
