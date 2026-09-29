@@ -255,3 +255,39 @@ func assertPatternRejected(t *testing.T, err error, op, pattern string) {
 			op, pattern, pathErr.Op, pathErr.Path)
 	}
 }
+
+// A pattern starting with "*" has an empty prefix: the name must still be
+// created inside dir, not beside it.
+func TestCreateTempEmptyPrefixStaysInDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	f, err := xos.CreateTemp(dir, "*.tmp")
+	if err != nil {
+		t.Fatalf("CreateTemp(dir, %q): %v", "*.tmp", err)
+	}
+
+	if err := f.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	if got := filepath.Dir(f.Name()); got != dir {
+		t.Errorf("CreateTemp(dir, %q) created %q in %q, want in %q", "*.tmp", f.Name(), got, dir)
+	}
+}
+
+func TestMkdirTempEmptyPrefixStaysInDir(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+
+	name, err := xos.MkdirTemp(dir, "*")
+	if err != nil {
+		t.Fatalf("MkdirTemp(dir, %q): %v", "*", err)
+	}
+
+	if got := filepath.Dir(name); got != dir {
+		t.Errorf("MkdirTemp(dir, %q) created %q in %q, want in %q", "*", name, got, dir)
+	}
+}

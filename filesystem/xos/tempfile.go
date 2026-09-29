@@ -168,6 +168,9 @@ func MkdirTemp(dir, pattern string) (string, error) {
 	}
 }
 
+// joinPath joins dir and a name prefix. Not filepath.Join: it cleans away
+// the trailing separator an empty prefix (a pattern starting with "*")
+// needs, and the name would land beside dir instead of inside it.
 func joinPath(dir, name string) string {
 	if dir != "" && os.IsPathSeparator(dir[len(dir)-1]) {
 		return dir + name
