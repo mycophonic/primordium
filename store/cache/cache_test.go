@@ -230,7 +230,14 @@ func TestCache_WriteAlreadyExists(t *testing.T) {
 	digest := computeDigest(content)
 
 	// First acquire and write
-	reader1, writer1, _ := blobCache.Acquire(digest)
+	reader1, writer1, err := blobCache.Acquire(digest)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer1 == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
 
 	var wg sync.WaitGroup
 
@@ -457,7 +464,14 @@ func TestCache_MultipleReadersComplete(t *testing.T) {
 	digest := computeDigest(content)
 
 	// Write content first
-	reader1, writer1, _ := blobCache.Acquire(digest)
+	reader1, writer1, err := blobCache.Acquire(digest)
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer1 == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
 
 	var setupWg sync.WaitGroup
 
@@ -540,6 +554,10 @@ func TestCache_LargeContent(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
+	if writer1 == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	var writeData []byte
 
 	var wg sync.WaitGroup
@@ -599,6 +617,10 @@ func TestCache_EmptyContent(t *testing.T) {
 	reader1, writer1, err := blobCache.Acquire(digest)
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer1 == nil {
+		t.Fatal("Acquire(): no writer for new content")
 	}
 
 	var wg sync.WaitGroup
@@ -983,6 +1005,10 @@ func TestCache_RapidAcquireClose(t *testing.T) {
 		t.Fatalf("initial Acquire() error: %v", err)
 	}
 
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	var wg sync.WaitGroup
 
 	initReader := reader
@@ -1082,6 +1108,10 @@ func TestCache_WriterAbandonmentNoWrite(t *testing.T) {
 		t.Fatalf("Acquire(empty) error: %v", err)
 	}
 
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	// Close writer immediately (valid for empty content)
 	if err = writer.Close(); err != nil {
 		t.Errorf("writer.Close() for empty error: %v", err)
@@ -1103,6 +1133,10 @@ func TestCache_WriterAbandonmentNoWrite(t *testing.T) {
 	reader, writer, err = blobCache.Acquire(nonEmptyDigest)
 	if err != nil {
 		t.Fatalf("Acquire(non-empty) error: %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
 	}
 
 	// Close without writing - should fail because hash won't match
@@ -1150,6 +1184,10 @@ func TestCache_PartialWriteAbandon(t *testing.T) {
 	reader, writer, err := blobCache.Acquire(digest)
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
 	}
 
 	// Write only half the content
@@ -1430,6 +1468,10 @@ func TestCache_GC_UnderQuota(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
@@ -1503,6 +1545,10 @@ func TestCache_GC_OverQuota(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
+	if writer1 == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
@@ -1557,6 +1603,10 @@ func TestCache_GC_PreservesInUseEntries(t *testing.T) {
 	reader, writer, err := blobCache.Acquire(digest)
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
 	}
 
 	// Read in background but DON'T close the reader yet
@@ -1749,6 +1799,10 @@ func TestCache_Exists(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	var wg sync.WaitGroup
 
 	wg.Go(func() {
@@ -1843,6 +1897,10 @@ func TestCache_AcquireFileRefusesActiveWriter(t *testing.T) {
 		t.Fatalf("Acquire() error: %v", err)
 	}
 
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
 	// Writer still open: the data is in flight and must not be exposed.
 	if _, err := blobCache.AcquireFile(digest); !errors.Is(err, fault.ErrNotFound) {
 		t.Fatalf("AcquireFile() with active writer: err = %v, want fault.ErrNotFound", err)
@@ -1864,6 +1922,10 @@ func TestCache_AcquireFilePinSurvivesGC(t *testing.T) {
 	reader, writer, err := blobCache.Acquire(digest)
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
 	}
 
 	_, _ = writer.Write(content)
