@@ -175,6 +175,11 @@ linters:
     # Cyclomatic follows cognitive complexity's 15, as the v0.6.1 baseline sets it.
     gocyclo:
       min-complexity: 15
+    # Every package variable, not only EOF and Err*: another package overwriting
+    # any of them is the same hidden side effect.
+    reassign:
+      patterns:
+        - ".*"
     # 80 lines for the long-but-flat function, as the v0.6.1 baseline sets it.
     funlen:
       lines: 80

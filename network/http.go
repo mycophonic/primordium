@@ -158,6 +158,7 @@ func SetDefaults() {
 	defaultTransport = transport
 
 	// Wrap with logging for retry-worthy responses
+	//nolint:reassign // SetDefaults' contract: it installs the process-wide default transport
 	http.DefaultTransport = &RoundTripper{
 		Transport: transport,
 	}
