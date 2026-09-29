@@ -160,7 +160,6 @@ linters:
       - path: _test.go
         linters:
           - varnamelen
-          - dupl
           - dupword
           - dogsled
           - noctx

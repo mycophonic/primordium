@@ -120,143 +120,62 @@ func TestUpload_SinglePart(t *testing.T) {
 	}
 }
 
-func TestUpload_MultiPart(t *testing.T) {
+// TestUpload_MultipartRoundTrip uploads in 5 MiB parts and downloads the
+// object back, whole.
+func TestUpload_MultipartRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	env := setup(t)
+	for _, test := range []struct {
+		name        string
+		totalSize   int64
+		concurrency int
+	}{
+		// 12 MiB → 3 parts (5 + 5 + 2), one worker.
+		{name: "multi-part", totalSize: 12 * bytesize.MiB, concurrency: 1},
+		// 4 parts, with as many concurrent workers.
+		{name: "concurrent", totalSize: 20 * bytesize.MiB, concurrency: 4},
+		// Exactly 2 full parts, no remainder.
+		{name: "exact-boundary", totalSize: 10 * bytesize.MiB, concurrency: 2},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 
-	// 5 MiB minimum part size, 12 MiB total → 3 parts (5 + 5 + 2).
-	partSize := int64(5 * bytesize.MiB)
-	totalSize := int64(12 * bytesize.MiB)
+			env := setup(t)
+			object := test.name + ".bin"
 
-	data := randomBytes(t, int(totalSize))
-	source := bytes.NewReader(data)
+			data := randomBytes(t, int(test.totalSize))
 
-	stateDir := t.TempDir()
-	tempDir := t.TempDir()
-	dataDir := t.TempDir()
+			err := env.client.Upload(
+				t.Context(),
+				object,
+				bytes.NewReader(data),
+				test.totalSize,
+				r2.MultipartOptions{
+					PartSize:    5 * bytesize.MiB,
+					StateDir:    t.TempDir(),
+					Concurrency: test.concurrency,
+				},
+			)
+			if err != nil {
+				t.Fatalf("Upload: %v", err)
+			}
 
-	err := env.client.Upload(
-		t.Context(),
-		"multi-part.bin",
-		source,
-		totalSize,
-		r2.MultipartOptions{
-			PartSize:    partSize,
-			StateDir:    stateDir,
-			Concurrency: 1,
-		},
-	)
-	if err != nil {
-		t.Fatalf("Upload: %v", err)
-	}
+			dataDir := t.TempDir()
 
-	// Verify round-trip.
-	err = env.client.Download(t.Context(), "multi-part.bin", tempDir, dataDir)
-	if err != nil {
-		t.Fatalf("Download: %v", err)
-	}
+			err = env.client.Download(t.Context(), object, t.TempDir(), dataDir)
+			if err != nil {
+				t.Fatalf("Download: %v", err)
+			}
 
-	got, err := xos.ReadFile(filepath.Join(dataDir, "multi-part.bin"))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
+			got, err := xos.ReadFile(filepath.Join(dataDir, object))
+			if err != nil {
+				t.Fatalf("read: %v", err)
+			}
 
-	if !bytes.Equal(got, data) {
-		t.Errorf("multipart round-trip mismatch: got %d bytes, want %d", len(got), len(data))
-	}
-}
-
-func TestUpload_ConcurrentWorkers(t *testing.T) {
-	t.Parallel()
-
-	env := setup(t)
-
-	// 4 parts with 4 concurrent workers.
-	partSize := int64(5 * bytesize.MiB)
-	totalSize := int64(20 * bytesize.MiB)
-
-	data := randomBytes(t, int(totalSize))
-	source := bytes.NewReader(data)
-
-	stateDir := t.TempDir()
-	tempDir := t.TempDir()
-	dataDir := t.TempDir()
-
-	err := env.client.Upload(
-		t.Context(),
-		"concurrent.bin",
-		source,
-		totalSize,
-		r2.MultipartOptions{
-			PartSize:    partSize,
-			StateDir:    stateDir,
-			Concurrency: 4,
-		},
-	)
-	if err != nil {
-		t.Fatalf("Upload: %v", err)
-	}
-
-	// Verify content is correct despite concurrent uploads.
-	err = env.client.Download(t.Context(), "concurrent.bin", tempDir, dataDir)
-	if err != nil {
-		t.Fatalf("Download: %v", err)
-	}
-
-	got, err := xos.ReadFile(filepath.Join(dataDir, "concurrent.bin"))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-
-	if !bytes.Equal(got, data) {
-		t.Errorf("concurrent upload round-trip mismatch: got %d bytes, want %d", len(got), len(data))
-	}
-}
-
-func TestUpload_ExactPartBoundary(t *testing.T) {
-	t.Parallel()
-
-	env := setup(t)
-
-	// Exactly 2 full parts, no remainder.
-	partSize := int64(5 * bytesize.MiB)
-	totalSize := int64(10 * bytesize.MiB)
-
-	data := randomBytes(t, int(totalSize))
-	source := bytes.NewReader(data)
-
-	stateDir := t.TempDir()
-	tempDir := t.TempDir()
-	dataDir := t.TempDir()
-
-	err := env.client.Upload(
-		t.Context(),
-		"exact-boundary.bin",
-		source,
-		totalSize,
-		r2.MultipartOptions{
-			PartSize:    partSize,
-			StateDir:    stateDir,
-			Concurrency: 2,
-		},
-	)
-	if err != nil {
-		t.Fatalf("Upload: %v", err)
-	}
-
-	err = env.client.Download(t.Context(), "exact-boundary.bin", tempDir, dataDir)
-	if err != nil {
-		t.Fatalf("Download: %v", err)
-	}
-
-	got, err := xos.ReadFile(filepath.Join(dataDir, "exact-boundary.bin"))
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-
-	if !bytes.Equal(got, data) {
-		t.Errorf("exact boundary round-trip mismatch: got %d bytes, want %d", len(got), len(data))
+			if !bytes.Equal(got, data) {
+				t.Errorf("round-trip mismatch: got %d bytes, want %d", len(got), len(data))
+			}
+		})
 	}
 }
 
