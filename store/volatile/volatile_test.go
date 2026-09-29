@@ -31,7 +31,7 @@ import (
 	"github.com/mycophonic/primordium/store/volatile"
 )
 
-//nolint:gocognit // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
+//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestVolatile_ConcurrentAcquire(t *testing.T) {
 	t.Parallel()
 

@@ -58,6 +58,8 @@ func New(root string, quota int64) *Cache {
 // On cache miss, the reader and writer are connected via a pipe: data written to writer
 // is teed to both the cache file and the reader.
 // The caller must Close() the returned reader and writer to release locks.
+//
+//nolint:funlen // one lock ladder, read top to bottom: each step's unlocks sit beside it
 func (c *Cache) Acquire(dgst digest.Digest) (io.ReadCloser, io.WriteCloser, error) {
 	// Use algorithm-encoded format for directory name (safe: validated hex + known algorithm).
 	// Shard into 256 prefix buckets by first 2 hex chars of the encoded hash.
@@ -185,6 +187,8 @@ func (p *PinnedFile) Release() error {
 // expected to complete a regular Acquire first and try again. The pin is the
 // same shared read flock a reader holds, so GarbageCollect skips the entry
 // while the pin is outstanding.
+//
+//nolint:funlen // one lock ladder, read top to bottom: each step's unlocks sit beside it
 func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 	name := strings.Replace(dgst.String(), ":", "-", 1)
 	prefix := dgst.Encoded()[:2]

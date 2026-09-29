@@ -146,7 +146,6 @@ linters:
     - errcheck # provided by revive
     - errname # provided by revive
     - forcetypeassert # provided by revive
-    - funlen # provided by revive
     - gomodguard # we use depguard instead
     - lll # provided by golines
     - loggercheck # better dealt with by specialized libraries
@@ -177,6 +176,11 @@ linters:
 
   settings:
     # Note: default, no changes
+    # 80 lines for the long-but-flat function, as the v0.6.1 baseline sets it.
+    funlen:
+      lines: 80
+      statements: 40
+      ignore-comments: true
     # Sonar's default for cognitive complexity, as the v0.6.1 baseline sets it.
     gocognit:
       min-complexity: 15
@@ -341,7 +345,7 @@ linters:
         - name: redundant-build-tag
           disabled: true # modernize plusbuild
         - name: function-length
-          arguments: [100, 0]
+          disabled: true # funlen
         - name: add-constant
           disabled: true # mnd for numbers, goconst for strings
         - name: cognitive-complexity
