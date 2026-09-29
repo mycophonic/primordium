@@ -175,7 +175,6 @@ linters:
           - dogsled
           - noctx
           - perfsprint
-          - depguard
       - path: _test.go
         text: "add-constant|cognitive-complexity|confusing-results|nested-structs|use-waitgroup-go|unchecked-type-assertion|unhandled-error|unused-receiver"
         linters:
@@ -319,7 +318,6 @@ linters:
             # CPU detection
             - github.com/klauspost/cpuid
             # Compression
-            - github.com/andybalholm/brotli
             - github.com/klauspost/compress
             - github.com/klauspost/pgzip
             - github.com/pierrec/lz4
@@ -328,6 +326,17 @@ linters:
             - github.com/aws/smithy-go
             - github.com/getsentry/sentry-go
             - github.com/aws/aws-sdk-go-v2
+            # Tests only
+            - gotest.tools/v3
+            - github.com/johannesboyne/gofakes3
+          # Standard-library packages the allow list would otherwise admit.
+          deny:
+            - pkg: log$
+              desc: logging is log/slog
+            - pkg: math/rand$
+              desc: use math/rand/v2
+            - pkg: io/ioutil$
+              desc: deprecated since Go 1.16; the functions moved to io and os
 
     staticcheck:
       checks:
