@@ -25,8 +25,8 @@ lint: do::lint::default do::lint::go::default
 [doc('Auto-fix what can be fixed (shared fixers + Go fixers)')]
 fix: do::fix::default do::fix::go::default
 
-# Unit, race, bench, and cover — the old `make test` (the coverage gate reads
-# TEST_GO_COVER_MIN above). No build/install: primordium is a library, with no
-# cmd/ binaries to build.
-[doc('Run the Go test suite: unit, race, bench, cover')]
-test: do::test::go::unit do::test::go::race do::test::go::bench do::test::go::cover
+# Unit, race and cover (the coverage gate reads TEST_GO_COVER_MIN above).
+# Benchmarks are a performance measure, not a test: `just do perf go bench`.
+# No build/install: primordium is a library, with no cmd/ binaries to build.
+[doc('Run the Go test suite: unit, race, cover')]
+test: do::test::go::unit do::test::go::race do::test::go::cover
