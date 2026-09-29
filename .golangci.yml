@@ -159,7 +159,6 @@ linters:
           - varnamelen
           - dupword
           - dogsled
-          - perfsprint
       - path: _test.go
         text: "confusing-results|nested-structs|unchecked-type-assertion|unhandled-error|unused-receiver"
         linters:

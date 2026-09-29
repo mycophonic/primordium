@@ -1496,7 +1496,7 @@ func TestReaddirNValues(t *testing.T) {
 	dir := t.TempDir()
 
 	for i := 1; i <= 105; i++ {
-		f, err := xos.Create(filepath.Join(dir, fmt.Sprintf("%d", i)))
+		f, err := xos.Create(filepath.Join(dir, strconv.Itoa(i)))
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
