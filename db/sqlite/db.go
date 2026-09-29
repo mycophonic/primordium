@@ -38,6 +38,9 @@ type Pragmas struct {
 	MaxConns   uint // 0 = database/sql default (unlimited).
 }
 
+// defaultCacheSize is the page cache of the read-only and read-write presets.
+const defaultCacheSize = 64 * bytesize.MiB
+
 // sizePragma sets pragma to size bytes.
 func sizePragma(pragma string, size int64) string {
 	return fmt.Sprintf("PRAGMA %s = %d", pragma, size)
@@ -57,7 +60,7 @@ var PragmasReadOnly = Pragmas{
 	Statements: []string{
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = NORMAL",
-		cacheSizePragma(64 * bytesize.MiB),
+		cacheSizePragma(defaultCacheSize),
 		"PRAGMA busy_timeout = 5000",
 	},
 }
@@ -73,7 +76,7 @@ var PragmasReadWrite = Pragmas{
 		"PRAGMA journal_mode = WAL",
 		"PRAGMA synchronous = FULL",
 		"PRAGMA foreign_keys = ON",
-		cacheSizePragma(64 * bytesize.MiB),
+		cacheSizePragma(defaultCacheSize),
 		"PRAGMA busy_timeout = 5000",
 	},
 }

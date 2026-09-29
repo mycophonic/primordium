@@ -110,7 +110,6 @@ func parseMemInfoLine(line, prefix string) (uint64, bool) {
 		return 0, false
 	}
 
-	//revive:disable-next-line:add-constant // decimal base
 	kilobytes, err := strconv.ParseUint(fields[1], 10, 64)
 	if err != nil {
 		return 0, false

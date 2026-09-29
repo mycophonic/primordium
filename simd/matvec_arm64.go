@@ -16,7 +16,6 @@
    limitations under the License.
 */
 
-//revive:disable:add-constant
 package simd
 
 //go:noescape

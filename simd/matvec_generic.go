@@ -18,7 +18,6 @@
 
 package simd
 
-//revive:disable:add-constant
 func matVecProduct64x32(
 	dst *[64]float32,
 	mat *[64][32]float32,

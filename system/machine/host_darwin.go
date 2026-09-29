@@ -130,7 +130,6 @@ func parseVMStatPageSize(line string) (uint64, error) {
 
 	sizeStr, _, _ := strings.Cut(after, " ")
 
-	//revive:disable-next-line:add-constant // decimal base
 	size, err := strconv.ParseUint(sizeStr, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%w: vm_stat: parse page size: %w", fault.ErrReadFailure, err)
@@ -149,7 +148,6 @@ func parseVMStatLine(line, prefix string) (uint64, bool) {
 	text := strings.TrimSpace(strings.TrimPrefix(line, prefix))
 	text = strings.TrimSuffix(text, ".")
 
-	//revive:disable-next-line:add-constant // decimal base
 	val, err := strconv.ParseUint(text, 10, 64)
 	if err != nil {
 		return 0, false

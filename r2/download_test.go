@@ -14,7 +14,6 @@
    limitations under the License.
 */
 
-//revive:disable:add-constant
 package r2_test
 
 import (
