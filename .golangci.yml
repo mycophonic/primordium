@@ -148,7 +148,6 @@ linters:
     - forcetypeassert # provided by revive
     - funlen # provided by revive
     - gocognit # provided by revive
-    - goconst # provided by revive
     - gomodguard # we use depguard instead
     - lll # provided by golines
     - loggercheck # better dealt with by specialized libraries
@@ -183,6 +182,11 @@ linters:
 
   settings:
     # Note: default, no changes
+    # A string repeated three times or more; format strings are patterns, not values.
+    goconst:
+      min-occurrences: 3
+      ignore-string-values:
+        - '^%'
     gosec:
       excludes:
         - G104 # unchecked errors are errcheck's
