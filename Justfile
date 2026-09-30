@@ -3,14 +3,8 @@
 # The import must be kept: it mounts every shared limen task under `just do ...`.
 import '.limen/just/main.just'
 
-# Project configuration, ported from the old Makefile:
-#   COVER_MIN := 30                          → TEST_GO_COVER_MIN
-#   LICENSE_IGNORES := --ignore gotest.tools → LINT_GO_LICENSES_FLAGS
-# go-licenses cannot resolve the LICENSE of the imported gotest.tools/v3
-# submodule (google/go-licenses#186), so it is ignored — exactly as the old
-# `lint-licenses` target did.
+# The coverage gate. go-licenses' ignores live in .lint-go.yaml.
 export TEST_GO_COVER_MIN := '30'
-export LINT_GO_LICENSES_FLAGS := '--ignore=gotest.tools/v3'
 
 # The FIRST recipe defined here becomes `just`'s default.
 # The shared default covers the language-agnostic linters (limen, just, aqua,
