@@ -1664,6 +1664,10 @@ func TestCache_GC_StatsAccuracy(t *testing.T) {
 			t.Fatalf("Acquire() error: %v", err)
 		}
 
+		if writer == nil {
+			t.Fatal("expected writer for new content")
+		}
+
 		wg.Go(func() {
 			if _, drainErr := io.ReadAll(reader); drainErr != nil {
 				t.Errorf("draining reader: %v", drainErr)
@@ -1839,6 +1843,10 @@ func TestCache_AcquireFilePinsCommittedContent(t *testing.T) {
 	reader, writer, err := blobCache.Acquire(digest)
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("expected writer for new content")
 	}
 
 	if _, err = writer.Write(content); err != nil {
