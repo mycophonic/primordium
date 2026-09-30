@@ -51,7 +51,6 @@ func TestCreateTempPattern(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct{ pattern, prefix, suffix string }{
-		//nolint:goconst // the ported test's pattern table
 		{"tempfile_test", "tempfile_test", ""},
 		{"tempfile_test*", "tempfile_test", ""},
 		{"tempfile_test*xyz", "tempfile_test", "xyz"},

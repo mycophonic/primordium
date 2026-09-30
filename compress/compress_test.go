@@ -288,7 +288,7 @@ func TestDecompress_LZ4ParallelMultiBlock(t *testing.T) {
 	// Trailing skippable frame: magic 0x184D2A50 + LE length + zeros.
 	tail := make([]byte, 512)
 	binary.LittleEndian.PutUint32(tail[0:4], 0x184D2A50)
-	binary.LittleEndian.PutUint32(tail[4:8], uint32(len(tail)-8)) // #nosec G115 -- a short fixed test frame
+	binary.LittleEndian.PutUint32(tail[4:8], uint32(len(tail)-8))
 	buf.Write(tail)
 
 	decompressed, err := compress.Decompress(&buf)

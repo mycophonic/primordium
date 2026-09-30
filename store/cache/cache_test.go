@@ -46,7 +46,6 @@ func computeDigest(content []byte) dgst.Digest {
 	return d
 }
 
-//nolint:funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_WriteAndRead(t *testing.T) {
 	t.Parallel()
 
@@ -272,7 +271,6 @@ func TestCache_WriteAlreadyExists(t *testing.T) {
 	assert.Check(t, reader2.Close())
 }
 
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_ConcurrentReadWhileWrite(t *testing.T) {
 	t.Parallel()
 
@@ -454,7 +452,6 @@ func TestCache_ConcurrentReadWhileWriteFails(t *testing.T) {
 	wg.Wait()
 }
 
-//nolint:gocognit // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_MultipleReadersComplete(t *testing.T) {
 	t.Parallel()
 
@@ -750,8 +747,6 @@ func TestCache_SequentialWriteThenReadMismatch(t *testing.T) {
 
 // TestCache_ConcurrentWritersRace tests multiple goroutines racing to write the same digest.
 // Only ONE should get a writer, others should get reader-only (for in-progress or complete).
-//
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_ConcurrentWritersRace(t *testing.T) {
 	t.Parallel()
 
@@ -868,8 +863,6 @@ func TestCache_ConcurrentWritersRace(t *testing.T) {
 }
 
 // TestCache_ReaderAttachesMidWrite tests a reader attaching at various points during a write.
-//
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 	t.Parallel()
 
@@ -989,8 +982,6 @@ func TestCache_ReaderAttachesMidWrite(t *testing.T) {
 }
 
 // TestCache_RapidAcquireClose tests rapid acquire/close cycles don't corrupt state.
-//
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_RapidAcquireClose(t *testing.T) {
 	t.Parallel()
 
@@ -1231,8 +1222,6 @@ func TestCache_PartialWriteAbandon(t *testing.T) {
 }
 
 // TestCache_MultipleConcurrentDigests tests concurrent operations on different digests.
-//
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_MultipleConcurrentDigests(t *testing.T) {
 	t.Parallel()
 
@@ -1340,8 +1329,6 @@ func TestCache_MultipleConcurrentDigests(t *testing.T) {
 }
 
 // TestCache_StressReadersWhileWriting stress tests many readers attaching during write.
-//
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_StressReadersWhileWriting(t *testing.T) {
 	t.Parallel()
 
@@ -1721,8 +1708,6 @@ func TestCache_GC_StatsAccuracy(t *testing.T) {
 }
 
 // TestCache_GC_ConcurrentWithAcquire tests GC doesn't interfere with concurrent Acquire.
-//
-//nolint:gocognit // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 	t.Parallel()
 
@@ -1740,7 +1725,7 @@ func TestCache_GC_ConcurrentWithAcquire(t *testing.T) {
 
 			content := make([]byte, 1000+idx*100)
 			for j := range content {
-				content[j] = byte(idx) // #nosec G115 -- a small goroutine index as fill
+				content[j] = byte(idx)
 			}
 
 			digest := computeDigest(content)

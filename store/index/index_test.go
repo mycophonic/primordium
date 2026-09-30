@@ -174,8 +174,6 @@ func TestGrowReopenPreservesData(t *testing.T) {
 // records still occupy slots), then verifies tombstones are eliminated,
 // only live records survive, and the capacity stays put: the live records
 // fit in it.
-//
-//nolint:gocognit,funlen,gocyclo // one scenario in order: the complexity is the check after each step
 func TestGrowWithTombstones(t *testing.T) {
 	t.Parallel()
 
@@ -269,8 +267,6 @@ func TestGrowWithTombstones(t *testing.T) {
 // TestChurn replaces keys over and over while the live count stays far below
 // the capacity: every Put succeeds, and the capacity does not move, with or
 // without a MaxCap.
-//
-//nolint:gocognit // one scenario in order: the complexity is the check after each step
 func TestChurn(t *testing.T) {
 	t.Parallel()
 
@@ -280,7 +276,7 @@ func TestChurn(t *testing.T) {
 
 			idx := openTestIndex(t, &index.Options{InitialCap: 1024, MaxCap: maxCap})
 
-			rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- fixed-seed keys for a repeatable test
+			rng := rand.New(rand.NewPCG(1, 2))
 
 			keys := make([]uint64, 100)
 			for i := range keys {
@@ -491,7 +487,6 @@ func writeTestJournal(t *testing.T, path string, newCap uint64, records []index.
 		off := journalHeaderSize + i*journalRecordSize
 		binary.BigEndian.PutUint64(buf[off:off+8], rec.Key)
 		copy(buf[off+8:off+8+valSize], rec.Value)
-		// #nosec G115 -- a timestamp's bit pattern, as the index stores it
 		binary.BigEndian.PutUint64(buf[off+8+valSize:off+8+valSize+8], uint64(rec.Timestamp))
 	}
 
@@ -502,8 +497,6 @@ func writeTestJournal(t *testing.T, path string, newCap uint64, records []index.
 
 // TestJournalRecovery simulates a crash mid-grow by leaving a journal file
 // and corrupting the data file, then verifies New recovers from the journal.
-//
-//nolint:gocognit,funlen,gocyclo // one scenario in order: the complexity is the check after each step
 func TestJournalRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -761,8 +754,6 @@ func TestJournalSizeMismatch(t *testing.T) {
 
 // TestConcurrentReadWriteGrow exercises concurrent Put (triggering multiple
 // grows) and Get operations under the race detector.
-//
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestConcurrentReadWriteGrow(t *testing.T) {
 	t.Parallel()
 
@@ -779,12 +770,12 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 	// Writers: each owns a disjoint key range to avoid update contention.
 	for w := range numWriters {
 		writers.Go(func() {
-			base := uint64(w) * keysPerWriter // #nosec G115 -- a small writer index
+			base := uint64(w) * keysPerWriter
 			for i := range uint64(keysPerWriter) {
 				key := base + i
 				val := testValue(key * 7)
 
-				if err := idx.Put(key, val, int64(key)); err != nil { // #nosec G115 -- a small test key
+				if err := idx.Put(key, val, int64(key)); err != nil {
 					t.Errorf("writer %d put %d: %v", w, key, err)
 
 					return
@@ -807,7 +798,7 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 				default:
 				}
 
-				key := uint64(r) * keysPerWriter // #nosec G115 -- a small reader index
+				key := uint64(r) * keysPerWriter
 
 				_, _, err := idx.Get(key)
 				if err != nil {
@@ -858,8 +849,6 @@ func TestConcurrentReadWriteGrow(t *testing.T) {
 
 // TestConcurrentDeleteDuringGrow exercises concurrent Delete, Put, and
 // ForEach while grow operations are being triggered.
-//
-//nolint:gocognit,funlen,gocyclo // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestConcurrentDeleteDuringGrow(t *testing.T) {
 	t.Parallel()
 
@@ -967,8 +956,6 @@ func TestConcurrentDeleteDuringGrow(t *testing.T) {
 
 // TestConcurrentGrowContention has multiple goroutines all racing to insert
 // into a tiny table, causing frequent grow contention on the write lock.
-//
-//nolint:gocognit // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestConcurrentGrowContention(t *testing.T) {
 	t.Parallel()
 
@@ -983,12 +970,12 @@ func TestConcurrentGrowContention(t *testing.T) {
 
 	for g := range numGoroutines {
 		wg.Go(func() {
-			base := uint64(g) * keysEach // #nosec G115 -- a small goroutine index
+			base := uint64(g) * keysEach
 			for i := range uint64(keysEach) {
 				key := base + i
 				val := testValue(key)
 
-				if err := idx.Put(key, val, int64(key)); err != nil { // #nosec G115 -- a small test key
+				if err := idx.Put(key, val, int64(key)); err != nil {
 					t.Errorf("goroutine %d put %d: %v", g, key, err)
 
 					return
@@ -1760,8 +1747,6 @@ func TestStaleWriterRecovery(t *testing.T) {
 // stale reader count in the cross-process lock word. The writer must detect
 // that no alive PIDs are registered in the lock file and CAS-reset the
 // stale count to acquire the write lock.
-//
-//nolint:gocognit,funlen,gocyclo // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestStaleReaderRecovery(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping under -short")

@@ -28,7 +28,6 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
-//nolint:funlen // a table of cases, one per line
 func TestFromString_ValidDigests(t *testing.T) {
 	t.Parallel()
 

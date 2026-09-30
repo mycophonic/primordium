@@ -20,7 +20,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-//nolint:wrapcheck,varnamelen // mirrors os.CreateTemp: its errors and names as the standard library has them
+//nolint:wrapcheck // mirrors os.CreateTemp: its errors as the standard library has them
 //revive:disable:exported
 package xos
 

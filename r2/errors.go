@@ -29,8 +29,6 @@ import (
 )
 
 // mapErr classifies an AWS SDK error into an appropriate fault sentinel.
-//
-//nolint:cyclop // Flat type-switch; each branch is trivial.
 func mapErr(err error) error {
 	// Context cancellation / deadline exceeded.
 	var cancelErr *smithy.CanceledError

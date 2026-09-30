@@ -94,8 +94,6 @@ func BenchmarkPutUpdate(b *testing.B) {
 }
 
 // BenchmarkGet measures lookup cost at various table sizes.
-//
-//nolint:gocognit // a benchmark: setup, the timed loop and its checks stay in one body
 func BenchmarkGet(b *testing.B) {
 	for _, count := range []int{100, 1_000, 10_000, 100_000} {
 		b.Run(fmt.Sprintf("n=%d", count), func(b *testing.B) {
@@ -156,8 +154,6 @@ func BenchmarkGetMiss(b *testing.B) {
 }
 
 // BenchmarkDelete measures delete cost (marking tombstones).
-//
-//nolint:gocognit // a benchmark: setup, the timed loop and its checks stay in one body
 func BenchmarkDelete(b *testing.B) {
 	idx := openIndex(b)
 
@@ -166,7 +162,7 @@ func BenchmarkDelete(b *testing.B) {
 	// the refill turns quadratic, and the benchmark runs for minutes while
 	// reporting only the deletes.
 	count := 10_000
-	rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- fixed-seed keys for a repeatable run
+	rng := rand.New(rand.NewPCG(1, 2))
 
 	keys := make([]uint64, count)
 	for i := range keys {
@@ -207,8 +203,6 @@ func BenchmarkDelete(b *testing.B) {
 }
 
 // BenchmarkForEach measures full iteration cost at various sizes.
-//
-//nolint:gocognit // a benchmark: setup, the timed loop and its checks stay in one body
 func BenchmarkForEach(b *testing.B) {
 	for _, count := range []int{100, 1_000, 10_000, 100_000} {
 		b.Run(fmt.Sprintf("n=%d", count), func(b *testing.B) {
@@ -245,8 +239,6 @@ func BenchmarkForEach(b *testing.B) {
 
 // BenchmarkGrowth measures the cost of growing from default capacity (1024)
 // to a target size. Reports total time and ns/op for the entire fill.
-//
-//nolint:gocognit // a benchmark: setup, the timed loop and its checks stay in one body
 func BenchmarkGrowth(b *testing.B) {
 	for _, target := range []int{1_000, 10_000, 100_000} {
 		b.Run(fmt.Sprintf("to=%d", target), func(b *testing.B) {

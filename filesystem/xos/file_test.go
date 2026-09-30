@@ -20,7 +20,7 @@
 
 // Adapted from Go stdlib src/os/os_test.go for xos package testing.
 
-//nolint:paralleltest,tparallel,thelper,gocognit,funlen,gocyclo // Ported stdlib tests; preserving original structure.
+//nolint:paralleltest,tparallel,thelper // Ported stdlib tests; preserving original structure.
 package xos_test
 
 import (
@@ -76,7 +76,7 @@ func hasLink() bool {
 
 	defer os.RemoveAll(dir) //nolint:errcheck // Best-effort cleanup.
 
-	f, err := os.Create(filepath.Join(dir, "t")) // #nosec G304 -- as in the standard library's os tests this file ports
+	f, err := os.Create(filepath.Join(dir, "t"))
 	if err != nil {
 		return false
 	}
@@ -107,7 +107,6 @@ var sysdir = func() *sysDir { //nolint:gochecknoglobals // Test fixture.
 				"libpowermanager.so",
 			},
 		}
-	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	case "windows":
 		return &sysDir{
 			os.Getenv("SystemRoot") + "\\system32\\drivers\\etc",
@@ -668,7 +667,6 @@ func TestStatDirWithTrailingSlash(t *testing.T) {
 }
 
 func TestStatDirModeExec(t *testing.T) {
-	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	if runtime.GOOS == "wasip1" {
 		t.Skip("Chmod is not supported on " + runtime.GOOS)
 	}
@@ -678,7 +676,6 @@ func TestStatDirModeExec(t *testing.T) {
 	const mode = 0o111
 
 	path := t.TempDir()
-	// #nosec G302 -- as in the standard library's os tests this file ports
 	if err := os.Chmod(path, 0o777); err != nil {
 		t.Fatalf("Chmod %q 0777: %v", path, err)
 	}
@@ -814,7 +811,6 @@ func TestOpenError(t *testing.T) {
 	// Create a file and a directory for error mapping tests.
 	touch(t, filepath.Join(dir, "is-a-file"))
 
-	// #nosec G301 -- as in the standard library's os tests this file ports
 	if err := os.Mkdir(filepath.Join(dir, "is-a-dir"), 0o777); err != nil {
 		t.Fatal(err)
 	}
@@ -1731,7 +1727,6 @@ func TestLongPath(t *testing.T) {
 		t.Run(fmt.Sprintf("length=%d", sz), func(t *testing.T) {
 			sizedTempDir := tmpdir[:sz-1] + "x"
 
-			// #nosec G301 -- as in the standard library's os tests this file ports
 			if err := os.MkdirAll(sizedTempDir, 0o755); err != nil {
 				t.Fatalf("MkdirAll failed: %v", err)
 			}
