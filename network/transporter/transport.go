@@ -129,186 +129,127 @@ func (t *retryTransport) waitForToken(ctx context.Context) (time.Duration, error
 	}
 }
 
+//nolint:funlen,gocognit,gocyclo // one retry protocol, read top to bottom: wait, attempt, classify, decide
 func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
-	var last outcome
+	var (
+		lastErr       error
+		retryAfterVal time.Duration
+	)
 
 	for attempt := range t.maxRetries + 1 {
 		if attempt > 0 {
-			backoff := max(last.retryAfter, t.backoffDuration(attempt))
+			backoff := max(retryAfterVal, t.backoffDuration(attempt))
+			retryAfterVal = 0
 
-			if err := waitToRetry(req, backoff, last.err); err != nil {
-				return nil, err
+			select {
+			case <-req.Context().Done():
+				return nil, fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr)
+			case <-time.After(backoff):
+			}
+
+			if err := resetBody(req); err != nil {
+				return nil, fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
 			}
 		}
 
-		var resp *http.Response
+		tokenWait, err := t.waitForToken(req.Context())
+		if err != nil {
+			return nil, err
+		}
 
-		resp, last = t.attempt(req, attempt)
-		if resp != nil {
+		start := time.Now()
+		resp, err := t.base.RoundTrip(req)
+		elapsed := time.Since(start)
+
+		if err != nil {
+			lastErr = fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
+
+			if req.Context().Err() != nil {
+				return nil, fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr)
+			}
+
+			slog.WarnContext(req.Context(), "HTTP transport error, retrying",
+				"attempt", attempt+1,
+				"elapsed", elapsed,
+				"token_wait", tokenWait,
+				"delay", t.backoffDuration(attempt+1).String(),
+				"error", err,
+				"url", req.URL.String(),
+			)
+
+			continue
+		}
+
+		slog.DebugContext(req.Context(), "HTTP roundtrip",
+			"status", resp.StatusCode,
+			"elapsed", elapsed,
+			"token_wait", tokenWait,
+			"url", req.URL.String(),
+		)
+
+		retryable := resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusUnauthorized ||
+			resp.StatusCode >= http.StatusInternalServerError
+		if !retryable {
+			if elapsed > slowRequestThreshold {
+				slog.WarnContext(req.Context(), "slow HTTP request",
+					"elapsed", elapsed,
+					"status", resp.StatusCode,
+					"url", req.URL.String(),
+				)
+			}
+
+			resp.Body = &progressBody{
+				ReadCloser: resp.Body,
+				url:        req.URL.String(),
+				start:      time.Now(),
+				totalSize:  resp.ContentLength,
+			}
+
 			return resp, nil
 		}
 
-		if last.final {
-			return nil, last.err
-		}
-	}
+		// Drain body before retry to allow connection reuse.
+		drainBody(resp.Body)
 
-	return nil, last.err
-}
+		lastErr = fmt.Errorf("%w: HTTP %d", fault.ErrUnacceptableResponse, resp.StatusCode)
 
-// outcome is what an attempt without a final response decided: an error
-// to hand back, or one to remember while another attempt is made, after at
-// least the delay the server asked for.
-type outcome struct {
-	err        error
-	retryAfter time.Duration
-	final      bool
-}
+		if attempt == t.maxRetries {
+			slog.WarnContext(req.Context(), "HTTP retries exhausted",
+				"status", resp.StatusCode,
+				"attempts", t.maxRetries+1,
+				"url", req.URL.String(),
+			)
 
-// attempt makes one round trip, once a rate-limit token is available. A
-// response it returns is final; without one, the outcome says what
-// happened.
-func (t *retryTransport) attempt(req *http.Request, attempt int) (*http.Response, outcome) {
-	ctx := req.Context()
-
-	tokenWait, err := t.waitForToken(ctx)
-	if err != nil {
-		return nil, outcome{err: err, final: true}
-	}
-
-	start := time.Now()
-	resp, err := t.base.RoundTrip(req)
-	elapsed := time.Since(start)
-
-	if err != nil {
-		lastErr := fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
-
-		if ctx.Err() != nil {
-			return nil, outcome{err: fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr), final: true}
+			break
 		}
 
-		slog.WarnContext(ctx, "HTTP transport error, retrying",
+		retryAfterVal = retryAfter(resp.Header)
+
+		if t.maxBackoff > 0 && retryAfterVal > t.maxBackoff {
+			slog.WarnContext(req.Context(), "retry-after too large, giving up",
+				"status", resp.StatusCode,
+				"retry_after", retryAfterVal,
+				"max", t.maxBackoff,
+				"url", req.URL.String(),
+			)
+
+			break
+		}
+
+		nextBackoff := max(retryAfterVal, t.backoffDuration(attempt+1))
+
+		slog.WarnContext(req.Context(), "HTTP error, retrying",
+			"status", resp.StatusCode,
 			"attempt", attempt+1,
 			"elapsed", elapsed,
 			"token_wait", tokenWait,
-			"delay", t.backoffDuration(attempt+1).String(),
-			"error", err,
-			"url", req.URL.String(),
-		)
-
-		return nil, outcome{err: lastErr}
-	}
-
-	slog.DebugContext(ctx, "HTTP roundtrip",
-		"status", resp.StatusCode,
-		"elapsed", elapsed,
-		"token_wait", tokenWait,
-		"url", req.URL.String(),
-	)
-
-	if !retryableStatus(resp.StatusCode) {
-		return accepted(req, resp, elapsed), outcome{}
-	}
-
-	// Drain body before retry to allow connection reuse.
-	drainBody(resp.Body)
-
-	return nil, t.statusFailure(req, resp.StatusCode, resp.Header, attempt, elapsed, tokenWait)
-}
-
-// statusFailure decides after a response whose status earns a retry. The
-// attempts end after the last one, and when the server asks for a longer
-// delay than maxBackoff allows.
-func (t *retryTransport) statusFailure(
-	req *http.Request,
-	status int,
-	header http.Header,
-	attempt int,
-	elapsed, tokenWait time.Duration,
-) outcome {
-	ctx := req.Context()
-	lastErr := fmt.Errorf("%w: HTTP %d", fault.ErrUnacceptableResponse, status)
-
-	if attempt == t.maxRetries {
-		slog.WarnContext(ctx, "HTTP retries exhausted",
-			"status", status,
-			"attempts", t.maxRetries+1,
-			"url", req.URL.String(),
-		)
-
-		return outcome{err: lastErr, final: true}
-	}
-
-	retryAfterVal := retryAfter(header)
-
-	if t.maxBackoff > 0 && retryAfterVal > t.maxBackoff {
-		slog.WarnContext(ctx, "retry-after too large, giving up",
-			"status", status,
-			"retry_after", retryAfterVal,
-			"max", t.maxBackoff,
-			"url", req.URL.String(),
-		)
-
-		return outcome{err: lastErr, final: true}
-	}
-
-	nextBackoff := max(retryAfterVal, t.backoffDuration(attempt+1))
-
-	slog.WarnContext(ctx, "HTTP error, retrying",
-		"status", status,
-		"attempt", attempt+1,
-		"elapsed", elapsed,
-		"token_wait", tokenWait,
-		"delay", nextBackoff.String(),
-		"url", req.URL.String(),
-	)
-
-	return outcome{err: lastErr, retryAfter: retryAfterVal}
-}
-
-// waitToRetry waits out backoff before the next attempt, unless the request
-// is cancelled first, then rewinds the request body for the resend.
-func waitToRetry(req *http.Request, backoff time.Duration, lastErr error) error {
-	select {
-	case <-req.Context().Done():
-		return fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr)
-	case <-time.After(backoff):
-	}
-
-	if err := resetBody(req); err != nil {
-		return fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
-	}
-
-	return nil
-}
-
-// retryableStatus reports the statuses worth another attempt: rate limiting,
-// an authorization a retry may renew, and server errors.
-func retryableStatus(code int) bool {
-	return code == http.StatusTooManyRequests ||
-		code == http.StatusUnauthorized ||
-		code >= http.StatusInternalServerError
-}
-
-// accepted hands a final response to the caller, its body wrapped to report
-// download progress, and logs it when it was slow.
-func accepted(req *http.Request, resp *http.Response, elapsed time.Duration) *http.Response {
-	if elapsed > slowRequestThreshold {
-		slog.WarnContext(req.Context(), "slow HTTP request",
-			"elapsed", elapsed,
-			"status", resp.StatusCode,
+			"delay", nextBackoff.String(),
 			"url", req.URL.String(),
 		)
 	}
 
-	resp.Body = &progressBody{
-		ReadCloser: resp.Body,
-		url:        req.URL.String(),
-		start:      time.Now(),
-		totalSize:  resp.ContentLength,
-	}
-
-	return resp
+	return nil, lastErr
 }
 
 // refill sends a token into the limiter channel at the configured rate.
