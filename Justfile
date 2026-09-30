@@ -24,3 +24,8 @@ fix: do::fix::default do::fix::go::default
 # No build/install: primordium is a library, with no cmd/ binaries to build.
 [doc('Run the Go test suite: unit, race, cover')]
 test: do::test::go::unit do::test::go::race do::test::go::cover
+
+# The shared security scans (govulncheck, for a Go module); the security
+# workflow runs this recipe.
+[doc('Run the security scans')]
+security: do::security::default
