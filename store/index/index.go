@@ -99,12 +99,33 @@ type Record struct {
 }
 
 // New opens or creates an index at the given path.
+//
+//nolint:funlen,gocognit,gocyclo // one setup sequence, in order; its complexity is an error check per step
 func New(path string, opts *Options) (*Index, error) {
 	idx := &Index{path: path, lockPath: path + ".lock", journalPath: path + ".journal"}
 
-	initialCap, optErr := idx.applyOptions(opts)
-	if optErr != nil {
-		return nil, optErr
+	initialCap := uint64(defaultCap)
+	idx.valSize = defaultValSize
+
+	if opts != nil {
+		if opts.InitialCap != 0 {
+			initialCap = opts.InitialCap
+		}
+
+		idx.maxCap = opts.MaxCap
+
+		if opts.ValSize != 0 {
+			idx.valSize = opts.ValSize
+		}
+	}
+
+	if idx.valSize <= 0 || idx.valSize > math.MaxUint16 {
+		return nil, fmt.Errorf("%w: valSize %d out of range (1..%d)",
+			fault.ErrInvalidArgument, idx.valSize, math.MaxUint16)
+	}
+
+	if idx.maxCap != 0 && initialCap > idx.maxCap {
+		return nil, fmt.Errorf("%w: initial capacity %d exceeds max %d", ErrCapacityExceeded, initialCap, idx.maxCap)
 	}
 
 	// Ensure the parent directory exists.
@@ -169,8 +190,22 @@ func New(path string, opts *Options) (*Index, error) {
 	}
 
 	hdr := idx.readHeader()
-	if err := idx.checkHeader(hdr); err != nil {
-		return nil, err
+	if hdr.Magic != magic {
+		return nil, fmt.Errorf("%w: invalid magic: %#x", fault.ErrInvalidArgument, hdr.Magic)
+	}
+
+	if hdr.Version != version {
+		return nil, fmt.Errorf("%w: unsupported version: %d", fault.ErrInvalidArgument, hdr.Version)
+	}
+
+	if hdr.ValSize != uint16(idx.valSize) {
+		return nil, fmt.Errorf("%w: valSize mismatch: file has %d, options specify %d",
+			fault.ErrInvalidArgument, hdr.ValSize, idx.valSize)
+	}
+
+	if idx.maxCap != 0 && hdr.Capacity > idx.maxCap {
+		return nil, fmt.Errorf("%w: existing capacity %d exceeds max %d",
+			ErrCapacityExceeded, hdr.Capacity, idx.maxCap)
 	}
 
 	idx.cap = hdr.Capacity
@@ -244,6 +279,8 @@ func (idx *Index) Get(key uint64) (Record, bool, error) {
 // Put inserts or updates a record. Grows the table if needed.
 // The value slice must be between 1 and valSize bytes; it is zero-padded
 // internally to the configured valSize.
+//
+//nolint:gocognit // the grow check and the probe belong under one write lock, in one place
 func (idx *Index) Put(key uint64, value []byte, timestamp int64) error {
 	if len(value) == 0 {
 		return fmt.Errorf("%w: empty value", fault.ErrInvalidArgument)
@@ -274,7 +311,48 @@ func (idx *Index) Put(key uint64, value []byte, timestamp int64) error {
 		hdr = idx.readHeader()
 	}
 
-	return idx.insertLocked(hdr, key, val, timestamp)
+	start := key % hdr.Capacity
+
+	var firstTombstone int64 = -1
+
+	for probe := range hdr.Capacity {
+		bucket := (start + probe) % hdr.Capacity
+		off := idx.offset(bucket)
+		status := idx.data[off]
+
+		switch status {
+		case statusEmpty:
+			// Insert at tombstone if we passed one, otherwise here.
+			if firstTombstone >= 0 {
+				off = firstTombstone
+				hdr.Tombstones--
+			}
+
+			idx.writeRecord(off, key, val, timestamp)
+
+			hdr.Count++
+			idx.writeHeader(hdr)
+
+			return nil
+
+		case statusOccupied:
+			if idx.readKey(off) == key {
+				// Update existing.
+				idx.writeRecord(off, key, val, timestamp)
+
+				return nil
+			}
+
+		case statusDeleted:
+			if firstTombstone < 0 {
+				firstTombstone = off
+			}
+		default:
+		}
+	}
+
+	// Should not happen if load factor is maintained.
+	return fmt.Errorf("%w: table full", fault.ErrSystemFailure)
 }
 
 // Delete removes a record by key. Returns false if not found.
@@ -371,109 +449,6 @@ func (idx *Index) Sync() error {
 	}
 
 	return nil
-}
-
-// applyOptions sets the value size and capacity bound from opts, the
-// defaults where opts leaves them zero, and returns the initial capacity.
-func (idx *Index) applyOptions(opts *Options) (uint64, error) {
-	initialCap := uint64(defaultCap)
-	idx.valSize = defaultValSize
-
-	if opts != nil {
-		if opts.InitialCap != 0 {
-			initialCap = opts.InitialCap
-		}
-
-		idx.maxCap = opts.MaxCap
-
-		if opts.ValSize != 0 {
-			idx.valSize = opts.ValSize
-		}
-	}
-
-	if idx.valSize <= 0 || idx.valSize > math.MaxUint16 {
-		return 0, fmt.Errorf("%w: valSize %d out of range (1..%d)",
-			fault.ErrInvalidArgument, idx.valSize, math.MaxUint16)
-	}
-
-	if idx.maxCap != 0 && initialCap > idx.maxCap {
-		return 0, fmt.Errorf("%w: initial capacity %d exceeds max %d", ErrCapacityExceeded, initialCap, idx.maxCap)
-	}
-
-	return initialCap, nil
-}
-
-// checkHeader refuses a data file this index cannot use: another format,
-// another version, another value size, or a capacity past the bound.
-func (idx *Index) checkHeader(hdr header) error {
-	if hdr.Magic != magic {
-		return fmt.Errorf("%w: invalid magic: %#x", fault.ErrInvalidArgument, hdr.Magic)
-	}
-
-	if hdr.Version != version {
-		return fmt.Errorf("%w: unsupported version: %d", fault.ErrInvalidArgument, hdr.Version)
-	}
-
-	if int(hdr.ValSize) != idx.valSize {
-		return fmt.Errorf("%w: valSize mismatch: file has %d, options specify %d",
-			fault.ErrInvalidArgument, hdr.ValSize, idx.valSize)
-	}
-
-	if idx.maxCap != 0 && hdr.Capacity > idx.maxCap {
-		return fmt.Errorf("%w: existing capacity %d exceeds max %d",
-			ErrCapacityExceeded, hdr.Capacity, idx.maxCap)
-	}
-
-	return nil
-}
-
-// insertLocked probes from key's home bucket and writes the record into the
-// first free slot, reusing the first tombstone passed, or over the record
-// already holding key. The caller holds the write lock and has grown the
-// table past the load factor.
-func (idx *Index) insertLocked(hdr header, key uint64, val []byte, timestamp int64) error {
-	start := key % hdr.Capacity
-
-	var firstTombstone int64 = -1
-
-	for probe := range hdr.Capacity {
-		bucket := (start + probe) % hdr.Capacity
-		off := idx.offset(bucket)
-		status := idx.data[off]
-
-		switch status {
-		case statusEmpty:
-			// Insert at tombstone if we passed one, otherwise here.
-			if firstTombstone >= 0 {
-				off = firstTombstone
-				hdr.Tombstones--
-			}
-
-			idx.writeRecord(off, key, val, timestamp)
-
-			hdr.Count++
-			idx.writeHeader(hdr)
-
-			return nil
-
-		case statusOccupied:
-			if idx.readKey(off) == key {
-				// Update existing.
-				idx.writeRecord(off, key, val, timestamp)
-
-				return nil
-			}
-
-		case statusDeleted:
-			if firstTombstone < 0 {
-				firstTombstone = off
-			}
-		default:
-		}
-	}
-
-	// Should not happen if load factor is maintained.
-	return fmt.Errorf("%w: table full", fault.ErrSystemFailure)
 }
 
 // --- internal ---
@@ -837,6 +812,8 @@ func (idx *Index) getUnlocked(key uint64) (Record, bool) {
 
 // growLocked rebuilds the table without its tombstones, at double the
 // capacity when the live records need it and at the same capacity otherwise.
+//
+//nolint:funlen,gocognit,gocyclo // the crash-safety protocol: its steps are ordered and read as one
 func (idx *Index) growLocked() error {
 	hdr := idx.readHeader()
 	liveLoad := float64(hdr.Count+1) / float64(hdr.Capacity)
@@ -858,7 +835,14 @@ func (idx *Index) growLocked() error {
 		newCap = hdr.Capacity
 	}
 
-	records := idx.liveRecords(hdr)
+	// Collect all live records.
+	records := make([]Record, 0, hdr.Count)
+	for bucket := range hdr.Capacity {
+		off := idx.offset(bucket)
+		if idx.data[off] == statusOccupied {
+			records = append(records, idx.readRecord(off))
+		}
+	}
 
 	// Take the setup lock to exclude concurrent New (which checks for
 	// the journal during recovery). Released after the journal is deleted.
@@ -898,7 +882,40 @@ func (idx *Index) growLocked() error {
 		return fmt.Errorf("%w: mmap new: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	idx.rebuild(newData, newCap, records)
+	// Zero the data region in the new mapping and write a fresh header.
+	for i := range newData[headerSize:] {
+		newData[headerSize+i] = 0
+	}
+
+	newHdr := header{
+		Magic:   magic,
+		Version: version,
+		// #nosec G115 -- valSize is validated to be in [1, 65535] in New
+		ValSize:  uint16(idx.valSize),
+		Capacity: newCap,
+	}
+	marshalHeader(newData, newHdr)
+
+	// Reinsert all records through the new mapping.
+	recSize := idx.recordSize()
+
+	for _, rec := range records {
+		start := rec.Key % newCap
+		for j := range newCap {
+			bucket := (start + j) % newCap
+			// #nosec G115 -- bucket < newCap, bounded by file size
+			off := int64(headerSize) + int64(bucket)*recSize
+			if newData[off] == statusEmpty {
+				marshalRecord(newData, off, rec.Key, rec.Value, idx.valSize, rec.Timestamp)
+
+				newHdr.Count++
+
+				break
+			}
+		}
+	}
+
+	marshalHeader(newData, newHdr)
 
 	// Swap: atomically transition idx from old mapping to new.
 	oldData, oldMstate := idx.data, idx.mstate
@@ -923,58 +940,6 @@ func (idx *Index) growLocked() error {
 	_ = os.Remove(idx.journalPath)
 
 	return nil
-}
-
-// liveRecords collects the occupied records of the current mapping.
-func (idx *Index) liveRecords(hdr header) []Record {
-	records := make([]Record, 0, hdr.Count)
-
-	for bucket := range hdr.Capacity {
-		off := idx.offset(bucket)
-		if idx.data[off] == statusOccupied {
-			records = append(records, idx.readRecord(off))
-		}
-	}
-
-	return records
-}
-
-// rebuild lays a fresh table of newCap buckets into newData, a mapping no
-// reader sees yet: the data region zeroed, then every record reinserted,
-// then the header with the final count.
-func (idx *Index) rebuild(newData []byte, newCap uint64, records []Record) {
-	for i := range newData[headerSize:] {
-		newData[headerSize+i] = 0
-	}
-
-	newHdr := header{
-		Magic:   magic,
-		Version: version,
-		// #nosec G115 -- valSize is validated to be in [1, 65535] in New
-		ValSize:  uint16(idx.valSize),
-		Capacity: newCap,
-	}
-	marshalHeader(newData, newHdr)
-
-	recSize := idx.recordSize()
-
-	for _, rec := range records {
-		start := rec.Key % newCap
-		for j := range newCap {
-			bucket := (start + j) % newCap
-			// #nosec G115 -- bucket < newCap, bounded by file size
-			off := int64(headerSize) + int64(bucket)*recSize
-			if newData[off] == statusEmpty {
-				marshalRecord(newData, off, rec.Key, rec.Value, idx.valSize, rec.Timestamp)
-
-				newHdr.Count++
-
-				break
-			}
-		}
-	}
-
-	marshalHeader(newData, newHdr)
 }
 
 // reopenLocked remaps the underlying file at its current size. Called
@@ -1146,6 +1111,7 @@ func (idx *Index) allReaderPIDsDead() bool {
 	return true
 }
 
+//nolint:gocognit // the cross-process read-lock protocol, read top to bottom
 func (idx *Index) rlock() {
 	idx.mu.RLock()
 
@@ -1163,14 +1129,21 @@ func (idx *Index) rlock() {
 		if old&lockWriteFlag != 0 {
 			// Writer is active. Check for stale writer before spinning further.
 			if spin >= stalePIDThreshold {
-				releaseDeadWriter(ptr, old)
+				writerPID := int((old & lockPIDMask) >> lockPIDShift)
+				if writerPID != 0 && !isProcessAlive(writerPID) {
+					atomic.CompareAndSwapUint64(ptr, old, 0)
+				}
 
 				spin = 0
 
 				continue
 			}
 
-			spinWait(spin)
+			if spin < spinYieldCount {
+				runtime.Gosched()
+			} else {
+				time.Sleep(time.Millisecond)
+			}
 
 			continue
 		}
@@ -1193,6 +1166,7 @@ func (idx *Index) runlock() {
 	idx.mu.RUnlock()
 }
 
+//nolint:gocognit // the cross-process write-lock protocol, read top to bottom
 func (idx *Index) wlock() {
 	idx.mu.Lock()
 
@@ -1211,8 +1185,17 @@ func (idx *Index) wlock() {
 		}
 
 		if spin >= stalePIDThreshold {
-			if idx.takeFromStale(ptr, old, target) {
-				return
+			if old&lockWriteFlag != 0 {
+				writerPID := int((old & lockPIDMask) >> lockPIDShift)
+				if writerPID != 0 && !isProcessAlive(writerPID) {
+					atomic.CompareAndSwapUint64(ptr, old, 0)
+				}
+			} else if idx.allReaderPIDsDead() {
+				// All reader PIDs are dead (or no PIDs registered). The
+				// reader count is stale — CAS directly to our write lock.
+				if atomic.CompareAndSwapUint64(ptr, old, target) {
+					return
+				}
 			}
 
 			spin = 0
@@ -1220,46 +1203,15 @@ func (idx *Index) wlock() {
 			continue
 		}
 
-		spinWait(spin)
+		if spin < spinYieldCount {
+			runtime.Gosched()
+		} else {
+			time.Sleep(time.Millisecond)
+		}
 	}
 }
 
 func (idx *Index) wunlock() {
 	atomic.StoreUint64(idx.lockWordPtr(), 0)
 	idx.mu.Unlock()
-}
-
-// takeFromStale recovers the lock word old from holders whose processes
-// are gone. A dead writer's word is cleared for the next attempt; when
-// every registered reader is dead (or none registered), the reader count
-// is stale and the word is taken directly as target. It reports whether
-// the caller now holds the write lock.
-func (idx *Index) takeFromStale(ptr *uint64, old, target uint64) bool {
-	if old&lockWriteFlag != 0 {
-		releaseDeadWriter(ptr, old)
-
-		return false
-	}
-
-	return idx.allReaderPIDsDead() && atomic.CompareAndSwapUint64(ptr, old, target)
-}
-
-// releaseDeadWriter clears the lock word old when it names a writer whose
-// process is gone. The compare-and-swap leaves a word that changed since
-// old was read alone.
-func releaseDeadWriter(ptr *uint64, old uint64) {
-	writerPID := int((old & lockPIDMask) >> lockPIDShift)
-	if writerPID != 0 && !isProcessAlive(writerPID) {
-		atomic.CompareAndSwapUint64(ptr, old, 0)
-	}
-}
-
-// spinWait backs off one spin of a lock loop: a yield for the first
-// spinYieldCount spins, a millisecond's sleep after.
-func spinWait(spin int) {
-	if spin < spinYieldCount {
-		runtime.Gosched()
-	} else {
-		time.Sleep(time.Millisecond)
-	}
 }
