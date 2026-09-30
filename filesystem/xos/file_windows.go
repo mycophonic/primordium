@@ -70,7 +70,7 @@ func Open(path string) (*os.File, error) {
 // includes FILE_SHARE_DELETE so that concurrent rename or deletion by
 // other handles is permitted.
 //
-//nolint:gocognit,gocyclo // mirrors the standard library's Windows open, whose shape it keeps for comparison
+//nolint:gocognit // mirrors the standard library's Windows open, whose shape it keeps for comparison
 func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	if path == "" {
 		return nil, &os.PathError{Op: opOpen, Path: path, Err: windows.ERROR_FILE_NOT_FOUND}

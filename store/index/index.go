@@ -100,7 +100,7 @@ type Record struct {
 
 // New opens or creates an index at the given path.
 //
-//nolint:funlen,gocognit,gocyclo // one setup sequence, in order; its complexity is an error check per step
+//nolint:gocognit // one setup sequence, in order; its complexity is an error check per step
 func New(path string, opts *Options) (*Index, error) {
 	idx := &Index{path: path, lockPath: path + ".lock", journalPath: path + ".journal"}
 
@@ -813,7 +813,7 @@ func (idx *Index) getUnlocked(key uint64) (Record, bool) {
 // growLocked rebuilds the table without its tombstones, at double the
 // capacity when the live records need it and at the same capacity otherwise.
 //
-//nolint:funlen,gocognit,gocyclo // the crash-safety protocol: its steps are ordered and read as one
+//nolint:gocognit // the crash-safety protocol: its steps are ordered and read as one
 func (idx *Index) growLocked() error {
 	hdr := idx.readHeader()
 	liveLoad := float64(hdr.Count+1) / float64(hdr.Capacity)
