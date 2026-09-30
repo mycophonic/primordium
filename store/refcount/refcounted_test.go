@@ -78,7 +78,7 @@ func TestLocker_ConcurrentAcquireSameKey(t *testing.T) {
 				dataPath := filepath.Join(dir, "data")
 				// Simulate some work
 				if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
-					return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+					return "", nil, err
 				}
 
 				return dataPath, nil, nil
@@ -119,7 +119,7 @@ func TestLocker_ReleaseWhenLastHolder(t *testing.T) {
 	path, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, "data")
 		if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
-			return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+			return "", nil, err
 		}
 
 		return dataPath, func() {
@@ -161,7 +161,7 @@ func TestLocker_MultipleHoldersPreventsCleanup(t *testing.T) {
 	path1, release1, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, "data")
 		if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
-			return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+			return "", nil, err
 		}
 
 		return dataPath, func() {
@@ -250,7 +250,7 @@ func TestLocker_DoubleReleaseIsIdempotent(t *testing.T) {
 	path, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, "data")
 		if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
-			return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+			return "", nil, err
 		}
 
 		return dataPath, func() {
@@ -299,7 +299,7 @@ func TestLocker_OnlyLastReleaserCleanupRuns(t *testing.T) {
 	_, release1, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, "data")
 		if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
-			return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+			return "", nil, err
 		}
 
 		return dataPath, func() {
@@ -363,7 +363,7 @@ func TestLocker_ConcurrentAcquireAndRelease(t *testing.T) {
 			path, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 				dataPath := filepath.Join(dir, "data")
 				if err := filesystem.WriteFile(dataPath, []byte("test"), 0o600); err != nil {
-					return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+					return "", nil, err
 				}
 
 				return dataPath, nil, nil
@@ -394,7 +394,6 @@ func TestLocker_ConcurrentAcquireAndRelease(t *testing.T) {
 	}
 }
 
-//nolint:gocognit // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestLocker_StressConcurrentKeys(t *testing.T) {
 	t.Parallel()
 
@@ -417,7 +416,7 @@ func TestLocker_StressConcurrentKeys(t *testing.T) {
 				path, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 					dataPath := filepath.Join(dir, "data")
 					if err := filesystem.WriteFile(dataPath, []byte(key), 0o600); err != nil {
-						return "", nil, err //nolint:wrapcheck // the test's own setup error, passed back through Acquire
+						return "", nil, err
 					}
 
 					return dataPath, nil, nil

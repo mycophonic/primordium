@@ -31,7 +31,6 @@ import (
 	"github.com/mycophonic/primordium/store/volatile"
 )
 
-//nolint:gocognit,funlen // a concurrency scenario: the goroutines, their synchronisation and every check read in one body
 func TestVolatile_ConcurrentAcquire(t *testing.T) {
 	t.Parallel()
 
@@ -157,7 +156,6 @@ func TestVolatile_ConcurrentAcquireDifferentContent(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			// #nosec G115 -- a small goroutine index
 			content := []byte("content-" + string(rune('A'+id%26)) + "-" + string(rune('0'+id)))
 
 			path, release, err := store.Acquire(content)

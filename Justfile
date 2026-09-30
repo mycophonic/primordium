@@ -3,14 +3,8 @@
 # The import must be kept: it mounts every shared limen task under `just do ...`.
 import '.limen/just/main.just'
 
-# Project configuration, ported from the old Makefile:
-#   COVER_MIN := 30                          → TEST_GO_COVER_MIN
-#   LICENSE_IGNORES := --ignore gotest.tools → LINT_GO_LICENSES_FLAGS
-# go-licenses cannot resolve the LICENSE of the imported gotest.tools/v3
-# submodule (google/go-licenses#186), so it is ignored — exactly as the old
-# `lint-licenses` target did.
+# The coverage gate. go-licenses' ignores live in .lint-go.yaml.
 export TEST_GO_COVER_MIN := '30'
-export LINT_GO_LICENSES_FLAGS := '--ignore=gotest.tools/v3'
 
 # The FIRST recipe defined here becomes `just`'s default.
 # The shared default covers the language-agnostic linters (limen, just, aqua,
@@ -25,8 +19,13 @@ lint: do::lint::default do::lint::go::default
 [doc('Auto-fix what can be fixed (shared fixers + Go fixers)')]
 fix: do::fix::default do::fix::go::default
 
-# Unit, race, bench, and cover — the old `make test` (the coverage gate reads
-# TEST_GO_COVER_MIN above). No build/install: primordium is a library, with no
-# cmd/ binaries to build.
-[doc('Run the Go test suite: unit, race, bench, cover')]
-test: do::test::go::unit do::test::go::race do::test::go::bench do::test::go::cover
+# Unit, race and cover (the coverage gate reads TEST_GO_COVER_MIN above).
+# Benchmarks are a performance measure, not a test: `just do perf go bench`.
+# No build/install: primordium is a library, with no cmd/ binaries to build.
+[doc('Run the Go test suite: unit, race, cover')]
+test: do::test::go::unit do::test::go::race do::test::go::cover
+
+# The shared security scans (govulncheck, for a Go module); the security
+# workflow runs this recipe.
+[doc('Run the security scans')]
+security: do::security::default

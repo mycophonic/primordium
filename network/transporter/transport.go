@@ -129,7 +129,7 @@ func (t *retryTransport) waitForToken(ctx context.Context) (time.Duration, error
 	}
 }
 
-//nolint:funlen,gocognit,gocyclo // one retry protocol, read top to bottom: wait, attempt, classify, decide
+//nolint:gocognit // one retry protocol, read top to bottom: wait, attempt, classify, decide
 func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 	var (
 		lastErr       error

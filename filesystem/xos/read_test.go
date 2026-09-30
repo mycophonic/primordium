@@ -102,7 +102,6 @@ func TestReadOnlyWriteFile(t *testing.T) {
 		t.Skip("Root can write to read-only files anyway, so skip the read-only test.")
 	}
 
-	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	if runtime.GOOS == "wasip1" {
 		t.Skip("no support for file permissions on " + runtime.GOOS)
 	}
@@ -171,7 +170,6 @@ func TestReadDir(t *testing.T) {
 	assert.Check(t, tf.Close())
 
 	subDir := filepath.Join(dir, "subdir")
-	// #nosec G301 -- as in the standard library's os tests this file ports
 	if err = os.Mkdir(subDir, 0o755); err != nil {
 		t.Fatal(err)
 	}

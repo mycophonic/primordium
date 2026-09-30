@@ -94,7 +94,6 @@ func TestWriteFileEmpty(t *testing.T) {
 }
 
 func TestWriteFilePermissions(t *testing.T) {
-	//nolint:goconst // a GOOS value, spelled as runtime.GOOS spells it
 	if runtime.GOOS == "windows" {
 		t.Skip("file permissions not fully supported on Windows")
 	}
@@ -252,14 +251,12 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 	roTarget := filepath.Join(roDir, "file.txt")
 
 	// Make the target directory read-only so rename fails.
-	// #nosec G302 -- the read-only directory under test keeps its read and search bits
 	if err := os.Chmod(roDir, 0o555); err != nil {
 		t.Fatal(err)
 	}
 
 	t.Cleanup(func() {
 		// Restore permissions so TempDir cleanup works.
-		// #nosec G302 -- a directory needs its search bit; G302 judges every chmod as a file's
 		if chmodErr := os.Chmod(roDir, filesystem.DirPermissionsPrivate); chmodErr != nil {
 			t.Error(chmodErr)
 		}
@@ -278,7 +275,6 @@ func TestWriteFileNoTempLeakOnFailure(t *testing.T) {
 	// Since roDir is read-only, CreateTemp should have failed — so no temp
 	// file. But if it somehow succeeded (e.g. race), verify no leak.
 	// Restore permissions to read the directory.
-	// #nosec G302 -- a directory needs its search bit; G302 judges every chmod as a file's
 	if chmodErr := os.Chmod(roDir, filesystem.DirPermissionsPrivate); chmodErr != nil {
 		t.Fatal(chmodErr)
 	}
