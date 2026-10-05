@@ -31,58 +31,48 @@ import (
 // mapErr classifies an AWS SDK error into an appropriate fault sentinel.
 func mapErr(err error) error {
 	// Context cancellation / deadline exceeded.
-	var cancelErr *smithy.CanceledError
-	if errors.As(err, &cancelErr) {
+	if _, ok := errors.AsType[*smithy.CanceledError](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrCancelled, err)
 	}
 
 	// TCP/DNS/TLS failure — request never reached the server.
-	var sendErr *smithyhttp.RequestSendError
-	if errors.As(err, &sendErr) {
+	if _, ok := errors.AsType[*smithyhttp.RequestSendError](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
 	}
 
 	// Not-found conditions (object, bucket, upload).
-	var notFound *types.NotFound
-	if errors.As(err, &notFound) {
+	if _, ok := errors.AsType[*types.NotFound](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrNotFound, err)
 	}
 
-	var noSuchKey *types.NoSuchKey
-	if errors.As(err, &noSuchKey) {
+	if _, ok := errors.AsType[*types.NoSuchKey](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrNotFound, err)
 	}
 
-	var noSuchBucket *types.NoSuchBucket
-	if errors.As(err, &noSuchBucket) {
+	if _, ok := errors.AsType[*types.NoSuchBucket](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrNotFound, err)
 	}
 
-	var noSuchUpload *types.NoSuchUpload
-	if errors.As(err, &noSuchUpload) {
+	if _, ok := errors.AsType[*types.NoSuchUpload](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrNotFound, err)
 	}
 
 	// Invalid SDK parameters (programming error).
-	var invalidParams *smithy.InvalidParamsError
-	if errors.As(err, &invalidParams) {
+	if _, ok := errors.AsType[*smithy.InvalidParamsError](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
 	}
 
 	// Serialization/deserialization failures (SDK or server protocol error).
-	var serErr *smithy.SerializationError
-	if errors.As(err, &serErr) {
+	if _, ok := errors.AsType[*smithy.SerializationError](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
 
-	var deserErr *smithy.DeserializationError
-	if errors.As(err, &deserErr) {
+	if _, ok := errors.AsType[*smithy.DeserializationError](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
 
 	// HTTP response errors — classify by status code.
-	var respErr *smithyhttp.ResponseError
-	if errors.As(err, &respErr) {
+	if respErr, ok := errors.AsType[*smithyhttp.ResponseError](err); ok {
 		return mapHTTPStatus(respErr.HTTPStatusCode(), err)
 	}
 

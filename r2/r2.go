@@ -111,8 +111,7 @@ func (cli *Client) Stat(ctx context.Context, objectKey string) (*ObjectInfo, err
 		Key:    aws.String(objectKey),
 	})
 	if err != nil {
-		var notFound *types.NotFound
-		if errors.As(err, &notFound) {
+		if _, ok := errors.AsType[*types.NotFound](err); ok {
 			return nil, fmt.Errorf("%w: %s", fault.ErrNotFound, objectKey)
 		}
 
