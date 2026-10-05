@@ -30,8 +30,8 @@ github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2xWg=
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
-github.com/forkcloser/blake3 v1.0.0 h1:w2N6B7EmLZl31OiPpl7kqgKiknJoot3xfc6qirNZIaQ=
-github.com/forkcloser/blake3 v1.0.0/go.mod h1:yl3AyBunlxsVVNqNMvTEE9D6C1Hk0RzMlT1sEJrv5Ds=
+github.com/forkcloser/blake3 v1.0.1 h1:ol94agsGVUs1srexJxb4jUSrXHdA3thPyrfuAVGhi5I=
+github.com/forkcloser/blake3 v1.0.1/go.mod h1:yl3AyBunlxsVVNqNMvTEE9D6C1Hk0RzMlT1sEJrv5Ds=
 github.com/forkcloser/xz v1.0.0 h1:kmiIk1SRI4ffZKNYQ+PgpIZ5WeF/opZKCiRUJyc8/Lw=
 github.com/forkcloser/xz v1.0.0/go.mod h1:97jHfaW5ugdlASYSsIlWK2tohamE+Jh5ouA78TH92sU=
 github.com/getsentry/sentry-go v0.49.0 h1:Ehejknu1l023Ub7QoRBVLAI7g3Jnhqku4oWx4B4Sh5s=
