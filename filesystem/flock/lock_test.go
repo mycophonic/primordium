@@ -1,5 +1,3 @@
-//go:build !race
-
 /*
    Copyright Mycophonic.
 
@@ -20,7 +18,7 @@ package flock_test
 
 import (
 	"errors"
-	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,17 +27,55 @@ import (
 	"github.com/mycophonic/primordium/filesystem/flock"
 )
 
-// Note: these tests are NOT racy - the entire point here is to prove that the filesystem lock is effectively protecting
-// against these conditions.
-// Maybe the test could be rewritten to use different variables instead so we can use race on it.
+// waitLimit bounds how long a test waits for a blocked lock to be granted once
+// it should be; reaching it means the lock was never granted, not that the
+// runner is slow.
+const waitLimit = 30 * time.Second
 
-const (
-	mainroutine1 = "mainroutine1"
-	mainroutine2 = "mainroutine2"
-	routine1     = "routine1"
-	routine2     = "routine2"
-	routine3     = "routine3"
-)
+// waiter is a lock taken in its own goroutine, which blocks until the test
+// releases what conflicts with it. When granted, it reports how many
+// conflicting locks had been released by then; done carries its error.
+type waiter struct {
+	granted chan int32
+	done    chan error
+}
+
+func startWaiter(released *atomic.Int32, lock func(string, func() error) error, path string) waiter {
+	w := waiter{granted: make(chan int32, 1), done: make(chan error, 1)}
+
+	go func() {
+		w.done <- lock(path, func() error {
+			w.granted <- released.Load()
+
+			return nil
+		})
+	}()
+
+	return w
+}
+
+// wait selects on done alone: granted is sent before done, so once done has
+// arrived granted is already buffered, while a select over both ready channels
+// would pick either.
+func (w waiter) wait(t *testing.T) int32 {
+	t.Helper()
+
+	select {
+	case err := <-w.done:
+		assert.NilError(t, err, "the waiting lock should not error")
+	case <-time.After(waitLimit):
+		t.Fatal("the waiting lock was never granted")
+	}
+
+	select {
+	case got := <-w.granted:
+		return got
+	default:
+		t.Fatal("the waiting lock returned without running")
+	}
+
+	return 0
+}
 
 func TestLock(t *testing.T) {
 	t.Parallel()
@@ -64,193 +100,81 @@ func TestLock(t *testing.T) {
 func TestLockWriteConcurrent(t *testing.T) {
 	t.Parallel()
 
-	var waitGroup sync.WaitGroup
-
-	var concurrentKey string
-
 	tempDir := t.TempDir()
 
-	waitGroup.Add(2)
+	var released atomic.Int32
 
-	// Start a lock, set the key, sleep 1s and confirm the key is still the same
-	go func() {
-		defer waitGroup.Done()
+	held, err := flock.Lock(tempDir)
+	assert.NilError(t, err)
 
-		lErr := flock.WithLock(tempDir, func() error {
-			concurrentKey = routine1
+	second := startWaiter(&released, flock.WithLock, tempDir)
 
-			time.Sleep(1 * time.Second)
-			assert.Assert(t, concurrentKey == routine1, "Key:"+concurrentKey)
+	_, tryErr := flock.TryLock(tempDir)
+	assert.Assert(t, errors.Is(tryErr, flock.ErrLockWouldBlock), "a second write lock should block, got: %v", tryErr)
 
-			return nil
-		})
+	released.Add(1)
+	assert.NilError(t, flock.Unlock(held))
 
-		assert.NilError(t, lErr, "locking should not error")
-	}()
-
-	// Wait 0.5s, start another lock, set the key, sleep 1s and confirm the key is still the same
-	go func() {
-		defer waitGroup.Done()
-
-		time.Sleep(500 * time.Millisecond)
-
-		lErr := flock.WithLock(tempDir, func() error {
-			concurrentKey = routine2
-
-			time.Sleep(1 * time.Second)
-			assert.Assert(t, concurrentKey == routine2, "Key:"+concurrentKey)
-
-			return nil
-		})
-
-		assert.NilError(t, lErr, "locking should not error")
-	}()
-
-	// Start a lock, set the key, wait 1s, confirm the key is still the same
-	lErr := flock.WithLock(tempDir, func() error {
-		concurrentKey = mainroutine1
-
-		time.Sleep(1 * time.Second)
-		assert.Assert(t, concurrentKey == mainroutine1, "Key:"+concurrentKey)
-
-		return nil
-	})
-	assert.NilError(t, lErr, "locking should not error")
-
-	// Wait 0.75s, start a lock, set the key, sleep 1s, confirm the key is unchanged
-	time.Sleep(750 * time.Millisecond)
-
-	lErr = flock.WithLock(tempDir, func() error {
-		concurrentKey = mainroutine2
-
-		time.Sleep(1 * time.Second)
-		assert.Assert(t, concurrentKey == mainroutine2, "Key:"+concurrentKey)
-
-		return nil
-	})
-
-	assert.NilError(t, lErr, "locking should not error")
-
-	waitGroup.Wait()
+	assert.Equal(t, second.wait(t), int32(1), "the second write lock was granted while the first was held")
 }
 
 func TestLockMultiRead(t *testing.T) {
 	t.Parallel()
 
-	var waitGroup sync.WaitGroup
-
-	var concurrentKey string
-
 	tempDir := t.TempDir()
 
-	waitGroup.Add(3)
+	var released atomic.Int32
 
-	// Start a readonly lock immediately
-	// Then wait 1s inside the lock - confirm the key got changed by the second read routine
-	go func() {
-		t.Log("Entering routine 1")
+	reader1, err := flock.ReadOnlyLock(tempDir)
+	assert.NilError(t, err)
 
-		defer waitGroup.Done()
+	// A second read lock is granted while the first is held: shared locks are compatible.
+	reader2, err := flock.TryReadOnlyLock(tempDir)
+	assert.NilError(t, err, "a second read lock should not block")
 
-		lErr := flock.WithReadOnlyLock(tempDir, func() error {
-			t.Log("Entering routine 1 read lock")
+	writer := startWaiter(&released, flock.WithLock, tempDir)
 
-			concurrentKey = routine1
+	_, tryErr := flock.TryLock(tempDir)
+	assert.Assert(t, errors.Is(tryErr, flock.ErrLockWouldBlock),
+		"a write lock should block on two readers, got: %v", tryErr)
 
-			time.Sleep(1 * time.Second)
-			assert.Assert(t, concurrentKey == routine2, "Key:"+concurrentKey)
+	released.Add(1)
+	assert.NilError(t, flock.Unlock(reader1))
 
-			return nil
-		})
+	_, tryErr = flock.TryLock(tempDir)
+	assert.Assert(t, errors.Is(tryErr, flock.ErrLockWouldBlock),
+		"a write lock should block on the remaining reader, got: %v", tryErr)
 
-		assert.NilError(t, lErr, "locking should not error")
-	}()
+	released.Add(1)
+	assert.NilError(t, flock.Unlock(reader2))
 
-	// Wait 0.5s before locking, then change the key
-	go func() {
-		t.Log("Entering routine 2")
-
-		defer waitGroup.Done()
-
-		time.Sleep(500 * time.Millisecond)
-
-		lErr := flock.WithReadOnlyLock(tempDir, func() error {
-			t.Log("Entering routine 2 read lock")
-
-			concurrentKey = routine2
-
-			return nil
-		})
-
-		assert.NilError(t, lErr, "locking should not error")
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-	// Start a write lock, confirm we have waited for the read locks to finish, change the key
-	go func() {
-		t.Log("Entering routine 3")
-
-		defer waitGroup.Done()
-
-		lErr := flock.WithLock(tempDir, func() error {
-			t.Log("Entering routine 3 write lock")
-			assert.Assert(t, concurrentKey == routine2, "Key:"+concurrentKey)
-			concurrentKey = routine3
-
-			return nil
-		})
-
-		assert.NilError(t, lErr, "locking should not error")
-	}()
-
-	waitGroup.Wait()
+	assert.Equal(t, writer.wait(t), int32(2), "the write lock was granted while a reader was held")
 }
 
 func TestLockWriteBlocksRead(t *testing.T) {
 	t.Parallel()
 
-	var waitGroup sync.WaitGroup
-
-	var concurrentKey string
-
 	tempDir := t.TempDir()
 
-	waitGroup.Add(2)
+	var released atomic.Int32
 
-	// Start a lock, set the key, sleep 1s and confirm the key is still the same
-	go func() {
-		defer waitGroup.Done()
+	held, err := flock.Lock(tempDir)
+	assert.NilError(t, err)
 
-		lErr := flock.WithLock(tempDir, func() error {
-			time.Sleep(1 * time.Second)
+	reader := startWaiter(&released, flock.WithReadOnlyLock, tempDir)
 
-			concurrentKey = routine1
+	_, tryErr := flock.TryReadOnlyLock(tempDir)
+	assert.Assert(
+		t,
+		errors.Is(tryErr, flock.ErrLockWouldBlock),
+		"a read lock should block on a writer, got: %v",
+		tryErr,
+	)
 
-			assert.Assert(t, concurrentKey == routine1, "Key:"+concurrentKey)
+	released.Add(1)
+	assert.NilError(t, flock.Unlock(held))
 
-			return nil
-		})
-
-		assert.NilError(t, lErr, "locking should not error")
-	}()
-
-	time.Sleep(50 * time.Millisecond)
-
-	// Start a readonly lock immediately
-	// Confirm the key has been set by the write lock
-	go func() {
-		defer waitGroup.Done()
-
-		lErr := flock.WithReadOnlyLock(tempDir, func() error {
-			assert.Assert(t, concurrentKey == routine1, "Key:"+concurrentKey)
-
-			return nil
-		})
-
-		assert.NilError(t, lErr, "locking should not error")
-	}()
-
-	waitGroup.Wait()
+	assert.Equal(t, reader.wait(t), int32(1), "the read lock was granted while the write lock was held")
 }
 
 func TestTryLock(t *testing.T) {
