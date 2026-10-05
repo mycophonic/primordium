@@ -1,6 +1,6 @@
 module github.com/mycophonic/primordium
 
-go 1.25.8
+go 1.26.0
 
 require (
 	github.com/aws/aws-sdk-go-v2 v1.43.6

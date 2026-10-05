@@ -392,8 +392,7 @@ func (cli *Client) listParts(ctx context.Context, key, uploadID string) ([]compl
 
 		resp, err := cli.under.ListParts(ctx, input)
 		if err != nil {
-			var noUpload *types.NoSuchUpload
-			if errors.As(err, &noUpload) {
+			if _, ok := errors.AsType[*types.NoSuchUpload](err); ok {
 				return nil, fmt.Errorf("upload %q expired or aborted: %w", uploadID, err)
 			}
 
