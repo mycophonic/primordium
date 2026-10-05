@@ -439,7 +439,7 @@ func TestBLAKE3256_ChunkedWriteEquivalence(t *testing.T) {
 	}
 }
 
-// TestAlgorithmRegistriesConsistent guards the hazard called out in AUDIT.md:
+// TestAlgorithmRegistriesConsistent guards against registry drift:
 // Hash(), New() and FromString() each read a different map, so an algorithm
 // added to one but not the others fails only at run time — a missing regexp
 // entry nil-derefs in FromString, a missing size entry makes New reject a
