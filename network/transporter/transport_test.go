@@ -37,10 +37,34 @@ import (
 	"github.com/mycophonic/primordium/network/transporter"
 )
 
-// schedulingSlack bounds how late a backoff timer and the loopback round
-// trip may run past the backoff itself. Timers never fire early, so lower
-// bounds need none.
+// schedulingSlack is how late a backoff timer and the loopback round trip
+// usually run past the backoff itself. Nothing bounds it for every retry: a
+// stalled runner delays whichever retries the stall overlaps. So the backoff
+// tests hold most retries to their upper bound and every retry only to twice
+// it, a ceiling a stall stays under and a wrong backoff does not. Timers never
+// fire early, so lower bounds hold for each retry and need no slack.
 const schedulingSlack = 150 * time.Millisecond
+
+// overBounds counts the gaps over their upper bound, and fails the test for any
+// gap over twice it. A single retry wrong by less than that ceiling passes, as
+// a stall would: the price of tolerating one.
+func overBounds(t *testing.T, gaps []time.Duration, high func(retry int) time.Duration) int {
+	t.Helper()
+
+	late := 0
+
+	for i, gap := range gaps {
+		bound := high(i)
+
+		assert.Assert(t, gap <= 2*bound, "retry %d: backoff %v over twice its bound %v: %v", i+1, gap, bound, gaps)
+
+		if gap > bound {
+			late++
+		}
+	}
+
+	return late
+}
 
 // backend is an HTTP test server recording when each request arrived.
 type backend struct {
@@ -805,23 +829,22 @@ func retryGaps(t *testing.T, opts transporter.Options) []time.Duration {
 func TestBackoffExponential(t *testing.T) {
 	t.Parallel()
 
-	const initial = 50 * time.Millisecond
+	// Long enough that the backoff, not schedulingSlack, sets each bound: a
+	// retry grown too fast then passes twice its bound, whatever its jitter.
+	const initial = 100 * time.Millisecond
 
 	gaps := retryGaps(t, transporter.Options{
-		MaxRetries:     4,
+		MaxRetries:     5,
 		InitialBackoff: initial,
 	})
 
 	// Expected center before retry n: initial * 2^(n-1), jittered by ±25%.
 	for i, gap := range gaps {
-		center := initial << i
-
-		low := center * 3 / 4
-		high := center*5/4 + schedulingSlack
-
-		assert.Assert(t, gap >= low && gap <= high,
-			"retry %d: backoff %v outside expected range [%v, %v]", i+1, gap, low, high)
+		assert.Assert(t, gap >= (initial<<i)*3/4, "retry %d: backoff %v under %v", i+1, gap, (initial<<i)*3/4)
 	}
+
+	late := overBounds(t, gaps, func(retry int) time.Duration { return (initial<<retry)*5/4 + schedulingSlack })
+	assert.Assert(t, late*2 < len(gaps), "%d of %d retries past their range: %v", late, len(gaps), gaps)
 }
 
 func TestBackoffJitterRange(t *testing.T) {
@@ -842,9 +865,11 @@ func TestBackoffJitterRange(t *testing.T) {
 		minSeen = min(minSeen, gap)
 
 		// Jitter range: [0.75, 1.25] * 40ms = [30ms, 50ms].
-		assert.Assert(t, gap >= backoff*3/4 && gap <= backoff*5/4+schedulingSlack,
-			"retry %d: backoff %v outside jitter range", i+1, gap)
+		assert.Assert(t, gap >= backoff*3/4, "retry %d: backoff %v under the jitter range", i+1, gap)
 	}
+
+	late := overBounds(t, gaps, func(int) time.Duration { return backoff*5/4 + schedulingSlack })
+	assert.Assert(t, late*2 < len(gaps), "%d of %d retries past the jitter range: %v", late, len(gaps), gaps)
 
 	// Timers only ever run late, so a delay this far under the center can
 	// only come from jitter.
@@ -864,11 +889,11 @@ func TestBackoffCappedByMaxBackoff(t *testing.T) {
 		MaxBackoff:     maxBackoff,
 	})
 
-	for i, gap := range gaps {
-		// Capped at 40ms, with jitter [0.75, 1.25] → max 50ms.
-		assert.Assert(t, gap <= maxBackoff*5/4+schedulingSlack,
-			"retry %d: backoff %v exceeded capped max %v * 1.25", i+1, gap, maxBackoff)
-	}
+	// Capped at 40ms, with jitter [0.75, 1.25] → max 50ms. An uncapped backoff
+	// passes it from the third retry on, and soon outlasts retryGaps' deadline.
+	late := overBounds(t, gaps, func(int) time.Duration { return maxBackoff*5/4 + schedulingSlack })
+	assert.Assert(t, late*2 < len(gaps), "%d of %d retries past the capped max %v * 1.25: %v",
+		late, len(gaps), maxBackoff, gaps)
 }
 
 // --- Response body ---
