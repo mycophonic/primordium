@@ -40,7 +40,7 @@ func TestValidateSocket_BoundaryLengths(t *testing.T) {
 	case "linux", "windows":
 		maxUsable = 107 // 108 - 1 for null terminator
 	default:
-		maxUsable = 103 // 104 - 1 for null terminator (macOS/BSD)
+		maxUsable = 103 // 104 - 1 for null terminator (macOS)
 	}
 
 	tests := []struct {

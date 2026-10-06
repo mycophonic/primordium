@@ -43,12 +43,7 @@ func validatePosix(component string) error {
 // See: unix(7) man page, /usr/include/sys/un.h.
 const socketPathMaxLinux = 108
 
-// socketPathMaxBSD is the maximum length of a Unix socket path on macOS and the BSDs.
-// On macOS and BSD variants (FreeBSD, NetBSD, OpenBSD, DragonFly), sun_path is 104 bytes
-// (including null terminator).
-//
-// References:
-//   - macOS: /usr/include/sys/un.h
-//   - FreeBSD: unix(4) man page
-//   - NetBSD/OpenBSD: similar to FreeBSD
-const socketPathMaxBSD = 104
+// socketPathMaxDarwin is the maximum length of a Unix socket path on macOS,
+// where sun_path is 104 bytes (including null terminator).
+// See: /usr/include/sys/un.h.
+const socketPathMaxDarwin = 104

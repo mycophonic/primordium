@@ -20,6 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
 
 // Validate checks path for the platform this program runs on: see
@@ -60,6 +62,20 @@ func (p platform) ValidateComponent(pathComponent string) error {
 
 	if strings.TrimSpace(pathComponent) == "" {
 		return errors.Join(ErrInvalidPath, errInvalidPathEmpty)
+	}
+
+	// Linux filesystems store a name's bytes as they are; macOS refuses a name
+	// that is not UTF-8, and Windows stores it under another name, its invalid
+	// bytes replaced.
+	if p.name != "linux" && !utf8.ValidString(pathComponent) { //nolint:goconst // the GOOS name, plainer spelled out
+		return errors.Join(ErrInvalidPath, errInvalidEncoding)
+	}
+
+	// Unicode 9.0, not the running macOS's: Apple documents that APFS refuses a
+	// code point unassigned in Unicode 9.0, and documents no later version.
+	if p.name == "darwin" &&
+		strings.ContainsFunc(pathComponent, func(r rune) bool { return !unicode.Is(unicode9, r) }) {
+		return errors.Join(ErrInvalidPath, errUnassignedCodePoint)
 	}
 
 	if err := p.validateSpecific(pathComponent); err != nil {

@@ -201,3 +201,42 @@ func TestPlatformValidateSocket(t *testing.T) {
 		assert.ErrorContains(t, err, name)
 	}
 }
+
+func TestPlatformInvalidUTF8(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"\xff", "a\xc3", "a\xed\xa0\x80b"} {
+		assert.NilError(t, pathcheck.Linux().ValidateComponent(name), "linux stores any bytes: %q", name)
+		assert.ErrorIs(t, pathcheck.Darwin().ValidateComponent(name), pathcheck.ErrInvalidPath, "darwin: %q", name)
+		assert.ErrorIs(t, pathcheck.Windows().ValidateComponent(name), pathcheck.ErrInvalidPath, "windows: %q", name)
+		assert.ErrorIs(t, pathcheck.Darwin().Validate("/dir/"+name), pathcheck.ErrInvalidPath, "darwin path: %q", name)
+	}
+}
+
+func TestDarwinUnicode9(t *testing.T) {
+	t.Parallel()
+
+	refused := map[string]string{
+		"unassigned":                  "a\u0378b",
+		"Unicode 11 (pleading face)":  "a\U0001F97Ab",
+		"Unicode 16 (face with bags)": "a\U0001FAE9b",
+		"noncharacter U+FFFE":         "a\uFFFEb",
+		"noncharacter U+FDD0":         "a\uFDD0b",
+		"noncharacter U+10FFFF":       "a\U0010FFFFb",
+	}
+
+	for label, name := range refused {
+		assert.ErrorIs(t, pathcheck.Darwin().ValidateComponent(name), pathcheck.ErrInvalidPath, label)
+		assert.ErrorIs(t, pathcheck.Darwin().Validate("/dir/"+name), pathcheck.ErrInvalidPath, label)
+		assert.NilError(t, pathcheck.Linux().ValidateComponent(name), label)
+	}
+
+	for label, name := range map[string]string{
+		"Unicode 6.1 (grinning face)": "a\U0001F600b",
+		"Unicode 9.0 (face palm)":     "a\U0001F926b",
+		"latin":                       "café",
+		"private use":                 "a\uE000b",
+	} {
+		assert.NilError(t, pathcheck.Darwin().ValidateComponent(name), label)
+	}
+}
