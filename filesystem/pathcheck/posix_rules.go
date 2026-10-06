@@ -1,5 +1,3 @@
-//go:build !linux && !windows
-
 /*
    Copyright Mycophonic.
 
@@ -18,7 +16,34 @@
 
 package pathcheck
 
-// maxSocketPathLen is the maximum length of a Unix socket path on this platform.
+import (
+	"fmt"
+	"regexp"
+)
+
+var (
+	posixKeywords = regexp.MustCompile(`^\.{1,2}$`)
+	posixReserved = regexp.MustCompile(`[\x{0}/]`)
+)
+
+func validatePosix(component string) error {
+	if posixReserved.MatchString(component) {
+		return fmt.Errorf("%w: %q (%q)", errForbiddenChars, component, posixReserved)
+	}
+
+	if posixKeywords.MatchString(component) {
+		return fmt.Errorf("%w: %q (%q)", errForbiddenKeywords, component, posixKeywords)
+	}
+
+	return nil
+}
+
+// socketPathMaxLinux is the maximum length of a Unix socket path on Linux.
+// There, and on illumos and Solaris, sun_path is 108 bytes (including null terminator).
+// See: unix(7) man page, /usr/include/sys/un.h.
+const socketPathMaxLinux = 108
+
+// socketPathMaxBSD is the maximum length of a Unix socket path on macOS and the BSDs.
 // On macOS and BSD variants (FreeBSD, NetBSD, OpenBSD, DragonFly), sun_path is 104 bytes
 // (including null terminator).
 //
@@ -26,4 +51,4 @@ package pathcheck
 //   - macOS: /usr/include/sys/un.h
 //   - FreeBSD: unix(4) man page
 //   - NetBSD/OpenBSD: similar to FreeBSD
-const maxSocketPathLen = 104
+const socketPathMaxBSD = 104

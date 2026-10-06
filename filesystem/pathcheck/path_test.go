@@ -19,6 +19,7 @@ package pathcheck_test
 import (
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -153,5 +154,24 @@ func TestFilesystemRestrictions(t *testing.T) {
 	for _, v := range valid {
 		err := pathcheck.ValidateComponent(v)
 		assert.NilError(t, err, v)
+	}
+}
+
+func TestValidateRelativePathInAbsoluteForm(t *testing.T) {
+	t.Parallel()
+
+	for _, typed := range []string{"./Dockerfile", "../sibling/Dockerfile", "dir/./file"} {
+		t.Run(typed, func(t *testing.T) {
+			t.Parallel()
+
+			native := filepath.FromSlash(typed)
+
+			assert.Assert(t, errors.Is(pathcheck.Validate(native), pathcheck.ErrInvalidPath),
+				"a relative component is refused as typed")
+
+			abs, err := filepath.Abs(native)
+			assert.NilError(t, err)
+			assert.NilError(t, pathcheck.Validate(abs), "the absolute form of %q should validate", typed)
+		})
 	}
 }

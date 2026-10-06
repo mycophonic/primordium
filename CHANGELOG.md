@@ -7,6 +7,27 @@ v0.11.1 are recorded only by their tags.
 
 ## [Unreleased]
 
+### Added
+
+- `filesystem/pathcheck.Platform`, with `Linux()`, `Darwin()`, `Windows()`
+  and `Native()`: validate paths for a platform other than the one the
+  program runs on. The package-level functions are unchanged and use
+  `Native()`.
+
+### Changed
+
+- `filesystem/pathcheck` documents its contract: `.` and `..` are refused,
+  a user's path is validated in its `filepath.Abs` form, and validation does
+  not keep a path inside a directory.
+- `filesystem/pathcheck` on Windows:
+  - counts a name's length in UTF-16 code units, as Windows does, not bytes;
+  - takes `/` as a separator, as Windows does, except in a long path
+    (`\\?\…`), where it is refused;
+  - refuses device paths (`\\.\…`, `\\?\Volume{…}\…`, `//?/…`) instead of
+    stripping their prefix; long paths to a drive or a share are accepted.
+- `filesystem/pathcheck.ValidateSocket` allows 108 bytes on illumos and
+  Solaris, not 104.
+
 ## [0.11.1] - 2026-10-05
 
 ### Changed
