@@ -15,4 +15,14 @@
 */
 
 // Package pathcheck provides utilities to enforce platform specific path validation.
+//
+// A path is valid when every component is a name a filesystem entry can carry
+// on the current platform. "." and ".." are not names, so a path containing
+// them is refused: pathcheck neither cleans nor resolves a path.
+//
+// To check a path a user typed, which may be relative, validate its absolute
+// form: filepath.Abs cleans it, leaving no "." or ".." component. Cleaning
+// resolves ".." lexically, so "../secret" validates as the absolute path it
+// names: pathcheck says nothing about where a path points. Keeping a path
+// under a directory is os.Root's job, or filepath.IsLocal's.
 package pathcheck

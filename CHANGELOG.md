@@ -7,6 +7,12 @@ v0.11.1 are recorded only by their tags.
 
 ## [Unreleased]
 
+### Changed
+
+- `filesystem/pathcheck` documents its contract: `.` and `..` are refused,
+  a user's path is validated in its `filepath.Abs` form, and validation does
+  not keep a path inside a directory.
+
 ## [0.11.1] - 2026-10-05
 
 ### Changed
