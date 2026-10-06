@@ -18,7 +18,6 @@ package pathcheck_test
 
 import (
 	"errors"
-	"fmt"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -30,49 +29,33 @@ import (
 	"github.com/mycophonic/primordium/filesystem/pathcheck"
 )
 
-func TestValidateSocket_BoundaryLengths(t *testing.T) {
+// TestPackageFunctionsUseNative checks that the package-level functions, which
+// consumers call, answer as the running platform does, error identity
+// included. The platform rules themselves are the fuzz targets' and the Quint
+// traces' to check.
+func TestPackageFunctionsUseNative(t *testing.T) {
 	t.Parallel()
 
-	// Determine platform-specific max length
-	var maxUsable int
+	native := pathcheck.Native()
 
-	switch runtime.GOOS {
-	case "linux", "windows":
-		maxUsable = 107 // 108 - 1 for null terminator
-	default:
-		maxUsable = 103 // 104 - 1 for null terminator (macOS)
-	}
+	for _, input := range []string{
+		"name", ".", "..", "", "a:b", "nul", "a\\b", "/a/b", "/a/../b", `C:\a\b`, strings.Repeat("x", 108),
+	} {
+		component, nativeComponent := pathcheck.ValidateComponent(input), native.ValidateComponent(input)
+		assert.Equal(t, component == nil, nativeComponent == nil, "ValidateComponent(%q)", input)
 
-	tests := []struct {
-		name    string
-		length  int
-		wantErr bool
-	}{
-		{"exactly-at-limit", maxUsable, false},
-		{"one-over-limit", maxUsable + 1, true},
-		{"well-under-limit", 50, false},
-		{"way-over-limit", maxUsable + 100, true},
-	}
+		path, nativePath := pathcheck.Validate(input), native.Validate(input)
+		assert.Equal(t, path == nil, nativePath == nil, "Validate(%q)", input)
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
+		socket, nativeSocket := pathcheck.ValidateSocket(input), native.ValidateSocket(input)
+		assert.Equal(t, socket == nil, nativeSocket == nil, "ValidateSocket(%q)", input)
 
-			path := strings.Repeat("x", tc.length)
-			err := pathcheck.ValidateSocket(path)
-
-			if tc.wantErr && err == nil {
-				t.Errorf("ValidateSocket(len=%d) should fail, got nil", tc.length)
+		for _, err := range []error{component, path, socket} {
+			if err != nil {
+				assert.Assert(t, errors.Is(err, pathcheck.ErrInvalidPath), "%q: %v", input, err)
+				assert.Assert(t, errors.Is(err, fault.ErrInvalidArgument), "%q: %v", input, err)
 			}
-
-			if !tc.wantErr && err != nil {
-				t.Errorf("ValidateSocket(len=%d) = %v, want nil", tc.length, err)
-			}
-
-			if tc.wantErr && err != nil && !errors.Is(err, fault.ErrInvalidArgument) {
-				t.Errorf("ValidateSocket error = %v, want fault.ErrInvalidArgument", err)
-			}
-		})
+		}
 	}
 }
 
@@ -96,64 +79,6 @@ func TestValidateSocket_ErrorMessageContainsDetails(t *testing.T) {
 
 	if !strings.Contains(errMsg, "200") {
 		t.Errorf("error message should contain actual length (200), got: %s", errMsg)
-	}
-}
-
-func TestFilesystemRestrictions(t *testing.T) {
-	t.Parallel()
-
-	invalid := []string{
-		"/",
-		"/start",
-		"mid/dle",
-		"end/",
-		".",
-		"..",
-		"",
-		fmt.Sprintf("A%0255s", "A"),
-	}
-
-	valid := []string{
-		fmt.Sprintf("A%0254s", "A"),
-		"test",
-		"test-hyphen",
-		".start.dot",
-		"mid.dot",
-		"∞",
-	}
-
-	if runtime.GOOS == "windows" {
-		invalid = append(invalid, []string{
-			"\\start",
-			"mid\\dle",
-			"end\\",
-			"\\",
-			"\\.",
-			"com².whatever",
-			"lpT2",
-			"Prn.",
-			"nUl",
-			"AUX",
-			"A<A",
-			"A>A",
-			"A:A",
-			"A\"A",
-			"A|A",
-			"A?A",
-			"A*A",
-			"end.dot.",
-			"end.space ",
-		}...)
-	}
-
-	for _, v := range invalid {
-		err := pathcheck.ValidateComponent(v)
-		assert.ErrorIs(t, err, pathcheck.ErrInvalidPath, v)
-	}
-
-	for _, v := range valid {
-		err := pathcheck.ValidateComponent(v)
-		assert.NilError(t, err, v)
 	}
 }
 
