@@ -26,7 +26,9 @@ import (
 )
 
 // Validate validates a full path by checking each component.
-// Returns an error if any component is invalid.
+// Returns an error if any component is invalid, including a "." or ".."
+// component: validate a user's relative path in its filepath.Abs form (see
+// the package documentation).
 func Validate(path string) error {
 	// Strip volume name (e.g., "C:" on Windows) — it is not a path component
 	path = path[len(filepath.VolumeName(path)):]
@@ -70,7 +72,9 @@ func ValidateComponent(pathComponent string) error {
 //   - Linux: 108 bytes (including null terminator)
 //   - macOS/BSD: 104 bytes (including null terminator)
 //
-// Returns an error if the path is too long for the current platform.
+// Returns an error if the path is too long for the current platform. The limit
+// applies to the string handed to bind or dial, so check that string, not a
+// shorter form of it.
 func ValidateSocket(path string) error {
 	// Need room for null terminator, so max usable length is maxSocketPathLen - 1
 	maxLen := maxSocketPathLen - 1

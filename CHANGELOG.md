@@ -7,6 +7,14 @@ v0.11.1 are recorded only by their tags.
 
 ## [Unreleased]
 
+### Changed
+
+- `filesystem/pathcheck` documents its contract: every component must be a
+  name a filesystem entry can carry, so `.` and `..` are refused. A path a
+  user typed is checked in its `filepath.Abs` form. `Validate` says nothing
+  about where a path points; confinement is `os.Root`'s or
+  `filepath.IsLocal`'s job.
+
 ## [0.11.1] - 2026-10-05
 
 ### Changed
