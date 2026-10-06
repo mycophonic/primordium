@@ -19,28 +19,32 @@ package pathcheck
 import (
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
 )
 
-// Validate validates a full path by checking each component.
-// Returns an error if any component is invalid, including a "." or ".."
-// component: validate a user's relative path in its filepath.Abs form (see
-// the package documentation).
+// Validate checks path for the platform this program runs on: see
+// Platform.Validate.
 func Validate(path string) error {
-	// Strip volume name (e.g., "C:" on Windows) — it is not a path component
-	path = path[len(filepath.VolumeName(path)):]
+	return Native().Validate(path) //nolint:wrapcheck // pathcheck's own error, already ErrInvalidPath
+}
 
-	// Iterate over path components
-	for component := range strings.SplitSeq(path, string(os.PathSeparator)) {
-		// Skip empty components (from leading/trailing/double separators)
-		if component == "" {
-			continue
-		}
+// ValidateComponent checks a single path component for the platform this
+// program runs on: see Platform.ValidateComponent.
+func ValidateComponent(pathComponent string) error {
+	return Native().ValidateComponent(pathComponent) //nolint:wrapcheck // pathcheck's own error, already ErrInvalidPath
+}
 
-		if err := ValidateComponent(component); err != nil {
+// ValidateSocket checks a Unix socket path's length for the platform this
+// program runs on: see Platform.ValidateSocket.
+func ValidateSocket(path string) error {
+	return Native().ValidateSocket(path) //nolint:wrapcheck // pathcheck's own error, already ErrInvalidPath
+}
+
+func (p platform) Validate(path string) error {
+	components, isSeparator := p.split(path)
+
+	for component := range strings.FieldsFuncSeq(components, isSeparator) {
+		if err := p.ValidateComponent(component); err != nil {
 			return fmt.Errorf("%w: invalid path component %q", err, component)
 		}
 	}
@@ -48,10 +52,9 @@ func Validate(path string) error {
 	return nil
 }
 
-// ValidateComponent will enforce os specific filename restrictions on a single path component.
-func ValidateComponent(pathComponent string) error {
+func (p platform) ValidateComponent(pathComponent string) error {
 	// https://en.wikipedia.org/wiki/Comparison_of_file_systems#Limits
-	if len(pathComponent) > pathComponentMaxLength {
+	if p.componentLength(pathComponent) > pathComponentMaxLength {
 		return errors.Join(ErrInvalidPath, errInvalidPathTooLong)
 	}
 
@@ -59,29 +62,19 @@ func ValidateComponent(pathComponent string) error {
 		return errors.Join(ErrInvalidPath, errInvalidPathEmpty)
 	}
 
-	if err := validatePlatformSpecific(pathComponent); err != nil {
+	if err := p.validateSpecific(pathComponent); err != nil {
 		return errors.Join(ErrInvalidPath, err)
 	}
 
 	return nil
 }
 
-// ValidateSocket checks that a Unix socket path does not exceed OS-specific limits.
-// Unix sockets have a hard limit on path length due to the fixed-size sun_path field
-// in struct sockaddr_un:
-//   - Linux: 108 bytes (including null terminator)
-//   - macOS/BSD: 104 bytes (including null terminator)
-//
-// Returns an error if the path is too long for the current platform. The limit
-// applies to the string handed to bind or dial, so check that string, not a
-// shorter form of it.
-func ValidateSocket(path string) error {
-	// Need room for null terminator, so max usable length is maxSocketPathLen - 1
-	maxLen := maxSocketPathLen - 1
+func (p platform) ValidateSocket(path string) error {
+	maxLen := p.socketMax - 1
 
 	if len(path) > maxLen {
 		return fmt.Errorf("%w: socket path exceeds %s limit of %d bytes (got %d): %s",
-			ErrInvalidPath, runtime.GOOS, maxLen, len(path), path)
+			ErrInvalidPath, p.name, maxLen, len(path), path)
 	}
 
 	return nil
