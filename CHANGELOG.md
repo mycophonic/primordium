@@ -32,6 +32,15 @@ v0.11.1 are recorded only by their tags.
 - `filesystem/pathcheck.ValidateSocket` allows 108 bytes on illumos and
   Solaris, not 104.
 
+### Fixed
+
+- `filesystem/pathcheck` on Darwin and Windows refuses a name that is not valid
+  UTF-8: macOS refuses to create it, and Windows stores it under another name.
+- `filesystem/pathcheck` on Darwin refuses a name holding a code point
+  unassigned in Unicode 9.0, noncharacters included, as Apple documents APFS
+  does. Characters assigned since 9.0 are refused too: Apple documents no later
+  version.
+
 ## [0.11.1] - 2026-10-05
 
 ### Changed

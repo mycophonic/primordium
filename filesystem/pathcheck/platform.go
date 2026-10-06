@@ -16,6 +16,8 @@
 
 package pathcheck
 
+//go:generate go run gen_unicode9.go
+
 import (
 	"runtime"
 	"strings"
@@ -40,7 +42,7 @@ type Platform interface {
 
 	// ValidateSocket checks that a Unix socket path fits the platform's
 	// sockaddr_un sun_path, NUL terminator included: 108 bytes on Linux and
-	// Windows, 104 on macOS and the BSDs. The limit applies to the string
+	// Windows, 104 on macOS. The limit applies to the string
 	// handed to bind or dial, so check that string, not a shorter form of it.
 	ValidateSocket(path string) error
 
@@ -56,19 +58,23 @@ type platform struct {
 //
 //nolint:iface // opaque: the sealed interface is the API, as crypto/ecdh's curves are
 func Linux() Platform {
+	//nolint:goconst // the GOOS name, plainer spelled out
 	return platform{name: "linux", socketMax: socketPathMaxLinux}
 }
 
-// Darwin returns the Darwin platform, which also stands for the BSDs.
+// Darwin returns the macOS platform. It refuses a name that is not valid UTF-8,
+// or that holds a code point unassigned in Unicode 9.0: the APFS rule Apple
+// documents, kept at the version it documents.
 //
 //nolint:iface // opaque: the sealed interface is the API, as crypto/ecdh's curves are
 func Darwin() Platform {
-	return platform{name: "darwin", socketMax: socketPathMaxBSD}
+	return platform{name: "darwin", socketMax: socketPathMaxDarwin}
 }
 
 // Windows returns the Windows platform. It accepts a drive letter, and a long
 // path's `\\?\C:` or `\\?\UNC\`, before the first component, and refuses device
-// paths.
+// paths and names that are not valid UTF-8, which Windows stores under another
+// name.
 //
 //nolint:iface // opaque: the sealed interface is the API, as crypto/ecdh's curves are
 func Windows() Platform {
