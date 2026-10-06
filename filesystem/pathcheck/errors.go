@@ -29,6 +29,7 @@ var (
 
 	errForbiddenChars    = errors.New("forbidden characters in path component")
 	errForbiddenKeywords = errors.New("forbidden keywords in path component")
+	errNoEndingSpaceDot  = errors.New("component cannot end with a space or dot")
 
 	// ErrInvalidPath is returned when a path is invalid.
 	ErrInvalidPath = fmt.Errorf("%w: invalid filesystem path", fault.ErrInvalidArgument)
