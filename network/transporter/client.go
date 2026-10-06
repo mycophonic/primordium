@@ -36,6 +36,10 @@ type Options struct {
 // concurrency limiting, rate limiting, retry with exponential backoff,
 // Retry-After headers, and User-Agent injection.
 //
+// The client has a connection pool of its own, configured as
+// http.DefaultTransport is at the client's first request. Closing its idle
+// connections closes no other client's.
+//
 // If MaxPerSecond > 0, a background goroutine is started for rate limiting.
 // Call CloseIdleConnections on the returned client when done to stop it.
 func NewClient(opts Options) *http.Client {

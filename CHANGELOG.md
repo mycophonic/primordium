@@ -40,6 +40,12 @@ v0.11.1 are recorded only by their tags.
   unassigned in Unicode 9.0, noncharacters included, as Apple documents APFS
   does. Characters assigned since 9.0 are refused too: Apple documents no later
   version.
+- `network/transporter`: each client has a connection pool of its own, cloned
+  from `http.DefaultTransport`'s configuration at its first request. Before,
+  all clients shared `http.DefaultTransport`'s pool: closing one client's idle
+  connections closed every client's, and could fail a request that had just
+  taken a connection. Limits on the pool, such as `network.SetDefaults`'
+  100 connections per host, now hold per client.
 
 ## [0.11.1] - 2026-10-05
 

@@ -24,6 +24,8 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mycophonic/primordium/fault"
@@ -32,9 +34,10 @@ import (
 // retryTransport is an http.RoundTripper that adds concurrency limiting,
 // rate limiting, retry with exponential backoff, Retry-After, and User-Agent.
 type retryTransport struct {
-	base        http.RoundTripper
-	sem         chan struct{} // parallelism semaphore; nil = unlimited
-	limiter     chan struct{} // rate limiter tokens; nil = unlimited
+	base        func() http.RoundTripper // ownTransport, taken at the first request
+	baseTaken   atomic.Bool              // base has been called
+	sem         chan struct{}            // parallelism semaphore; nil = unlimited
+	limiter     chan struct{}            // rate limiter tokens; nil = unlimited
 	stopLimiter context.CancelFunc
 	maxRetries  int
 	initBackoff time.Duration
@@ -44,12 +47,17 @@ type retryTransport struct {
 
 func newRetryTransport(opts Options) *retryTransport {
 	transport := &retryTransport{
-		base:        http.DefaultTransport,
 		maxRetries:  opts.MaxRetries,
 		initBackoff: opts.InitialBackoff,
 		maxBackoff:  opts.MaxBackoff,
 		userAgent:   opts.UserAgent,
 	}
+
+	transport.base = sync.OnceValue(func() http.RoundTripper {
+		transport.baseTaken.Store(true)
+
+		return ownTransport()
+	})
 
 	if opts.Parallelism > 0 {
 		transport.sem = make(chan struct{}, opts.Parallelism)
@@ -66,6 +74,23 @@ func newRetryTransport(opts Options) *retryTransport {
 	}
 
 	return transport
+}
+
+// ownTransport returns a clone of http.DefaultTransport: a pool of its own, so
+// that no other user of http.DefaultTransport (another client's
+// CloseIdleConnections, every httptest.Server.Close) closes this client's
+// connections, or fails a request that has just taken one. It is taken at the
+// first request, not when the client is made: network.SetDefaults promises its
+// configuration to requests made after it, and a client may be made before.
+// The clone drops whatever wraps the *http.Transport: network.SetDefaults'
+// wrapper adds only a header this client never sets and a log line. One that
+// cannot be cloned is shared, as nothing else carries its configuration.
+func ownTransport() http.RoundTripper {
+	if cloner, ok := http.DefaultTransport.(interface{ Clone() *http.Transport }); ok {
+		return cloner.Clone()
+	}
+
+	return http.DefaultTransport
 }
 
 // RoundTrip implements http.RoundTripper.
@@ -92,11 +117,17 @@ func (t *retryTransport) CloseIdleConnections() {
 		t.stopLimiter()
 	}
 
+	// Before the first request there is no connection to close, and calling
+	// base would take the clone before network.SetDefaults may have run.
+	if !t.baseTaken.Load() {
+		return
+	}
+
 	type closeIdler interface {
 		CloseIdleConnections()
 	}
 
-	if ci, ok := t.base.(closeIdler); ok {
+	if ci, ok := t.base().(closeIdler); ok {
 		ci.CloseIdleConnections()
 	}
 }
@@ -158,7 +189,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		}
 
 		start := time.Now()
-		resp, err := t.base.RoundTrip(req)
+		resp, err := t.base().RoundTrip(req)
 		elapsed := time.Since(start)
 
 		if err != nil {
