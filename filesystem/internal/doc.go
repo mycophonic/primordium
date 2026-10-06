@@ -14,10 +14,6 @@
    limitations under the License.
 */
 
-package dirs
-
-const (
-	osDarwin  = "darwin"
-	osLinux   = "linux"
-	osWindows = "windows"
-)
+// Package internal holds what the filesystem packages share and cannot import
+// from filesystem itself, which imports them.
+package internal

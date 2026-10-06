@@ -24,6 +24,7 @@ import (
 	"sync"
 
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/filesystem/internal"
 )
 
 //nolint:gochecknoglobals // resolved once per process
@@ -69,7 +70,7 @@ func RuntimeDir() (string, error) {
 	}
 
 	// #nosec G703 -- baseDir from TempDir+hardcoded name
-	if err := os.MkdirAll(baseDir, dirPermissions); err != nil {
+	if err := os.MkdirAll(baseDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
@@ -85,7 +86,7 @@ func RuntimeDir() (string, error) {
 func DataDir() (string, error) {
 	dir := getDataDir()
 
-	if err := os.MkdirAll(dir, dirPermissions); err != nil {
+	if err := os.MkdirAll(dir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
@@ -131,7 +132,7 @@ func ConfigDir() (string, error) {
 
 	configDir := filepath.Join(base, name)
 
-	if err := os.MkdirAll(configDir, dirPermissions); err != nil {
+	if err := os.MkdirAll(configDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
@@ -147,7 +148,7 @@ func ConfigDir() (string, error) {
 func CacheDir(sub ...string) (string, error) {
 	cacheDir := filepath.Join(append([]string{getCacheDir()}, sub...)...)
 
-	if err := os.MkdirAll(cacheDir, dirPermissions); err != nil {
+	if err := os.MkdirAll(cacheDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
@@ -194,7 +195,7 @@ func BinDir() (string, error) {
 
 	binDirectory := filepath.Join(cacheDirectory, "bin")
 
-	if err := os.MkdirAll(binDirectory, dirPermissions); err != nil {
+	if err := os.MkdirAll(binDirectory, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 

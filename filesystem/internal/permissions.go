@@ -14,10 +14,15 @@
    limitations under the License.
 */
 
-package dirs
+package internal
 
+import "os"
+
+// The file and directory modes filesystem exports; see filesystem's constants
+// of the same names.
 const (
-	osDarwin  = "darwin"
-	osLinux   = "linux"
-	osWindows = "windows"
+	FilePermissionsDefault os.FileMode = 0o644
+	DirPermissionsDefault  os.FileMode = 0o755
+	FilePermissionsPrivate os.FileMode = 0o600
+	DirPermissionsPrivate  os.FileMode = 0o700
 )

@@ -33,6 +33,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"github.com/mycophonic/primordium/filesystem/internal"
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
@@ -45,12 +46,10 @@ const (
 
 	reserved = 0
 	allBytes = ^uint32(0)
-
-	lockPermission = 0o600
 )
 
 func platformLock(path string, lockType lockType) (file *os.File, err error) {
-	file, err = xos.OpenFile(path+".lock", os.O_CREATE, lockPermission)
+	file, err = xos.OpenFile(path+".lock", os.O_CREATE, internal.FilePermissionsPrivate)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +69,7 @@ func platformLock(path string, lockType lockType) (file *os.File, err error) {
 }
 
 func platformTryLock(path string, lockType lockType) (file *os.File, err error) {
-	file, err = xos.OpenFile(path+".lock", os.O_CREATE, lockPermission)
+	file, err = xos.OpenFile(path+".lock", os.O_CREATE, internal.FilePermissionsPrivate)
 	if err != nil {
 		return nil, err
 	}

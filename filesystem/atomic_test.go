@@ -114,7 +114,7 @@ func TestWriteFilePermissions(t *testing.T) {
 	got := fi.Mode().Perm()
 	// The umask package may have been initialized (zeroing the OS umask) or not.
 	// Either way, the result should not be more permissive than requested.
-	if got&^os.FileMode(filesystem.FilePermissionsPrivate) != 0 {
+	if got&^filesystem.FilePermissionsPrivate != 0 {
 		t.Errorf("perm = %#o, has bits beyond %#o", got, filesystem.FilePermissionsPrivate)
 	}
 }

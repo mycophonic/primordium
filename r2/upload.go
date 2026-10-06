@@ -457,7 +457,7 @@ func saveState(statePath string, state *uploadState) error {
 
 	tmpPath := statePath + ".tmp"
 
-	if err := filesystem.WriteFile(tmpPath, data, stateFileMode); err != nil {
+	if err := filesystem.WriteFile(tmpPath, data, filesystem.FilePermissionsPrivate); err != nil {
 		return fmt.Errorf("write temp state: %w", err)
 	}
 
