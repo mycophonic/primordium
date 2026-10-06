@@ -357,20 +357,26 @@ func TestRetryAfterExceedsMaxBackoff(t *testing.T) {
 func TestRetryAfterParsing(t *testing.T) {
 	t.Parallel()
 
+	fixed := func(value string) func() string { return func() string { return value } }
+
 	tests := []struct {
 		name       string
-		value      string
+		value      func() string
 		maxBackoff time.Duration
 		wantCalls  int32
 	}{
-		{"seconds", "5", 4900 * time.Millisecond, 1},
-		{"future_date", time.Now().Add(10 * time.Second).UTC().Format(http.TimeFormat), 5 * time.Second, 1},
-		{"zero", "0", time.Millisecond, 2},
-		{"negative", "-1", time.Millisecond, 2},
-		{"empty", "", time.Millisecond, 2},
-		{"past_date", "Thu, 01 Dec 2025 16:00:00 GMT", time.Millisecond, 2},
-		{"float", "1.5", time.Millisecond, 2},
-		{"garbage", "not-a-date-or-number", time.Millisecond, 2},
+		{"seconds", fixed("5"), 4900 * time.Millisecond, 1},
+		// The date is taken as the response is written: a parallel subtest may
+		// wait seconds for its turn, eating a date taken when the table is built.
+		{"future_date", func() string {
+			return time.Now().Add(10 * time.Second).UTC().Format(http.TimeFormat)
+		}, 5 * time.Second, 1},
+		{"zero", fixed("0"), time.Millisecond, 2},
+		{"negative", fixed("-1"), time.Millisecond, 2},
+		{"empty", fixed(""), time.Millisecond, 2},
+		{"past_date", fixed("Thu, 01 Dec 2025 16:00:00 GMT"), time.Millisecond, 2},
+		{"float", fixed("1.5"), time.Millisecond, 2},
+		{"garbage", fixed("not-a-date-or-number"), time.Millisecond, 2},
 	}
 
 	for _, test := range tests {
@@ -378,8 +384,8 @@ func TestRetryAfterParsing(t *testing.T) {
 			t.Parallel()
 
 			back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, _ int32) {
-				if test.value != "" {
-					w.Header().Set("Retry-After", test.value)
+				if value := test.value(); value != "" {
+					w.Header().Set("Retry-After", value)
 				}
 
 				w.WriteHeader(http.StatusTooManyRequests)
