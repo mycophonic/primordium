@@ -17,8 +17,7 @@
 package dirs
 
 const (
-	osDarwin       = "darwin"
-	osLinux        = "linux"
-	osWindows      = "windows"
-	dirPermissions = 0o700
+	osDarwin  = "darwin"
+	osLinux   = "linux"
+	osWindows = "windows"
 )

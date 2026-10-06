@@ -30,5 +30,4 @@ const (
 	defaultPartSize  = 100 * bytesize.MiB
 	maxParts         = 10_000 // S3/R2 maximum.
 	listPartsMaxKeys = 1000   // S3 ListParts page size.
-	stateFileMode    = 0o600
 )

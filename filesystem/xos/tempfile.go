@@ -29,14 +29,11 @@ import (
 	"math/rand/v2"
 	"os"
 	"strconv"
+
+	"github.com/mycophonic/primordium/filesystem/internal"
 )
 
 const (
-	// tempFilePerm and tempDirPerm are CreateTemp's and MkdirTemp's modes,
-	// before umask.
-	tempFilePerm os.FileMode = 0o600
-	tempDirPerm  os.FileMode = 0o700
-
 	// tempAttempts bounds the retries on a name collision, as the standard
 	// library does.
 	tempAttempts = 10000
@@ -85,7 +82,7 @@ func CreateTemp(dir, pattern string) (*os.File, error) {
 	for {
 		name := prefix + nextRandom() + suffix
 
-		f, err := OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, tempFilePerm)
+		f, err := OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, internal.FilePermissionsPrivate)
 		if os.IsExist(err) {
 			//nolint:gocritic // initClause: os.CreateTemp's retry, as the standard library writes it
 			if try++; try < tempAttempts {
@@ -144,7 +141,7 @@ func MkdirTemp(dir, pattern string) (string, error) {
 	for {
 		name := prefix + nextRandom() + suffix
 
-		err := os.Mkdir(name, tempDirPerm)
+		err := os.Mkdir(name, internal.DirPermissionsPrivate)
 		if err == nil {
 			return name, nil
 		}
