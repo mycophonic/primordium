@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"sync"
@@ -789,10 +790,72 @@ func retryGaps(t *testing.T, opts transporter.Options) []time.Duration {
 	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 
+	type attempt struct {
+		getConn, gotConn, connectStart, connectDone, wrote time.Time
+		reused                                             bool
+	}
+
+	var (
+		traceMu  sync.Mutex
+		attempts []*attempt
+	)
+
+	last := func(set func(a *attempt)) {
+		traceMu.Lock()
+		defer traceMu.Unlock()
+
+		if len(attempts) > 0 {
+			set(attempts[len(attempts)-1])
+		}
+	}
+
+	ctx = httptrace.WithClientTrace(ctx, &httptrace.ClientTrace{
+		GetConn: func(string) {
+			now := &attempt{getConn: time.Now()}
+
+			traceMu.Lock()
+			defer traceMu.Unlock()
+
+			attempts = append(attempts, now)
+		},
+		GotConn: func(info httptrace.GotConnInfo) {
+			last(func(a *attempt) { a.gotConn, a.reused = time.Now(), info.Reused })
+		},
+		ConnectStart: func(string, string) { last(func(a *attempt) { a.connectStart = time.Now() }) },
+		ConnectDone:  func(string, string, error) { last(func(a *attempt) { a.connectDone = time.Now() }) },
+		WroteRequest: func(httptrace.WroteRequestInfo) { last(func(a *attempt) { a.wrote = time.Now() }) },
+	})
+
 	resp, err := doGet(ctx, t, client, back.url)
 	if resp != nil {
 		assert.Check(t, resp.Body.Close())
 	}
+
+	arrivalGaps := back.gaps()
+
+	traceMu.Lock()
+	for i, a := range attempts {
+		gap := time.Duration(0)
+		if i > 0 && i-1 < len(arrivalGaps) {
+			gap = arrivalGaps[i-1]
+		}
+
+		since := time.Duration(0)
+		if i > 0 {
+			since = a.getConn.Sub(attempts[i-1].wrote)
+		}
+
+		dial := time.Duration(0)
+		if !a.connectStart.IsZero() {
+			dial = a.connectDone.Sub(a.connectStart)
+		}
+
+		t.Logf("TRACE attempt %d: gap=%v reused=%v wait=%v getconn->gotconn=%v dial=%v gotconn->wrote=%v",
+			i, gap, a.reused, since, a.gotConn.Sub(a.getConn), dial, a.wrote.Sub(a.gotConn))
+	}
+	traceMu.Unlock()
+
+	t.Error("DIAGNOSTIC: fails on purpose so the trace above is printed")
 
 	assert.Assert(t, errors.Is(err, fault.ErrUnacceptableResponse), "got %v", err)
 
