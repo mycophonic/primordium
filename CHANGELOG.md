@@ -16,6 +16,10 @@ v0.11.1 are recorded only by their tags.
 
 ### Changed
 
+- `filesystem`'s `FilePermissionsDefault`, `DirPermissionsDefault`,
+  `FilePermissionsPrivate` and `DirPermissionsPrivate` are typed
+  `os.FileMode`, no longer untyped: using one as another integer type, such
+  as a `uint32` mode, needs a conversion.
 - `filesystem/pathcheck` documents its contract: `.` and `..` are refused,
   a user's path is validated in its `filepath.Abs` form, and validation does
   not keep a path inside a directory.

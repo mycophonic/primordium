@@ -31,9 +31,9 @@ import (
 	"errors"
 	"os"
 
-	"github.com/mycophonic/primordium/filesystem/internal"
 	"golang.org/x/sys/windows"
 
+	"github.com/mycophonic/primordium/filesystem/internal"
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
