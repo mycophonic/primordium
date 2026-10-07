@@ -46,6 +46,10 @@ v0.11.1 are recorded only by their tags.
   connections closed every client's, and could fail a request that had just
   taken a connection. Limits on the pool, such as `network.SetDefaults`'
   100 connections per host, now hold per client.
+- `filesystem/pathcheck` on Windows refuses a long path to a drive that does
+  not start at its root: `\\?\C:` is the volume device, as `\\.\C:` is, and
+  `\\?\C:name` is relative to the drive's current directory, which Windows
+  rules out after `\\?\`.
 
 ## [0.11.1] - 2026-10-05
 

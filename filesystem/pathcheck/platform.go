@@ -98,11 +98,14 @@ func (platform) sealed() {}
 
 // split returns the part of path that holds its components, and what
 // separates them. On Windows, a drive letter ("C:") goes, and so does the
-// long-path prefix before one (`\\?\C:`) or before a share (`\\?\UNC\`). Both
-// "\" and "/" separate, except in a long path, where Windows takes "/" as a
-// character. A UNC share needs nothing more, its server and share being names.
-// Any other `\\?\` path, and every `\\.\` device path, is left whole, and is
-// refused for its "?" or "." component: a device is not a filesystem entry.
+// long-path prefix before a drive's root (`\\?\C:\`) or before a share
+// (`\\?\UNC\`). Both "\" and "/" separate, except in a long path, where Windows
+// takes "/" as a character. A UNC share needs nothing more, its server and
+// share being names. Any other `\\?\` path is left whole, and so is every
+// `\\.\` device path, to be refused for its "?" or "." component: a device is
+// not a filesystem entry. That includes `\\?\C:`, the volume itself, as
+// `\\.\C:` is, and `\\?\C:name`, relative to the drive's current directory,
+// which a long path cannot be.
 func (p platform) split(path string) (string, func(rune) bool) {
 	if p.name != "windows" {
 		return path, isSlash
@@ -112,7 +115,7 @@ func (p platform) split(path string) (string, func(rune) bool) {
 		switch {
 		case len(rest) >= len(longUNCPrefix) && strings.EqualFold(rest[:len(longUNCPrefix)], longUNCPrefix):
 			return rest[len(longUNCPrefix):], isBackslash
-		case hasDriveLetter(rest):
+		case hasDriveLetter(rest) && len(rest) > 2 && rest[2] == '\\':
 			return rest[2:], isBackslash
 		}
 	}
