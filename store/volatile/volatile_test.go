@@ -18,6 +18,7 @@ package volatile_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"sync"
@@ -36,7 +37,10 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 
 	const (
 		numGoroutines = 100
-		holdDuration  = 1 * time.Second
+		// allHeldLimit bounds how long the holders wait for one another;
+		// reaching it means they never all held the content at once, not that
+		// the runner is slow.
+		allHeldLimit = 60 * time.Second
 	)
 
 	root := t.TempDir()
@@ -48,9 +52,22 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 		successCount atomic.Int64
 		errorCount   atomic.Int64
 		paths        sync.Map
+		arrived      atomic.Int64
 	)
 
-	start := time.Now()
+	// Every holder waits for all the others to hold the content before it
+	// releases: holds that excluded one another could never all overlap.
+	allHeld := make(chan struct{})
+	// One limit for all, which closes for every waiter at once: a serialized
+	// holder must not wait a limit of its own.
+	deadline, cancel := context.WithTimeout(t.Context(), allHeldLimit)
+	defer cancel()
+
+	arrive := func() {
+		if arrived.Add(1) == numGoroutines {
+			close(allHeld)
+		}
+	}
 
 	for i := range numGoroutines {
 		wg.Add(1)
@@ -62,6 +79,7 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 			if err != nil {
 				t.Errorf("goroutine %d: acquire failed: %v", id, err)
 				errorCount.Add(1)
+				arrive()
 
 				return
 			}
@@ -77,16 +95,19 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 				t.Errorf("goroutine %d: content mismatch: got %q, want %q", id, data, content)
 			}
 
-			// Hold the lease
-			time.Sleep(holdDuration)
+			arrive()
+
+			select {
+			case <-allHeld:
+			case <-deadline.Done():
+				t.Errorf("goroutine %d: the holders never all held the content at once", id)
+			}
 
 			release()
 		}(i)
 	}
 
 	wg.Wait()
-
-	elapsed := time.Since(start)
 
 	// All goroutines should succeed
 	if got := successCount.Load(); got != numGoroutines {
@@ -96,14 +117,6 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 	if got := errorCount.Load(); got != 0 {
 		t.Errorf("error count: got %d, want 0", got)
 	}
-
-	// Execution should be parallel - total time should be close to holdDuration, not numGoroutines * holdDuration
-	maxExpected := holdDuration + 5*time.Second // generous buffer for lock contention
-	if elapsed > maxExpected {
-		t.Errorf("execution took %v, want less than %v (goroutines should run in parallel)", elapsed, maxExpected)
-	}
-
-	t.Logf("completed %d concurrent acquires in %v", numGoroutines, elapsed)
 
 	// All paths should be identical (same content = same path)
 	var firstPath string
