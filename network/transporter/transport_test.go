@@ -21,8 +21,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httptrace"
 	"strconv"
 	"strings"
 	"sync"
@@ -773,6 +775,80 @@ func TestRateLimiting(t *testing.T) {
 }
 
 // --- CloseIdleConnections ---
+
+// TestConnectionsAreTheClients checks that a client's connections are its own:
+// another client closing its idle connections, or http.DefaultTransport
+// closing its own (as every httptest.Server.Close does), leaves them open.
+func TestConnectionsAreTheClients(t *testing.T) {
+	t.Parallel()
+
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{})
+	other := newClient(t, transporter.Options{})
+
+	reused := func(c *http.Client) bool {
+		t.Helper()
+
+		var info httptrace.GotConnInfo
+
+		ctx := httptrace.WithClientTrace(t.Context(), &httptrace.ClientTrace{
+			GotConn: func(got httptrace.GotConnInfo) { info = got },
+		})
+
+		resp, err := doGet(ctx, t, c, back.url)
+		assert.NilError(t, err)
+
+		_, err = io.Copy(io.Discard, resp.Body)
+		assert.NilError(t, err)
+		assert.NilError(t, resp.Body.Close())
+
+		return info.Reused
+	}
+
+	assert.Assert(t, !reused(client), "a new client has no connection to reuse")
+	assert.Assert(t, !reused(other), "a new client has no connection to reuse")
+
+	other.CloseIdleConnections()
+	http.DefaultTransport.(interface{ CloseIdleConnections() }).CloseIdleConnections()
+
+	assert.Assert(t, reused(client), "another client closed this client's connection")
+}
+
+// TestDefaultTransportTakenAtFirstRequest checks that a client made, and even
+// closed, before http.DefaultTransport is configured, as network.SetDefaults
+// does at startup, still requests with that configuration.
+//
+//nolint:paralleltest // replaces the process-wide default transport
+func TestDefaultTransportTakenAtFirstRequest(t *testing.T) {
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{})
+	client.CloseIdleConnections()
+
+	var dialed atomic.Bool
+
+	configured := &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialed.Store(true)
+
+			return (&net.Dialer{}).DialContext(ctx, network, addr)
+		},
+	}
+
+	previous := http.DefaultTransport
+	http.DefaultTransport = configured //nolint:reassign // the configuration under test
+
+	t.Cleanup(func() {
+		configured.CloseIdleConnections()
+
+		http.DefaultTransport = previous //nolint:reassign // restores the configuration under test
+	})
+
+	resp, err := doGet(t.Context(), t, client, back.url)
+	assert.NilError(t, err)
+	assert.Check(t, resp.Body.Close())
+
+	assert.Assert(t, dialed.Load(), "the request did not use http.DefaultTransport's configuration")
+}
 
 func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {
 	t.Parallel()
