@@ -200,3 +200,16 @@ func TestReadDir(t *testing.T) {
 		t.Fatalf("ReadDir %s: subdir directory not found", dir)
 	}
 }
+
+// TestReadDirOfFileMatchesOS: ReadDir on a file fails as os.ReadDir does,
+// error text included.
+func TestReadDirOfFileMatchesOS(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "file")
+	assert.NilError(t, os.WriteFile(path, nil, 0o600))
+
+	_, got := xos.ReadDir(path)
+	_, want := os.ReadDir(path)
+	assert.Equal(t, got.Error(), want.Error())
+}

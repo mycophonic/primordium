@@ -89,14 +89,15 @@ func ReadDir(path string) ([]os.DirEntry, error) {
 
 	defer func() { _ = file.Close() }() // read-only: a close error carries nothing
 
-	// Match stdlib openDir behavior: fstat and reject non-directories early.
+	// os.ReadDir opens the path as a directory, so a file is refused by
+	// "open": the same error, from fstat here.
 	fi, err := file.Stat()
 	if err != nil {
 		return nil, err //nolint:wrapcheck // Thin wrapper matching os.ReadDir signature.
 	}
 
 	if !fi.IsDir() {
-		return nil, &os.PathError{Op: "fdopendir", Path: path, Err: syscall.ENOTDIR}
+		return nil, &os.PathError{Op: "open", Path: path, Err: syscall.ENOTDIR}
 	}
 
 	entries, err := file.ReadDir(-1)
