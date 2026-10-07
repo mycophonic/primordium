@@ -18,6 +18,7 @@ package iox_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"sync/atomic"
 	"testing"
@@ -266,4 +267,54 @@ func TestReadSeeker_FailedSeekKeepsPosition(t *testing.T) {
 	n, err := rs.Read(buf)
 	assert.NilError(t, err)
 	assert.Equal(t, string(buf[:n]), "b", "the byte after the failed seek is the one before it")
+}
+
+// errWithData is the error flakySource returns along with its data.
+var errWithData = errors.New("error with data")
+
+// flakySource returns its data with an error on the first Read, which
+// io.Reader allows, then io.EOF.
+type flakySource struct{ done bool }
+
+func (f *flakySource) Read(p []byte) (int, error) {
+	if f.done {
+		return 0, io.EOF
+	}
+
+	f.done = true
+
+	return copy(p, "ab"), errWithData
+}
+
+func (*flakySource) Seek(int64, int) (int64, error) { return 0, nil }
+
+// TestReadSeeker_ErrorWithDataIsReturned: an error the source returns with
+// data comes back once those bytes are read, as bufio.Reader has it.
+func TestReadSeeker_ErrorWithDataIsReturned(t *testing.T) {
+	t.Parallel()
+
+	rs := iox.NewReadSeekerWithSize(&flakySource{}, 16)
+	buf := make([]byte, 1)
+
+	for _, want := range []string{"a", "b"} {
+		n, err := rs.Read(buf)
+		assert.NilError(t, err)
+		assert.Equal(t, string(buf[:n]), want)
+	}
+
+	_, err := rs.Read(buf)
+	assert.Assert(t, errors.Is(err, errWithData), "got %v", err)
+
+	// A seek that moves the source drops a held error: it belonged to the old
+	// position.
+	rs = iox.NewReadSeekerWithSize(&flakySource{}, 16)
+
+	_, err = rs.Read(buf)
+	assert.NilError(t, err)
+
+	_, err = rs.Seek(0, io.SeekStart)
+	assert.NilError(t, err)
+
+	_, err = rs.Read(buf)
+	assert.Assert(t, errors.Is(err, io.EOF), "after a seek, got %v, want the source's own io.EOF", err)
 }

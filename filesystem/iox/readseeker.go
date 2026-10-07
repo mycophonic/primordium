@@ -26,8 +26,9 @@ import (
 // will close it.
 type ReadSeeker struct {
 	buf    []byte
-	off    int // read offset within buf
-	end    int // valid data end within buf
+	off    int   // read offset within buf
+	end    int   // valid data end within buf
+	err    error // the source's error, held until the bytes it came with are read
 	source io.ReadSeeker
 }
 
@@ -65,22 +66,26 @@ func (rs *ReadSeeker) Read(dest []byte) (int, error) {
 		return n, nil
 	}
 
+	if err := rs.err; err != nil {
+		rs.err = nil
+
+		return 0, err
+	}
+
 	// Large reads bypass the buffer entirely.
 	if len(dest) >= len(rs.buf) {
 		return rs.source.Read(dest)
 	}
 
-	// Refill the buffer.
-	// Deliver data first; the error will surface on the next Read (matches bufio.Reader).
+	// Refill the buffer. Deliver data first; an error that came with it is held
+	// for the Read after the buffer empties, as bufio.Reader does.
 	n, err := rs.source.Read(rs.buf)
 	if n > 0 {
-		rs.off = 0
 		rs.end = n
+		rs.off = copy(dest, rs.buf[:rs.end])
+		rs.err = err
 
-		copied := copy(dest, rs.buf[:rs.end])
-		rs.off = copied
-
-		return copied, nil
+		return rs.off, nil
 	}
 
 	return 0, err
@@ -124,6 +129,7 @@ func (rs *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 
 	rs.off = 0
 	rs.end = 0
+	rs.err = nil
 
 	return pos, nil
 }
