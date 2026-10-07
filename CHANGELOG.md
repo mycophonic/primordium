@@ -7,6 +7,8 @@ v0.11.1 are recorded only by their tags.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-07
+
 ### Added
 
 - `filesystem/pathcheck.Platform`, with `Linux()`, `Darwin()`, `Windows()`
