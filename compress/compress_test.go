@@ -21,7 +21,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"os/exec"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/forkcloser/xz"
@@ -174,16 +175,10 @@ func TestDecompress_XZ(t *testing.T) {
 func TestDecompress_Bzip2(t *testing.T) {
 	t.Parallel()
 
-	if _, err := exec.LookPath("bzip2"); err != nil {
-		t.Skip("bzip2 binary not available")
-	}
-
-	cmd := exec.CommandContext(t.Context(), "bzip2")
-	cmd.Stdin = bytes.NewReader([]byte(testPayload))
-
-	bz2Data, err := cmd.Output()
+	// The standard library reads bzip2 but cannot write it.
+	bz2Data, err := os.ReadFile(filepath.Join("testdata", "payload.bz2"))
 	if err != nil {
-		t.Fatalf("bzip2 compress: %v", err)
+		t.Fatalf("fixture: %v", err)
 	}
 
 	rc, err := compress.Decompress(bytes.NewReader(bz2Data))
