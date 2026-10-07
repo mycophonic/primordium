@@ -248,3 +248,22 @@ func TestReadSeeker_CloseNonCloser(t *testing.T) {
 	err := rs.Close()
 	assert.NilError(t, err, "close on non-Closer should return nil")
 }
+
+// TestReadSeeker_FailedSeekKeepsPosition: a seek the source refuses leaves the
+// position where it was, buffered bytes included, as io.Seeker documents.
+func TestReadSeeker_FailedSeekKeepsPosition(t *testing.T) {
+	t.Parallel()
+
+	rs := iox.NewReadSeekerWithSize(bytes.NewReader([]byte("ab")), 2)
+
+	buf := make([]byte, 1)
+	_, err := rs.Read(buf)
+	assert.NilError(t, err)
+
+	_, err = rs.Seek(-2, io.SeekStart)
+	assert.Assert(t, err != nil, "a seek before the start is an error")
+
+	n, err := rs.Read(buf)
+	assert.NilError(t, err)
+	assert.Equal(t, string(buf[:n]), "b", "the byte after the failed seek is the one before it")
+}
