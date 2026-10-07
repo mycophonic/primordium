@@ -37,9 +37,10 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 
 	const (
 		numGoroutines = 100
-		// allHeldLimit bounds how long the holders wait for one another;
-		// reaching it means they never all held the content at once, not that
-		// the runner is slow.
+		// allHeldLimit bounds how long the holders wait for one another. It is
+		// a clock bound, about six times the slowest run seen (10.3 s on
+		// windows-2025, then with one-second holds); reaching it means the
+		// holders never all held the content at once.
 		allHeldLimit = 60 * time.Second
 	)
 
@@ -107,7 +108,19 @@ func TestVolatile_ConcurrentAcquire(t *testing.T) {
 		}(i)
 	}
 
-	wg.Wait()
+	finished := make(chan struct{})
+
+	go func() {
+		wg.Wait()
+		close(finished)
+	}()
+
+	select {
+	case <-finished:
+	case <-deadline.Done():
+		t.Fatalf("after %v, %d of %d holders had acquired: the holds never all overlapped",
+			allHeldLimit, arrived.Load(), numGoroutines)
+	}
 
 	// All goroutines should succeed
 	if got := successCount.Load(); got != numGoroutines {
