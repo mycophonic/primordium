@@ -59,7 +59,7 @@ func RuntimeDir() (string, error) {
 
 	switch runtime.GOOS {
 	case osLinux:
-		if xdgRuntime := os.Getenv("XDG_RUNTIME_DIR"); xdgRuntime != "" {
+		if xdgRuntime, ok := xdgDir("XDG_RUNTIME_DIR"); ok {
 			baseDir = filepath.Join(xdgRuntime, name)
 		} else {
 			baseDir = filepath.Join(os.TempDir(), name)
@@ -99,7 +99,7 @@ func getDataDir() string {
 		return filepath.Join(HomeDir(), "Library", "Application Support", name)
 
 	case osLinux:
-		if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" {
+		if dataHome, ok := xdgDir("XDG_DATA_HOME"); ok {
 			return filepath.Join(dataHome, name)
 		}
 
@@ -125,18 +125,43 @@ func getDataDir() string {
 // On macOS: ~/Library/Application Support/<appname> (same as DataDir)
 // On Windows: %AppData%\<appname> (roaming profile, syncs across machines).
 func ConfigDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		panic(fmt.Sprintf("%v: %v", fault.ErrSystemFailure, err))
-	}
-
-	configDir := filepath.Join(base, name)
+	configDir := filepath.Join(getConfigBase(), name)
 
 	if err := os.MkdirAll(configDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	return configDir, nil
+}
+
+// getConfigBase is the user's configuration directory. On Linux it follows the
+// XDG spec, which os.UserConfigDir does not: a relative $XDG_CONFIG_HOME is
+// ignored there, where os.UserConfigDir fails.
+func getConfigBase() string {
+	if runtime.GOOS == osLinux {
+		if configHome, ok := xdgDir("XDG_CONFIG_HOME"); ok {
+			return configHome
+		}
+
+		return filepath.Join(HomeDir(), ".config")
+	}
+
+	base, err := os.UserConfigDir()
+	if err != nil {
+		panic(fmt.Sprintf("%v: %v", fault.ErrSystemFailure, err))
+	}
+
+	return base
+}
+
+// xdgDir returns an XDG variable's value when the spec lets it count: "All
+// paths set in these environment variables must be absolute. If an
+// implementation encounters a relative path in any of these variables it
+// should consider the path invalid and ignore it" (XDG Base Directory 0.8).
+func xdgDir(variable string) (string, bool) {
+	dir := os.Getenv(variable)
+
+	return dir, dir != "" && filepath.IsAbs(dir)
 }
 
 // CacheDir returns the app-specific directory for cached data.
@@ -161,7 +186,7 @@ func getCacheDir() string {
 		return filepath.Join(HomeDir(), "Library", "Caches", name)
 
 	case osLinux:
-		if xdgCache := os.Getenv("XDG_CACHE_HOME"); xdgCache != "" {
+		if xdgCache, ok := xdgDir("XDG_CACHE_HOME"); ok {
 			return filepath.Join(xdgCache, name)
 		}
 
