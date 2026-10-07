@@ -258,3 +258,44 @@ func TestWindowsLongPathNeedsDriveRoot(t *testing.T) {
 		assert.Assert(t, errors.Is(windows.Validate(path), pathcheck.ErrInvalidPath), "%q", path)
 	}
 }
+
+// TestWindowsUNCNamesAShare: a UNC path names a server and a share, which
+// together form its volume; a server alone is no filesystem entry.
+func TestWindowsUNCNamesAShare(t *testing.T) {
+	t.Parallel()
+
+	windows := pathcheck.Windows()
+
+	for _, path := range []string{
+		`\\server\share`, `\\server\share\dir`, `//server/share`, `\/server\\share`,
+		`\\?\UNC\server\share`, `\\?\unc\server\share\dir`, `\server`, `C:\server`,
+	} {
+		assert.NilError(t, windows.Validate(path), "%q", path)
+	}
+
+	for _, path := range []string{
+		`\\`, `\\server`, `\\server\`, `\\server\\`, `//server`, `\\?\UNC\`, `\\?\UNC\server`, `\\?\UNC\server\`,
+	} {
+		assert.Assert(t, errors.Is(windows.Validate(path), pathcheck.ErrInvalidPath), "%q", path)
+	}
+}
+
+// TestWindowsLongPathHasNoEmptyName: Win32 does not normalize a long path, so
+// "\\" in it is an empty name; elsewhere it is one separator.
+func TestWindowsLongPathHasNoEmptyName(t *testing.T) {
+	t.Parallel()
+
+	windows := pathcheck.Windows()
+
+	for _, path := range []string{
+		`\\?\C:\`, `\\?\C:\a\b`, `\\?\C:\a\`, `\\?\UNC\server\share\`, `C:\a\\b`, `\\server\\share`,
+	} {
+		assert.NilError(t, windows.Validate(path), "%q", path)
+	}
+
+	for _, path := range []string{
+		`\\?\C:\\a`, `\\?\C:\a\\b`, `\\?\UNC\\server\share`, `\\?\UNC\server\\share`, `\\?\UNC\server\share\\x`,
+	} {
+		assert.Assert(t, errors.Is(windows.Validate(path), pathcheck.ErrInvalidPath), "%q", path)
+	}
+}

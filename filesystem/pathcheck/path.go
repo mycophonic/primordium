@@ -45,6 +45,14 @@ func ValidateSocket(path string) error {
 func (p platform) Validate(path string) error {
 	components, isSeparator := p.split(path)
 
+	if p.isUNC(path) && countFields(components, isSeparator) < 2 {
+		return fmt.Errorf("%w: %q", errors.Join(ErrInvalidPath, errUNCWithoutShare), path)
+	}
+
+	if p.longHasEmptyComponent(path, components) {
+		return fmt.Errorf("%w: %q", errors.Join(ErrInvalidPath, errInvalidPathEmpty), path)
+	}
+
 	for component := range strings.FieldsFuncSeq(components, isSeparator) {
 		if err := p.ValidateComponent(component); err != nil {
 			return fmt.Errorf("%w: invalid path component %q", err, component)
