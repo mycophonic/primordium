@@ -50,6 +50,9 @@ v0.11.1 are recorded only by their tags.
   not start at its root: `\\?\C:` is the volume device, as `\\.\C:` is, and
   `\\?\C:name` is relative to the drive's current directory, which Windows
   rules out after `\\?\`.
+- `store/refcount`: an `Acquire` whose factory fails no longer leaves the
+  key's entry directory behind: it is released as a holder is, so the entry
+  goes when no other holder has it.
 
 ## [0.11.1] - 2026-10-05
 
