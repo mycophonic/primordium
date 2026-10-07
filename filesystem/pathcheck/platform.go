@@ -149,6 +149,22 @@ func (p platform) isUNC(path string) bool {
 	return !device
 }
 
+// longHasEmptyComponent reports an empty name in a Windows long path: Win32
+// sends what follows `\\?\` to the filesystem unparsed, so "\\" there is not
+// one separator, as it is elsewhere. A drive's root separator is not one, nor
+// is a trailing separator.
+func (p platform) longHasEmptyComponent(path, components string) bool {
+	if p.name != "windows" || !strings.HasPrefix(path, longPathPrefix) {
+		return false
+	}
+
+	if !p.isUNC(path) {
+		components = strings.TrimPrefix(components, `\`)
+	}
+
+	return strings.HasPrefix(components, `\`) || strings.Contains(components, `\\`)
+}
+
 // countFields counts the non-empty components: Win32 collapses repeated
 // separators after a UNC path's first two. A long path, which Win32 does not
 // normalize, holds no empty component to skip.

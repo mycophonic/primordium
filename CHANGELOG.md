@@ -56,6 +56,9 @@ v0.11.1 are recorded only by their tags.
 - `filesystem/pathcheck` on Windows refuses a UNC path that does not name a
   server and a share (`\\server`, `\\?\UNC\server`): together they form
   its volume, and a server alone is no filesystem entry.
+- `filesystem/pathcheck` on Windows refuses an empty name in a long path
+  (`\\?\C:\a\\b`): Windows does not normalize what follows `\\?\`, so the
+  doubled separator is not one separator there, as it is elsewhere.
 
 ## [0.11.1] - 2026-10-05
 

@@ -279,3 +279,23 @@ func TestWindowsUNCNamesAShare(t *testing.T) {
 		assert.Assert(t, errors.Is(windows.Validate(path), pathcheck.ErrInvalidPath), "%q", path)
 	}
 }
+
+// TestWindowsLongPathHasNoEmptyName: Win32 does not normalize a long path, so
+// "\\" in it is an empty name; elsewhere it is one separator.
+func TestWindowsLongPathHasNoEmptyName(t *testing.T) {
+	t.Parallel()
+
+	windows := pathcheck.Windows()
+
+	for _, path := range []string{
+		`\\?\C:\`, `\\?\C:\a\b`, `\\?\C:\a\`, `\\?\UNC\server\share\`, `C:\a\\b`, `\\server\\share`,
+	} {
+		assert.NilError(t, windows.Validate(path), "%q", path)
+	}
+
+	for _, path := range []string{
+		`\\?\C:\\a`, `\\?\C:\a\\b`, `\\?\UNC\\server\share`, `\\?\UNC\server\\share`, `\\?\UNC\server\share\\x`,
+	} {
+		assert.Assert(t, errors.Is(windows.Validate(path), pathcheck.ErrInvalidPath), "%q", path)
+	}
+}
