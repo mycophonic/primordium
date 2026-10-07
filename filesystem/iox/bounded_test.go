@@ -43,7 +43,9 @@ func streamLengths() []int { return []int{0, 1, 2, 3, 5, 8} }
 
 func bufferSizes() []int { return []int{1, 2, 3, 5} }
 
-func chunks() []int { return []int{0, 1} }
+// chunks are how a source returns its bytes: all it can, a byte at a time, or
+// all it can with io.EOF on the last of them.
+func chunks() []int { return []int{0, 1, -1} }
 
 // faults are where a source returns its error with data: never, at the start,
 // one byte in, and three.

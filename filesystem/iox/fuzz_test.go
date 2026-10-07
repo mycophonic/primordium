@@ -62,8 +62,15 @@ func FuzzReadSeeker(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte, bufferSize, chunk, fault byte, script []byte) {
 		faultAt := int(fault) - 1 // 0 for none
 
-		if err := runReadSeeker(data, int(bufferSize%16)+1, int(chunk%4), faultAt, decode(script)); err != nil {
-			t.Fatalf("stream %q, buffer %d, chunk %d, fault %d: %v", data, bufferSize%16+1, chunk%4, faultAt, err)
+		if err := runReadSeeker(data, int(bufferSize%16)+1, int(chunk%4)-1, faultAt, decode(script)); err != nil {
+			t.Fatalf(
+				"stream %q, buffer %d, chunk %d, fault %d: %v",
+				data,
+				bufferSize%16+1,
+				int(chunk%4)-1,
+				faultAt,
+				err,
+			)
 		}
 	})
 }
@@ -78,11 +85,11 @@ func FuzzReader(f *testing.F) {
 			reads[i] = int(size)
 		}
 
-		src := newSource(data, int(chunk%4))
+		src := newSource(data, int(chunk%4)-1)
 		src.faultAt = int(fault) - 1
 
 		if err := runReader(iox.NewReaderWithSize(src, int(bufferSize%16)+1), src, data, reads); err != nil {
-			t.Fatalf("stream %q, buffer %d, chunk %d: %v", data, bufferSize%16+1, chunk%4, err)
+			t.Fatalf("stream %q, buffer %d, chunk %d: %v", data, bufferSize%16+1, int(chunk%4)-1, err)
 		}
 	})
 }
