@@ -112,8 +112,13 @@ func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), 
 	// Step 5: Call factory to create resource (factory checks if already exists)
 	resourcePath, cleanup, err := factory(resourceDir)
 	if err != nil {
-		_ = flock.Unlock(readLock)
+		// Released as a holder is, so that the entry goes when no other holder
+		// has it. The directory lock goes first: release takes the global lock
+		// before it, and taking it while holding the directory's would invert
+		// Acquire's order.
 		_ = flock.Unlock(dirLock)
+
+		rc.buildRelease(resourceDir, lockPath, readLock, nil)()
 
 		return "", nil, err
 	}

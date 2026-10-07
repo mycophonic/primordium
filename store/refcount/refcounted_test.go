@@ -237,6 +237,58 @@ func TestLocker_FactoryError(t *testing.T) {
 	}
 }
 
+// TestLocker_FactoryErrorLeavesNothing: a failed Acquire is released as a
+// holder is, so its entry goes when no one else holds it, stays when someone
+// does, and the key stays usable.
+func TestLocker_FactoryErrorLeavesNothing(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	locker := refcount.New(dir)
+
+	const key = "failed-factory"
+
+	entry := filepath.Join(dir, key)
+	failing := func(string) (string, func(), error) { return "", nil, errFactory }
+	writing := func(dir string) (string, func(), error) {
+		dataPath := filepath.Join(dir, "data")
+		if _, err := os.Stat(dataPath); errors.Is(err, os.ErrNotExist) {
+			if err := filesystem.WriteFile(dataPath, []byte("held"), 0o600); err != nil {
+				return "", nil, err
+			}
+		}
+
+		return dataPath, nil, nil
+	}
+
+	if _, _, err := locker.Acquire(key, failing); !errors.Is(err, errFactory) {
+		t.Fatalf("Acquire = %v, want %v", err, errFactory)
+	}
+
+	if _, err := os.Stat(entry); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("entry left by a failed Acquire with no holder: %v", err)
+	}
+
+	path, release, err := locker.Acquire(key, writing)
+	if err != nil {
+		t.Fatalf("Acquire after a failed one: %v", err)
+	}
+
+	if _, _, err := locker.Acquire(key, failing); !errors.Is(err, errFactory) {
+		t.Fatalf("Acquire = %v, want %v", err, errFactory)
+	}
+
+	if data, err := os.ReadFile(path); err != nil || string(data) != "held" {
+		t.Fatalf("a failed Acquire disturbed a held entry: %q, %v", data, err)
+	}
+
+	release()
+
+	if _, err := os.Stat(entry); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("entry left after its last release: %v", err)
+	}
+}
+
 func TestLocker_DoubleReleaseIsIdempotent(t *testing.T) {
 	t.Parallel()
 
