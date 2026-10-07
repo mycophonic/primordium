@@ -99,13 +99,13 @@ func (rs *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 		if offset >= 0 {
 			newOff := int64(rs.off) + offset
 			if newOff <= int64(rs.end) {
-				rs.off = int(newOff)
-
 				// Ask the underlying source for the absolute position.
 				pos, err := rs.source.Seek(0, io.SeekCurrent)
 				if err != nil {
 					return 0, err
 				}
+
+				rs.off = int(newOff)
 
 				return pos - int64(rs.end-rs.off), nil
 			}
@@ -115,11 +115,17 @@ func (rs *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
 		offset -= int64(rs.end - rs.off)
 	}
 
-	// Invalidate the buffer.
+	// The buffer goes only once the source has moved: a failed seek leaves
+	// the position, buffered bytes included, where it was.
+	pos, err := rs.source.Seek(offset, whence)
+	if err != nil {
+		return 0, err
+	}
+
 	rs.off = 0
 	rs.end = 0
 
-	return rs.source.Seek(offset, whence)
+	return pos, nil
 }
 
 // Close closes the underlying reader if it implements io.Closer.
