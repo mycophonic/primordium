@@ -240,3 +240,21 @@ func TestDarwinUnicode9(t *testing.T) {
 		assert.NilError(t, pathcheck.Darwin().ValidateComponent(name), label)
 	}
 }
+
+// TestWindowsLongPathNeedsDriveRoot: a long path to a drive starts at its root
+// (`\\?\C:\`). Without it, `\\?\C:` is the volume device, and `\\?\C:name` is
+// relative to the drive's current directory, which Windows rules out after
+// `\\?\`.
+func TestWindowsLongPathNeedsDriveRoot(t *testing.T) {
+	t.Parallel()
+
+	windows := pathcheck.Windows()
+
+	for _, path := range []string{`\\?\C:\`, `\\?\c:\dir\name`} {
+		assert.NilError(t, windows.Validate(path), "%q", path)
+	}
+
+	for _, path := range []string{`\\?\C:`, `\\?\C:name`, `\\?\a:b`, `\\?\c:dir\name`} {
+		assert.Assert(t, errors.Is(windows.Validate(path), pathcheck.ErrInvalidPath), "%q", path)
+	}
+}
