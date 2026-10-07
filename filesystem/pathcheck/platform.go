@@ -127,6 +127,40 @@ func (p platform) split(path string) (string, func(rune) bool) {
 	return path, isSlashOrBackslash
 }
 
+// isUNC reports a Windows path to a share, `\\server\share` or
+// `\\?\UNC\server\share`, either separator in the first. A device path
+// (`\\.\`, `\\?\`) starts the same way and is not one.
+func (p platform) isUNC(path string) bool {
+	if p.name != "windows" {
+		return false
+	}
+
+	if rest, ok := strings.CutPrefix(path, longPathPrefix); ok {
+		return len(rest) >= len(longUNCPrefix) && strings.EqualFold(rest[:len(longUNCPrefix)], longUNCPrefix)
+	}
+
+	if len(path) < 2 || !isSlashOrBackslash(rune(path[0])) || !isSlashOrBackslash(rune(path[1])) {
+		return false
+	}
+
+	device := len(path) > 2 && (path[2] == '.' || path[2] == '?') &&
+		(len(path) == 3 || isSlashOrBackslash(rune(path[3])))
+
+	return !device
+}
+
+// countFields counts the non-empty components: Win32 collapses repeated
+// separators after a UNC path's first two. A long path, which Win32 does not
+// normalize, holds no empty component to skip.
+func countFields(components string, isSeparator func(rune) bool) int {
+	count := 0
+	for range strings.FieldsFuncSeq(components, isSeparator) {
+		count++
+	}
+
+	return count
+}
+
 func isSlash(r rune) bool { return r == '/' }
 
 func isBackslash(r rune) bool { return r == '\\' }

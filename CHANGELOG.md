@@ -53,6 +53,9 @@ v0.11.1 are recorded only by their tags.
 - `store/refcount`: an `Acquire` whose factory fails no longer leaves the
   key's entry directory behind: it is released as a holder is, so the entry
   goes when no other holder has it.
+- `filesystem/pathcheck` on Windows refuses a UNC path that does not name a
+  server and a share (`\\server`, `\\?\UNC\server`): together they form
+  its volume, and a server alone is no filesystem entry.
 
 ## [0.11.1] - 2026-10-05
 
