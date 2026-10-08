@@ -37,6 +37,8 @@ import (
 var (
 	errWrite = errors.New("write failed")
 	errClose = errors.New("close failed")
+
+	errSeekReachedSource = errors.New("a seek within the buffer reached the source")
 )
 
 func streamLengths() []int { return []int{0, 1, 2, 3, 5, 8} }
@@ -103,10 +105,13 @@ func runReadSeeker(data []byte, bufferSize, chunk, fault int, ops []op) error {
 	src.faultAt = fault
 	wrapper := iox.NewReadSeekerWithSize(src, bufferSize)
 	ref := &stream{data: data, source: src}
-	buffered := 0 // bytes the wrapper holds that the stream has not yet given out
+	buffered := 0  // bytes the wrapper holds that the stream has not yet given out
+	known := false // whether a seek has told the wrapper where the source stands
 
 	for i, call := range ops {
 		if call.seek {
+			seeks := src.seeks
+
 			got, err := wrapper.Seek(call.offset, call.whence)
 			if checkErr := ref.seek(call.offset, call.whence, got, err); checkErr != nil {
 				return fmt.Errorf(
@@ -140,6 +145,14 @@ func runReadSeeker(data []byte, bufferSize, chunk, fault int, ops []op) error {
 			if kind == seekUnsure {
 				buffered = -1
 			}
+
+			// A seek within the buffer asks the source where it stands once;
+			// after any seek has, it never does again.
+			if kind == seekKept && known && src.seeks != seeks {
+				return fmt.Errorf("call %d, Seek(%d, %d): %w", i, call.offset, call.whence, errSeekReachedSource)
+			}
+
+			known = err == nil && (known || src.seeks != seeks)
 
 			ref.note(kind)
 
