@@ -20,18 +20,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/mycophonic/primordium/fault"
 )
 
-// JSON formats output as indented JSON array.
+// JSON renders the entries as one indented array.
 type JSON struct{}
 
-// PrintAll writes all data entries as a JSON array to the writer.
+// PrintAll writes all data entries as a JSON array to the writer: an empty
+// array for no entries, and ErrInvalidArgument for a value JSON cannot carry,
+// such as a NaN.
 func (*JSON) PrintAll(data []*Data, writer io.Writer) error {
-	encoder := json.NewEncoder(writer)
-	encoder.SetIndent("", "  ")
+	if data == nil {
+		data = []*Data{}
+	}
 
-	if err := encoder.Encode(data); err != nil {
-		return fmt.Errorf("encoding JSON: %w", err)
+	encoded, err := json.MarshalIndent(data, "", "  ")
+	if err != nil {
+		return fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
+	}
+
+	if _, err = writer.Write(append(encoded, '\n')); err != nil {
+		return fmt.Errorf("%w: %w", fault.ErrWriteFailure, err)
 	}
 
 	return nil
