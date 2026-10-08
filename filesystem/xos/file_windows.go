@@ -206,13 +206,15 @@ func createFileShareDelete(
 func accessMode(flag int) uint32 {
 	var access uint32
 
+	// O_WRONLY|O_RDWR, which is neither, gets no access at all, as
+	// syscall.Open gives it: a handle that can only be queried.
 	switch flag & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR) {
+	case os.O_RDONLY:
+		access = windows.GENERIC_READ
 	case os.O_WRONLY:
 		access = windows.GENERIC_WRITE
 	case os.O_RDWR:
 		access = windows.GENERIC_READ | windows.GENERIC_WRITE
-	default: // O_RDONLY (0) and any unexpected combination
-		access = windows.GENERIC_READ
 	}
 
 	if flag&os.O_CREATE != 0 {
