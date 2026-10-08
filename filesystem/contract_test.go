@@ -20,9 +20,10 @@ package filesystem_test
 // through a temporary file and a rename) and os.Rename's ("if newpath already
 // exists and is not a directory, Rename replaces it"):
 //   - a WriteFile ends one of two ways: it succeeds, and the path holds
-//     exactly the data, a regular file with the mode asked for less the
-//     process's umask; or it fails with fault.ErrWriteFailure, and the path is
-//     exactly as it was;
+//     exactly the data, a regular file created with the mode asked for, less
+//     the process's umask, as os.WriteFile creates one (Windows keeps only
+//     whether the owner may write); or it fails with fault.ErrWriteFailure,
+//     and the path is exactly as it was;
 //   - it succeeds where its directory exists and the path is missing or a
 //     file the rename may replace; it fails where the directory is missing
 //     or the path is a directory; over a read-only file the platform decides
@@ -37,9 +38,6 @@ package filesystem_test
 import (
 	"bytes"
 	"os"
-	"runtime"
-
-	"github.com/mycophonic/primordium/filesystem/umask"
 )
 
 // snapshot is what a path holds, as the caller can see it.
@@ -69,20 +67,6 @@ func take(path string) snapshot {
 
 func (s snapshot) equal(other snapshot) bool {
 	return s.kind == other.kind && bytes.Equal(s.data, other.data) && s.mode == other.mode
-}
-
-// expectedMode is the mode a written file has: what was asked, less the
-// process's umask; Windows keeps only whether the owner may write.
-func expectedMode(perm os.FileMode) os.FileMode {
-	if runtime.GOOS == "windows" {
-		if perm&0o200 == 0 {
-			return 0o444
-		}
-
-		return 0o666
-	}
-
-	return perm &^ os.FileMode(umask.Get())
 }
 
 // entries lists what dir holds.
