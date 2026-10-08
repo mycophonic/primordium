@@ -1,3 +1,5 @@
+//go:build windows
+
 /*
    Copyright Mycophonic.
 
@@ -14,15 +16,30 @@
    limitations under the License.
 */
 
-package filesystem
+package umask_test
 
 import (
-	"github.com/mycophonic/primordium/filesystem/dirs"
+	"os"
+	"testing"
+
 	"github.com/mycophonic/primordium/filesystem/umask"
 )
 
-// Initialize sets the application name for directory resolution and disables the process umask.
-func Initialize(appName string) {
+func TestMain(m *testing.M) {
+	if os.Getenv(getFirstVariable) != "" {
+		os.Exit(getFirst())
+	}
+
+	m.Run()
+}
+
+// TestDisable: Windows has no umask, so Get is 0.
+func TestDisable(t *testing.T) {
+	t.Parallel()
+
 	umask.Disable()
-	dirs.SetAppName(appName)
+
+	if got := umask.Get(); got != 0 {
+		t.Fatalf("Get() = %#o on Windows, want 0", got)
+	}
 }
