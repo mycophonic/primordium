@@ -29,6 +29,7 @@ package xos
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"syscall"
 	"unsafe"
@@ -52,6 +53,24 @@ const (
 
 	// ownerWrite is the Unix owner-write permission bit, used to map to FILE_ATTRIBUTE_READONLY.
 	ownerWrite os.FileMode = 0o200
+)
+
+// The high 12 bits of an open flag carry FILE_FLAG_* attributes for CreateFile,
+// as syscall.Open takes them (windows.O_FILE_FLAG_*); a bit there that is no
+// such flag is ErrInvalid.
+const (
+	fileFlagsMask      = 0xFFF00000
+	validFileFlagsMask = windows.FILE_FLAG_OPEN_REPARSE_POINT |
+		windows.FILE_FLAG_BACKUP_SEMANTICS |
+		windows.FILE_FLAG_OVERLAPPED |
+		windows.FILE_FLAG_OPEN_NO_RECALL |
+		windows.FILE_FLAG_SESSION_AWARE |
+		windows.FILE_FLAG_POSIX_SEMANTICS |
+		windows.FILE_FLAG_DELETE_ON_CLOSE |
+		windows.FILE_FLAG_SEQUENTIAL_SCAN |
+		windows.FILE_FLAG_NO_BUFFERING |
+		windows.FILE_FLAG_RANDOM_ACCESS |
+		windows.FILE_FLAG_WRITE_THROUGH
 )
 
 // appendAccess combines the file access rights Go sets for O_APPEND on Windows:
@@ -79,6 +98,10 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	pathp, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, &os.PathError{Op: opOpen, Path: path, Err: err}
+	}
+
+	if fileFlags(flag)&^validFileFlagsMask != 0 {
+		return nil, &os.PathError{Op: opOpen, Path: path, Err: fs.ErrInvalid}
 	}
 
 	access := accessMode(flag)
@@ -183,13 +206,15 @@ func createFileShareDelete(
 func accessMode(flag int) uint32 {
 	var access uint32
 
+	// O_WRONLY|O_RDWR, which is neither, gets no access at all, as
+	// syscall.Open gives it: a handle that can only be queried.
 	switch flag & (os.O_RDONLY | os.O_WRONLY | os.O_RDWR) {
+	case os.O_RDONLY:
+		access = windows.GENERIC_READ
 	case os.O_WRONLY:
 		access = windows.GENERIC_WRITE
 	case os.O_RDWR:
 		access = windows.GENERIC_READ | windows.GENERIC_WRITE
-	default: // O_RDONLY (0) and any unexpected combination
-		access = windows.GENERIC_READ
 	}
 
 	if flag&os.O_CREATE != 0 {
@@ -244,5 +269,10 @@ func fileAttributes(flag int, perm os.FileMode) uint32 {
 		attrs |= windows.FILE_FLAG_WRITE_THROUGH
 	}
 
-	return attrs
+	return attrs | fileFlags(flag)
+}
+
+// fileFlags is the FILE_FLAG_* part of an open flag.
+func fileFlags(flag int) uint32 {
+	return uint32(flag) & fileFlagsMask // #nosec G115 -- the high bits are what is kept
 }

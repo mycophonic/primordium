@@ -37,12 +37,12 @@ import (
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
-// openFlags are every combination of access mode and the flags os.OpenFile
-// documents.
+// openFlags are every combination of access mode, the three and the one that
+// is none (O_WRONLY|O_RDWR), and the flags os.OpenFile documents.
 func openFlags() []int {
 	var flags []int
 
-	for _, access := range []int{os.O_RDONLY, os.O_WRONLY, os.O_RDWR} {
+	for _, access := range []int{os.O_RDONLY, os.O_WRONLY, os.O_RDWR, os.O_WRONLY | os.O_RDWR} {
 		for bits := range 32 {
 			flag := access
 
