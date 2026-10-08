@@ -23,6 +23,7 @@ package flock_test
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -119,12 +120,7 @@ func play(t *testing.T, path string, sequence []call) {
 				lock = flock.Lock
 			}
 
-			file, err := lock(path)
-			if err != nil || file == nil {
-				t.Fatalf("%+v, step %d: a free blocking lock = %v, %v; want the lock", sequence, i, file, err)
-			}
-
-			files[step.slot] = file
+			files[step.slot] = grantedWithin(t, lock, path, fmt.Sprintf("%+v, step %d", sequence, i))
 			model[step.slot] = holder{exclusive: step.exclusive}
 
 			continue
@@ -213,17 +209,12 @@ func blockedOn(t *testing.T, held []bool, exclusive, scoped bool) {
 	files := make([]*os.File, len(held))
 
 	for i, holderExclusive := range held {
-		var err error
-
+		lock := flock.ReadOnlyLock
 		if holderExclusive {
-			files[i], err = flock.Lock(path)
-		} else {
-			files[i], err = flock.ReadOnlyLock(path)
+			lock = flock.Lock
 		}
 
-		if err != nil {
-			t.Fatalf("holders %v: lock %d: %v", held, i, err)
-		}
+		files[i] = grantedWithin(t, lock, path, fmt.Sprintf("holders %v, lock %d", held, i))
 	}
 
 	conflicting := 0
@@ -271,6 +262,38 @@ func blockedOn(t *testing.T, held []bool, exclusive, scoped bool) {
 	if got := <-granted; got < int32(conflicting) {
 		t.Fatalf("holders %v, exclusive %v: granted after %d releases, want %d", held, exclusive, got, conflicting)
 	}
+}
+
+// grantedWithin takes a lock the model says is free, which must then be
+// granted at once: one not granted within grantLimit fails the test there,
+// rather than leaving it to hang until the package's timeout.
+func grantedWithin(t *testing.T, lock func(string) (*os.File, error), path, what string) *os.File {
+	t.Helper()
+
+	type result struct {
+		file *os.File
+		err  error
+	}
+
+	done := make(chan result, 1)
+
+	go func() {
+		file, err := lock(path)
+		done <- result{file, err}
+	}()
+
+	select {
+	case got := <-done:
+		if got.err != nil || got.file == nil {
+			t.Fatalf("%s: a free lock = %v, %v; want the lock", what, got.file, got.err)
+		}
+
+		return got.file
+	case <-time.After(grantLimit):
+		t.Fatalf("%s: a free lock was not granted within %v", what, grantLimit)
+	}
+
+	return nil
 }
 
 // lockBlocking takes a blocking lock, runs granted while holding it, and lets
