@@ -223,16 +223,5 @@ func getCacheDir() string {
 // On macOS: ~/Library/Caches/<appname>/bin
 // On Windows: %LOCALAPPDATA%\<appname>\cache\bin.
 func BinDir() (string, error) {
-	cacheDirectory, err := CacheDir()
-	if err != nil {
-		return "", err
-	}
-
-	binDirectory := filepath.Join(cacheDirectory, "bin")
-
-	if err := os.MkdirAll(binDirectory, internal.DirPermissionsPrivate); err != nil {
-		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	return binDirectory, nil
+	return CacheDir("bin")
 }
