@@ -24,7 +24,8 @@ package iox_test
 //     error; a source that does is outside this contract, as io.Reader
 //     discourages it and tells the caller it means "nothing happened", so a
 //     wrapper may pass it on (bufio's io.ErrNoProgress is a safeguard beyond
-//     it). A source may return bytes and an error together: the caller sees
+// it). A source may return io.EOF with its last bytes or after them. A source may return bytes and an error together:
+// the caller sees
 //     that error once, where the stream had it, before any byte past it; a
 //     small forward SeekCurrent within the buffered bytes keeps it, any other
 //     seek that succeeds drops it, as it belonged to the old position.
@@ -57,7 +58,7 @@ var (
 // and that can return fewer bytes than asked (io.Reader allows it).
 type source struct {
 	reader *bytes.Reader
-	chunk  int // most bytes one Read returns; 0 for no limit
+	chunk  int // most bytes one Read returns; 0 for no limit; -1 for no limit, with io.EOF on the last bytes
 	reads  int
 	seeks  int
 	asked  int // the size of the last Read asked of it
@@ -93,6 +94,11 @@ func (s *source) Read(p []byte) (int, error) {
 
 	if fault {
 		return n, errFault
+	}
+
+	// io.Reader lets a source return io.EOF with the last bytes, not after.
+	if s.chunk < 0 && err == nil && n > 0 && s.reader.Len() == 0 {
+		return n, io.EOF
 	}
 
 	return n, err
