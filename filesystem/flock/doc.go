@@ -15,6 +15,6 @@
 */
 
 // Package flock provides a platform-independent API for advisory file
-// locking. Calls to functions in this package on platforms that do not support
-// advisory locks will return errors for which IsNotSupported returns true.
+// locking: flock(2) on Unix, LockFileEx on Windows, there on a lock file kept
+// beside the path, since a directory cannot be locked.
 package flock
