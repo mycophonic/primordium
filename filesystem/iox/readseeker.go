@@ -22,13 +22,15 @@ import (
 
 // ReadSeeker wraps an io.ReadSeeker with buffered reading. Seeks invalidate
 // the buffer except for small forward SeekCurrent operations that fall within
-// the buffered data. If the underlying reader implements io.Closer, Close
-// will close it.
+// the buffered data, which reach the source at most once, to learn where it
+// stands. If the underlying reader implements io.Closer, Close will close it.
 type ReadSeeker struct {
 	buf    []byte
 	off    int   // read offset within buf
 	end    int   // valid data end within buf
 	err    error // the source's error, held until the bytes it came with are read
+	pos    int64 // the source's offset, once a seek has told it
+	known  bool
 	source io.ReadSeeker
 }
 
@@ -74,12 +76,17 @@ func (rs *ReadSeeker) Read(dest []byte) (int, error) {
 
 	// Large reads bypass the buffer entirely.
 	if len(dest) >= len(rs.buf) {
-		return rs.source.Read(dest)
+		n, err := rs.source.Read(dest)
+		rs.pos += int64(n)
+
+		return n, err
 	}
 
 	// Refill the buffer. Deliver data first; an error that came with it is held
 	// for the Read after the buffer empties, as bufio.Reader does.
 	n, err := rs.source.Read(rs.buf)
+	rs.pos += int64(n)
+
 	if n > 0 {
 		rs.end = n
 		rs.off = copy(dest, rs.buf[:rs.end])
@@ -92,41 +99,44 @@ func (rs *ReadSeeker) Read(dest []byte) (int, error) {
 }
 
 // Seek sets the offset for the next Read. For io.SeekCurrent with a small
-// forward offset, the seek is satisfied within the buffer without a syscall.
-// All other seeks invalidate the buffer and delegate to the underlying source.
+// forward offset within the buffered bytes, the seek is satisfied in the
+// buffer: the source is asked where it stands the first time, and the offset
+// is tracked from there. All other seeks invalidate the buffer and delegate
+// to the underlying source.
 //
 //nolint:wrapcheck // I/O wrapper must return unwrapped errors
 func (rs *ReadSeeker) Seek(offset int64, whence int) (int64, error) {
-	// For SeekCurrent, adjust offset to account for buffered but unconsumed bytes.
-	// The underlying source is ahead of the logical read position by (rs.end - rs.off).
+	// The source is ahead of the logical position by the unread buffered bytes.
 	if whence == io.SeekCurrent {
-		// Optimize small forward seeks within buffered data.
-		if offset >= 0 {
-			newOff := int64(rs.off) + offset
-			if newOff <= int64(rs.end) {
-				// Ask the underlying source for the absolute position.
+		if newOff := int64(rs.off) + offset; offset >= 0 && newOff <= int64(rs.end) {
+			if !rs.known {
 				pos, err := rs.source.Seek(0, io.SeekCurrent)
 				if err != nil {
 					return 0, err
 				}
 
-				rs.off = int(newOff)
-
-				return pos - int64(rs.end-rs.off), nil
+				rs.pos, rs.known = pos, true
 			}
+
+			rs.off = int(newOff)
+
+			return rs.pos - int64(rs.end-rs.off), nil
 		}
 
-		// Adjust offset to account for buffered but unconsumed bytes.
 		offset -= int64(rs.end - rs.off)
 	}
 
 	// The buffer goes only once the source has moved: a failed seek leaves
-	// the position, buffered bytes included, where it was.
+	// the position, buffered bytes included, where it was. Where the source
+	// stands after a failure is its business, so it is asked again next time.
 	pos, err := rs.source.Seek(offset, whence)
 	if err != nil {
+		rs.known = false
+
 		return 0, err
 	}
 
+	rs.pos, rs.known = pos, true
 	rs.off = 0
 	rs.end = 0
 	rs.err = nil
