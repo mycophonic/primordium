@@ -19,214 +19,108 @@ package format
 import (
 	"fmt"
 	"io"
-	"slices"
 	"strings"
 )
 
-// Markdown formats output as structured markdown with tables.
-type Markdown struct{}
+// markdown renders headings for nested values and tables for scalar fields.
+type markdown struct{}
 
 // PrintAll writes all data entries with horizontal rule separators.
-func (m *Markdown) PrintAll(data []*Data, writer io.Writer) error {
+func (markdown) PrintAll(data []*Data, writer io.Writer) error {
+	out := &printer{writer: writer}
+
 	for i, entry := range data {
 		if i > 0 {
-			if _, err := fmt.Fprintf(writer, "\n%s\n\n", mdRuleSeparator); err != nil {
-				return fmt.Errorf("writing separator: %w", err)
-			}
+			out.printf("\n%s\n\n", mdRuleSeparator)
 		}
 
-		if err := m.printOne(entry, writer); err != nil {
-			return err
+		out.printf("## %s\n\n", entry.Object)
+
+		if len(entry.Meta) > 0 {
+			out.markdownFields(entry.Meta, 3)
 		}
 	}
 
-	return nil
+	return out.done()
 }
 
-func (m *Markdown) printOne(data *Data, writer io.Writer) error {
-	if _, err := fmt.Fprintf(writer, "## %s\n\n", data.Object); err != nil {
-		return fmt.Errorf("writing title: %w", err)
+// markdownFields renders a map: its scalar fields as one table, then each
+// nested field as a section headed at level.
+func (p *printer) markdownFields(data map[string]any, level int) {
+	scalars, nested := separateFields(data)
+
+	if len(scalars) > 0 {
+		p.markdownTable(scalars)
 	}
 
-	if len(data.Meta) > 0 {
-		return m.printMap(writer, data.Meta, 3)
+	for _, key := range sortedKeys(nested) {
+		p.printf("%s %s\n\n", heading(level), key)
+		p.markdownNested(nested[key], level)
 	}
-
-	return nil
 }
 
-func (m *Markdown) printMap(writer io.Writer, meta map[string]any, headingLevel int) error {
-	scalarFields, nestedFields := separateFields(meta)
-
-	if len(scalarFields) > 0 {
-		if err := m.printTable(writer, scalarFields); err != nil {
-			return err
-		}
-	}
-
-	for _, key := range sortedKeys(nestedFields) {
-		if err := m.printValue(writer, key, nestedFields[key], headingLevel); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *Markdown) printValue(writer io.Writer, key string, value any, headingLevel int) error {
-	switch typedValue := value.(type) {
+// markdownNested renders what sits under a heading at level: a map's fields,
+// or a slice's items.
+func (p *printer) markdownNested(value any, level int) {
+	switch typed := value.(type) {
 	case map[string]any:
-		return m.printMapSection(writer, key, typedValue, headingLevel)
+		p.markdownFields(typed, level+1)
 	case []any:
-		return m.printSliceSection(writer, key, typedValue, headingLevel)
-	default:
-		return nil
+		p.markdownItems(typed, level)
 	}
 }
 
-func (m *Markdown) printMapSection(
-	writer io.Writer,
-	key string,
-	data map[string]any,
-	headingLevel int,
-) error {
-	heading := strings.Repeat(headingChar, min(headingLevel, maxHeadingLevel))
-
-	if _, err := fmt.Fprintf(writer, "%s %s\n\n", heading, key); err != nil {
-		return fmt.Errorf("writing heading %s: %w", key, err)
-	}
-
-	scalarFields, nestedFields := separateFields(data)
-
-	if len(scalarFields) > 0 {
-		if err := m.printTable(writer, scalarFields); err != nil {
-			return err
-		}
-	}
-
-	for _, nestedKey := range sortedKeys(nestedFields) {
-		if err := m.printValue(writer, nestedKey, nestedFields[nestedKey], headingLevel+1); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (m *Markdown) printSliceSection(
-	writer io.Writer,
-	key string,
-	slice []any,
-	headingLevel int,
-) error {
-	heading := strings.Repeat(headingChar, min(headingLevel, maxHeadingLevel))
-
-	if _, err := fmt.Fprintf(writer, "%s %s\n\n", heading, key); err != nil {
-		return fmt.Errorf("writing heading %s: %w", key, err)
-	}
+// markdownItems renders a slice's items under a heading at level: a scalar
+// as a list entry, a map or a slice as a numbered section one level down.
+func (p *printer) markdownItems(slice []any, level int) {
+	listed := false
 
 	for index, item := range slice {
-		switch typedItem := item.(type) {
-		case map[string]any:
-			if err := m.printSliceItem(writer, index, typedItem, headingLevel); err != nil {
-				return err
+		switch item.(type) {
+		case map[string]any, []any:
+			if listed {
+				p.printf("\n")
+
+				listed = false
 			}
+
+			p.printf("%s Item %d\n\n", heading(level+1), index+1)
+			p.markdownNested(item, level+1)
 		default:
-			if _, err := fmt.Fprintf(writer, "- %v\n", typedItem); err != nil {
-				return fmt.Errorf("writing item %d: %w", index, err)
-			}
+			p.printf("- %s\n", oneLine(fmt.Sprintf("%v", item)))
+
+			listed = true
 		}
 	}
 
-	return nil
+	if listed {
+		p.printf("\n")
+	}
 }
 
-// printSliceItem prints one map item of a slice section: a numbered
-// heading one level down, its scalar fields as a table, then its nested
-// fields as sections of their own.
-func (m *Markdown) printSliceItem(
-	writer io.Writer,
-	index int,
-	item map[string]any,
-	headingLevel int,
-) error {
-	itemHeading := strings.Repeat(headingChar, min(headingLevel+1, maxHeadingLevel))
-
-	if _, err := fmt.Fprintf(writer, "%s Item %d\n\n", itemHeading, index+1); err != nil {
-		return fmt.Errorf("writing item %d heading: %w", index, err)
-	}
-
-	scalarFields, nestedFields := separateFields(item)
-
-	if len(scalarFields) > 0 {
-		if err := m.printTable(writer, scalarFields); err != nil {
-			return err
-		}
-	}
-
-	for _, nestedKey := range sortedKeys(nestedFields) {
-		if err := m.printValue(writer, nestedKey, nestedFields[nestedKey], headingLevel+2); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func (*Markdown) printTable(writer io.Writer, fields map[string]any) error {
-	if _, err := fmt.Fprintln(writer, "| Field | Value |"); err != nil {
-		return fmt.Errorf("writing table header: %w", err)
-	}
-
-	if _, err := fmt.Fprintln(writer, "|-------|-------|"); err != nil {
-		return fmt.Errorf("writing table separator: %w", err)
-	}
+func (p *printer) markdownTable(fields map[string]any) {
+	p.printf("| Field | Value |\n|-------|-------|\n")
 
 	for _, key := range sortedKeys(fields) {
-		if _, err := fmt.Fprintf(
-			writer,
-			"| %s | %s |\n",
-			escapePipe(key),
-			escapePipe(fmt.Sprintf("%v", fields[key])),
-		); err != nil {
-			return fmt.Errorf("writing table row %s: %w", key, err)
-		}
+		p.printf("| %s | %s |\n", cell(key), cell(fmt.Sprintf("%v", fields[key])))
 	}
 
-	if _, err := fmt.Fprintln(writer); err != nil {
-		return fmt.Errorf("writing table trailing newline: %w", err)
-	}
-
-	return nil
+	p.printf("\n")
 }
 
-func escapePipe(s string) string {
-	return strings.ReplaceAll(s, "|", `\|`)
+// heading is the ATX marker for a level; Markdown has six.
+func heading(level int) string {
+	return strings.Repeat(headingChar, min(level, maxHeadingLevel))
 }
 
-func separateFields(data map[string]any) (scalars, nested map[string]any) {
-	scalars = make(map[string]any)
-	nested = make(map[string]any)
-
-	for key, value := range data {
-		switch value.(type) {
-		case map[string]any, []any:
-			nested[key] = value
-		default:
-			scalars[key] = value
-		}
-	}
-
-	return scalars, nested
+// cell makes a string fit one table cell: a pipe would end the cell, and a
+// line break the row.
+func cell(s string) string {
+	return oneLine(strings.ReplaceAll(s, "|", `\|`))
 }
 
-func sortedKeys(data map[string]any) []string {
-	keys := make([]string, 0, len(data))
-	for key := range data {
-		keys = append(keys, key)
-	}
-
-	slices.Sort(keys)
-
-	return keys
+// oneLine keeps a string on one line, as a list item or a table row must be:
+// a line break becomes <br>.
+func oneLine(s string) string {
+	return strings.NewReplacer("\r\n", "<br>", "\n", "<br>", "\r", "<br>").Replace(s)
 }
