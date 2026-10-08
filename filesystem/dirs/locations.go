@@ -33,6 +33,16 @@ var (
 	name     string
 )
 
+// appName is the name SetAppName set. Without one, every directory would be
+// the user's whole base directory, so asking before SetAppName panics.
+func appName() string {
+	if name == "" {
+		panic("dirs: a directory was asked for before SetAppName")
+	}
+
+	return name
+}
+
 // HomeDir returns the current user's home directory.
 // Panics if the home directory cannot be determined, as this indicates
 // a fundamentally broken system configuration that cannot be recovered from.
@@ -60,16 +70,15 @@ func RuntimeDir() (string, error) {
 	switch runtime.GOOS {
 	case osLinux:
 		if xdgRuntime, ok := xdgDir("XDG_RUNTIME_DIR"); ok {
-			baseDir = filepath.Join(xdgRuntime, name)
+			baseDir = filepath.Join(xdgRuntime, appName())
 		} else {
-			baseDir = filepath.Join(os.TempDir(), name)
+			baseDir = filepath.Join(os.TempDir(), appName())
 		}
 	default:
 		// macOS, Windows, and others use temp directory
-		baseDir = filepath.Join(os.TempDir(), name)
+		baseDir = filepath.Join(os.TempDir(), appName())
 	}
 
-	// #nosec G703 -- baseDir from TempDir+hardcoded name
 	if err := os.MkdirAll(baseDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -96,24 +105,24 @@ func DataDir() (string, error) {
 func getDataDir() string {
 	switch runtime.GOOS {
 	case osDarwin:
-		return filepath.Join(HomeDir(), "Library", "Application Support", name)
+		return filepath.Join(HomeDir(), "Library", "Application Support", appName())
 
 	case osLinux:
 		if dataHome, ok := xdgDir("XDG_DATA_HOME"); ok {
-			return filepath.Join(dataHome, name)
+			return filepath.Join(dataHome, appName())
 		}
 
-		return filepath.Join(HomeDir(), ".local", "share", name)
+		return filepath.Join(HomeDir(), ".local", "share", appName())
 
 	case osWindows:
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, name)
+			return filepath.Join(localAppData, appName())
 		}
 
-		return filepath.Join(HomeDir(), "AppData", "Local", name)
+		return filepath.Join(HomeDir(), "AppData", "Local", appName())
 
 	default:
-		return filepath.Join(HomeDir(), ".local", "share", name)
+		return filepath.Join(HomeDir(), ".local", "share", appName())
 	}
 }
 
@@ -125,7 +134,7 @@ func getDataDir() string {
 // On macOS: ~/Library/Application Support/<appname> (same as DataDir)
 // On Windows: %AppData%\<appname> (roaming profile, syncs across machines).
 func ConfigDir() (string, error) {
-	configDir := filepath.Join(getConfigBase(), name)
+	configDir := filepath.Join(getConfigBase(), appName())
 
 	if err := os.MkdirAll(configDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
@@ -183,24 +192,24 @@ func CacheDir(sub ...string) (string, error) {
 func getCacheDir() string {
 	switch runtime.GOOS {
 	case osDarwin:
-		return filepath.Join(HomeDir(), "Library", "Caches", name)
+		return filepath.Join(HomeDir(), "Library", "Caches", appName())
 
 	case osLinux:
 		if xdgCache, ok := xdgDir("XDG_CACHE_HOME"); ok {
-			return filepath.Join(xdgCache, name)
+			return filepath.Join(xdgCache, appName())
 		}
 
-		return filepath.Join(HomeDir(), ".cache", name)
+		return filepath.Join(HomeDir(), ".cache", appName())
 
 	case osWindows:
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, name, "cache")
+			return filepath.Join(localAppData, appName(), "cache")
 		}
 
-		return filepath.Join(HomeDir(), "AppData", "Local", name, "cache")
+		return filepath.Join(HomeDir(), "AppData", "Local", appName(), "cache")
 
 	default:
-		return filepath.Join(HomeDir(), ".cache", name)
+		return filepath.Join(HomeDir(), ".cache", appName())
 	}
 }
 
@@ -213,16 +222,5 @@ func getCacheDir() string {
 // On macOS: ~/Library/Caches/<appname>/bin
 // On Windows: %LOCALAPPDATA%\<appname>\cache\bin.
 func BinDir() (string, error) {
-	cacheDirectory, err := CacheDir()
-	if err != nil {
-		return "", err
-	}
-
-	binDirectory := filepath.Join(cacheDirectory, "bin")
-
-	if err := os.MkdirAll(binDirectory, internal.DirPermissionsPrivate); err != nil {
-		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	return binDirectory, nil
+	return CacheDir("bin")
 }

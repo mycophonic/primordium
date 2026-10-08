@@ -26,6 +26,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"github.com/mycophonic/primordium/filesystem/dirs"
@@ -33,31 +34,55 @@ import (
 
 const appName = "primordium-dirs-test"
 
-// invalidNameVariable asks the test binary, run again by TestSetAppName, to
-// try a name pathcheck refuses before anything else.
-const invalidNameVariable = "PRIMORDIUM_DIRS_INVALID_NAME"
+// childVariable asks the test binary, run again, to try what must come in a
+// process of its own, before SetAppName: "invalid", a name pathcheck refuses;
+// "before:<directory>", that directory with no name set.
+const childVariable = "PRIMORDIUM_DIRS_CHILD"
 
 func TestMain(m *testing.M) {
-	if os.Getenv(invalidNameVariable) != "" {
-		os.Exit(setInvalidName())
+	if mode := os.Getenv(childVariable); mode != "" {
+		os.Exit(child(mode))
 	}
 
 	dirs.SetAppName(appName)
 	m.Run()
 }
 
-// setInvalidName gives SetAppName a name pathcheck refuses, first: 3 when it
-// panics, as the contract says, 0 when it does not.
-func setInvalidName() (code int) {
+// child runs what mode asks: 3 when it panics, as the contract says, 0 when
+// it does not.
+func child(mode string) (code int) {
 	defer func() {
 		if recover() != nil {
 			code = 3
 		}
 	}()
 
+	if directory, ok := strings.CutPrefix(mode, "before:"); ok {
+		_, _ = directories()[directory]()
+
+		return 0
+	}
+
 	dirs.SetAppName("..")
 
 	return 0
+}
+
+// panicsInChild runs the test binary again in mode and checks that it
+// panicked there.
+func panicsInChild(t *testing.T, mode string) {
+	t.Helper()
+
+	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
+
+	cmd.Env = append(os.Environ(), childVariable+"="+mode)
+
+	err := cmd.Run()
+
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
+		t.Fatalf("%s did not panic: %v", mode, err)
+	}
 }
 
 // variables are the environment variables that bear on the directories on
@@ -195,15 +220,16 @@ func TestSetAppName(t *testing.T) {
 		t.Fatalf("after a second SetAppName, DataDir() = %q, %v; want it named %q", got, err, appName)
 	}
 
-	cmd := exec.CommandContext(t.Context(), os.Args[0], "-test.run=^$")
+	panicsInChild(t, "invalid")
+}
 
-	cmd.Env = append(os.Environ(), invalidNameVariable+"=1")
+// TestDirectoriesNeedAName: every directory asked for before SetAppName
+// panics, in a run of its own, rather than handing out the base directory.
+func TestDirectoriesNeedAName(t *testing.T) {
+	t.Parallel()
 
-	err := cmd.Run()
-
-	var exit *exec.ExitError
-	if !errors.As(err, &exit) || exit.ExitCode() != 3 {
-		t.Fatalf("SetAppName(\"..\") did not panic: %v", err)
+	for directory := range directories() {
+		panicsInChild(t, "before:"+directory)
 	}
 }
 
