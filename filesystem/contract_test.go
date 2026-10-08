@@ -25,13 +25,14 @@ package filesystem_test
 //     whether the owner may write); or it fails with fault.ErrWriteFailure,
 //     and the path is exactly as it was;
 //   - it succeeds where its directory exists and the path is missing or a
-//     file the rename may replace; it fails where the directory is missing
-//     or the path is a directory; over a read-only file the platform decides
-//     (a rename on Unix answers to the directory, on Windows to the file),
-//     within the first rule, and so it does on Windows over a file any other
-//     handle holds open: os.Rename there is MoveFileEx with
-//     MOVEFILE_REPLACE_EXISTING, which refuses such a target whatever its
-//     share mode;
+//     file the rename may replace, held open or not: on Windows, xos.Rename
+//     replaces a file whose holders opened it with FILE_SHARE_DELETE, as xos
+//     opens, on a volume with the POSIX-semantics rename (NTFS; the property
+//     is the volume's, and a FAT volume refuses as os does), and refuses one
+//     a holder opened without, as os.Open does; it
+//     fails where the directory is missing or the path is a directory; over
+//     a read-only file the platform decides (a rename on Unix answers to the
+//     directory, on Windows to the file), within the first rule;
 //   - either way, it leaves no temporary file behind;
 //   - a reader sees the old content or the new, never a mix.
 

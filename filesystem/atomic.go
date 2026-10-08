@@ -49,7 +49,9 @@ import (
 // WriteFile atomically writes data to a file by first writing to a temp file and calling rename.
 // Generally speaking, this should almost always be used as a dropin for os.WriteFile.
 // The only exception is when inodes matter.
-// The file is created with perm before umask, as os.WriteFile creates one.
+// The file is created with perm before umask, as os.WriteFile creates one, and
+// replaces one that readers hold open, on Windows too when they opened it
+// through xos.
 func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	tmpFile, err := createTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename), perm)
 	if err != nil {
@@ -77,7 +79,7 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 		return errors.Join(fault.ErrWriteFailure, err)
 	}
 
-	if err = os.Rename(tmpFile.Name(), filename); err != nil {
+	if err = xos.Rename(tmpFile.Name(), filename); err != nil {
 		return errors.Join(fault.ErrWriteFailure, err)
 	}
 

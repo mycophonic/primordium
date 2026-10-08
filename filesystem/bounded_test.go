@@ -22,6 +22,7 @@ package filesystem_test
 import (
 	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -134,14 +135,9 @@ func TestBoundedWriteFile(t *testing.T) {
 
 // TestWholeContents: readers racing writes that alternate two contents of
 // different lengths see one or the other, whole, every time, and every write
-// lands. Windows refuses to replace a file a reader holds open, so the race is
-// Unix's; TestHeldTarget checks Windows without one.
+// lands, on Windows too, the readers holding the file through xos.
 func TestWholeContents(t *testing.T) {
 	t.Parallel()
-
-	if runtime.GOOS == "windows" {
-		t.Skip("Windows refuses the rename while a reader holds the file: TestHeldTarget checks it")
-	}
 
 	path := filepath.Join(t.TempDir(), "target")
 	contents := [][]byte{bytes.Repeat([]byte{'a'}, 10), bytes.Repeat([]byte{'b'}, 70000)}
@@ -202,11 +198,12 @@ func TestWholeContents(t *testing.T) {
 	}
 }
 
-// TestHeldTarget: on Windows, os.Rename (MoveFileEx with
-// MOVEFILE_REPLACE_EXISTING) refuses a target any reader holds open, whatever
-// its share mode, so a WriteFile over a held file fails with ErrWriteFailure
-// and leaves it whole; once the reader lets go, it lands. Elsewhere, it lands
-// either way.
+// TestHeldTarget: a WriteFile over a file a reader holds open lands, the
+// reader keeping the file it opened, on every platform when the reader opened
+// it through xos; a reader that opened it through os.Open, with no
+// FILE_SHARE_DELETE, makes Windows refuse the rename, so there the write fails
+// with ErrWriteFailure and leaves the file whole, and lands once the reader
+// lets go.
 func TestHeldTarget(t *testing.T) {
 	t.Parallel()
 
@@ -222,13 +219,22 @@ func TestHeldTarget(t *testing.T) {
 		}
 
 		err = filesystem.WriteFile(path, []byte("new"), 0o644)
+		refused := runtime.GOOS == "windows" && name == "os.Open"
 
 		switch {
-		case runtime.GOOS != "windows" && err != nil:
-			t.Fatalf("%s held: %v; a rename over an open file is fine here", name, err)
-		case runtime.GOOS == "windows" && !errors.Is(err, fault.ErrWriteFailure):
+		case !refused && err != nil:
+			t.Fatalf("%s held: %v; a rename over an open file lands here", name, err)
+		case !refused:
+			if got := take(path); !bytes.Equal(got.data, []byte("new")) {
+				t.Fatalf("%s held: the write landed as %q", name, got.data)
+			}
+
+			if still, readErr := io.ReadAll(reader); readErr != nil || string(still) != "old" {
+				t.Fatalf("%s held: the reader reads %q, %v; want the file it opened", name, still, readErr)
+			}
+		case !errors.Is(err, fault.ErrWriteFailure):
 			t.Fatalf("%s held: %v, want ErrWriteFailure", name, err)
-		case runtime.GOOS == "windows":
+		default:
 			if got := take(path); !bytes.Equal(got.data, []byte("old")) {
 				t.Fatalf("%s held: the refused write left %q", name, got.data)
 			}
