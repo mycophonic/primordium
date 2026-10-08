@@ -39,7 +39,7 @@ package dirs_test
 //     non-existent an attempt should be made to create it with permission
 //     0700"), and an existing one keeps its mode.
 //   - SetAppName takes the first name, which must be a valid path component,
-//     and ignores the rest.
+//     and ignores the rest; a directory asked for before it panics.
 
 import (
 	"os"
