@@ -21,9 +21,8 @@ import (
 	"github.com/mycophonic/primordium/filesystem/umask"
 )
 
-// Initialize sets the application name for directory resolution and reads the system umask.
+// Initialize sets the application name for directory resolution and disables the process umask.
 func Initialize(appName string) {
-	// For the side effects (bypass system umask).
-	umask.Get()
+	umask.Disable()
 	dirs.SetAppName(appName)
 }

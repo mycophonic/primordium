@@ -23,38 +23,39 @@ import (
 
 //nolint:gochecknoglobals // the umask is process-wide state
 var (
-	mutex       sync.Mutex
-	getOnce     sync.Once
-	currentMask = defaultUmask
+	mutex sync.Mutex
+	found *uint32 // the mask Disable found; nil until it has run
 )
 
-// Set sets the file mode creation mask (umask) for the current process.
-func Set(mask uint32) {
+// Disable zeroes the process umask, once: from then on a file or directory
+// gets exactly the mode its creation asks for. Later calls do nothing.
+func Disable() {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	if mask == currentMask {
+	if found != nil {
 		return
 	}
 
-	currentMask = mask
-	_ = umask(int(mask))
+	mask := umask(0)
+	if mask < 0 || mask > math.MaxUint32 {
+		panic("the process umask is out of range")
+	}
+
+	masked := uint32(mask)
+	found = &masked
 }
 
-// Get retrieves the current file mode creation mask (umask) for the current process.
+// Get is the mask the process started with, the operator's, as [Disable]
+// found it. It panics when [Disable] has not run: a umask cannot be read
+// without being set.
 func Get() uint32 {
 	mutex.Lock()
 	defer mutex.Unlock()
 
-	getOnce.Do(func() {
-		cMask := umask(0)
+	if found == nil {
+		panic("umask.Get before umask.Disable")
+	}
 
-		if cMask > math.MaxUint32 || cMask < 0 {
-			panic("currently set user umask is out of range")
-		}
-
-		currentMask = uint32(cMask)
-	})
-
-	return currentMask
+	return *found
 }

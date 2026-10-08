@@ -18,11 +18,13 @@ package filesystem
 
 import (
 	"errors"
+	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem/umask"
 	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
@@ -47,10 +49,9 @@ import (
 // WriteFile atomically writes data to a file by first writing to a temp file and calling rename.
 // Generally speaking, this should almost always be used as a dropin for os.WriteFile.
 // The only exception is when inodes matter.
+// The file is created with perm before umask, as os.WriteFile creates one.
 func WriteFile(filename string, data []byte, perm os.FileMode) error {
-	perm = (^os.FileMode(umask.Get())) & perm
-
-	tmpFile, err := xos.CreateTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename))
+	tmpFile, err := createTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename), perm)
 	if err != nil {
 		return errors.Join(fault.ErrWriteFailure, err)
 	}
@@ -63,10 +64,6 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 			_ = tmpFile.Close()
 		}
 	}()
-
-	if err = os.Chmod(tmpFile.Name(), perm); err != nil {
-		return errors.Join(fault.ErrWriteFailure, err)
-	}
 
 	if _, err = tmpFile.Write(data); err != nil {
 		return errors.Join(fault.ErrWriteFailure, err)
@@ -85,4 +82,24 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	}
 
 	return nil
+}
+
+// tempAttempts bounds the retries on a name collision, as os.CreateTemp does.
+const tempAttempts = 10000
+
+// createTemp is os.CreateTemp with the mode the caller chose: created with
+// perm, before umask, the temporary file lands with the mode os.WriteFile
+// would have given, which a Chmod after the fact would not.
+//
+//nolint:wrapcheck // WriteFile, its only caller, wraps what it returns
+func createTemp(dir, prefix string, perm os.FileMode) (*os.File, error) {
+	for try := 0; ; try++ {
+		// The suffix is a name, not a secret: O_EXCL is what makes it unique.
+		name := filepath.Join(dir, prefix+strconv.FormatUint(uint64(rand.Uint32()), 10)) // #nosec G404 -- see above
+
+		file, err := xos.OpenFile(name, os.O_RDWR|os.O_CREATE|os.O_EXCL, perm)
+		if !errors.Is(err, fs.ErrExist) || try >= tempAttempts {
+			return file, err
+		}
+	}
 }

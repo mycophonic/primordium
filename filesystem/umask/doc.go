@@ -14,30 +14,23 @@
    limitations under the License.
 */
 
-// Package umask provides cross-platform umask management that gives the
-// application explicit control over file permissions.
+// Package umask takes the umask out of file creation: once disabled, a file
+// or directory gets exactly the mode its creation asks for.
 //
-// # Design
+// On Unix the kernel strips the umask's bits from the mode of everything a
+// process creates: code that asks for 0o644 gets 0o600 under an operator's
+// 0o077, and never learns. [Disable] zeroes the process umask, once, so the
+// mode asked for is the mode the file gets; the mask it found is kept for
+// [Get].
 //
-// On Unix, the OS umask silently strips permission bits from every file
-// creation. This is a frequent source of bugs: an application creates a file
-// with mode 0644 but actually gets 0600 because the user's umask is 0077.
+// The zeroed umask is inherited by every child process, like the rest of the
+// process's state, and a tool that follows the convention (0o666 less the
+// umask) then creates files anyone may write. A program that spawns such
+// tools gives them the operator's mask back, in the child
+// (sh -c 'umask 077; exec "$@"', or the tool's own setting), never by
+// restoring the process umask around the spawn: the umask is process-wide,
+// and the restored mask would strip what every other goroutine creates
+// meanwhile.
 //
-// This package deliberately zeroes the OS umask on the first call to [Get],
-// so subsequent file creations receive exactly the permissions the caller
-// requests. The original umask value is captured and stored internally as a
-// hardened default (0077) that security-sensitive code paths can apply
-// manually where appropriate (see filesystem.WriteFile).
-//
-// On Windows, umask has no effect; the platform stub is a no-op.
-//
-// # API contract
-//
-//   - [Get] zeroes the OS umask (once) and returns the internal mask value.
-//     The first call captures the process's original umask; subsequent calls
-//     return the cached value.
-//   - [Set] updates the internal mask. If the new value differs from the
-//     current one, the OS umask is also updated.
-//
-// Both functions are safe for concurrent use.
+// On Windows there is no umask: [Disable] does nothing and [Get] is 0.
 package umask

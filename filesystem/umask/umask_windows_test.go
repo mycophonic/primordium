@@ -1,3 +1,5 @@
+//go:build windows
+
 /*
    Copyright Mycophonic.
 
@@ -14,6 +16,30 @@
    limitations under the License.
 */
 
-package umask
+package umask_test
 
-const defaultUmask uint32 = 0o077
+import (
+	"os"
+	"testing"
+
+	"github.com/mycophonic/primordium/filesystem/umask"
+)
+
+func TestMain(m *testing.M) {
+	if os.Getenv(getFirstVariable) != "" {
+		os.Exit(getFirst())
+	}
+
+	m.Run()
+}
+
+// TestDisable: Windows has no umask, so Get is 0.
+func TestDisable(t *testing.T) {
+	t.Parallel()
+
+	umask.Disable()
+
+	if got := umask.Get(); got != 0 {
+		t.Fatalf("Get() = %#o on Windows, want 0", got)
+	}
+}
