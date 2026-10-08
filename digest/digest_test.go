@@ -439,12 +439,9 @@ func TestBLAKE3256_ChunkedWriteEquivalence(t *testing.T) {
 	}
 }
 
-// TestAlgorithmRegistriesConsistent guards against registry drift:
-// Hash(), New() and FromString() each read a different map, so an algorithm
-// added to one but not the others fails only at run time — a missing regexp
-// entry nil-derefs in FromString, a missing size entry makes New reject a
-// known algorithm.
-func TestAlgorithmRegistriesConsistent(t *testing.T) {
+// TestEveryAlgorithmRoundTrips: for every algorithm, a hash's sum is accepted
+// by New, fits MaxDigestSize, and its String parses back to the same digest.
+func TestEveryAlgorithmRoundTrips(t *testing.T) {
 	t.Parallel()
 
 	all := []digest.Algorithm{
@@ -456,18 +453,16 @@ func TestAlgorithmRegistriesConsistent(t *testing.T) {
 		t.Run(string(alg), func(t *testing.T) {
 			t.Parallel()
 
-			// Present in hashConstructors, and the size agrees with digestSizes
-			// via New's length check.
-			h := alg.Hash()
-			raw := h.Sum(nil)
+			raw := alg.Hash().Sum(nil)
+			if len(raw) > digest.MaxDigestSize {
+				t.Fatalf("%s digests are %d bytes, over MaxDigestSize", alg, len(raw))
+			}
 
 			dgst, err := digest.New(alg, raw)
 			if err != nil {
 				t.Fatalf("New(%s, %d bytes): %v", alg, len(raw), err)
 			}
 
-			// Present in anchoredEncodedRegexps, and the regexp accepts what
-			// the hash actually produces.
 			parsed, err := digest.FromString(dgst.String())
 			if err != nil {
 				t.Fatalf("FromString(%s): %v", dgst.String(), err)

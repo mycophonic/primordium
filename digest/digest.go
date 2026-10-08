@@ -25,7 +25,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"hash"
-	"regexp"
 	"strings"
 
 	"github.com/forkcloser/blake3"
@@ -46,45 +45,24 @@ const (
 	BLAKE3256  Algorithm = "blake3-256"
 )
 
-//nolint:gochecknoglobals // Package-level registry is appropriate here
-var (
-	// hashConstructors maps algorithms to their hash constructor functions.
-	hashConstructors = map[Algorithm]func() hash.Hash{
-		MD5:        crypto.MD5.New,
-		SHA1:       crypto.SHA1.New,
-		SHA256:     crypto.SHA256.New,
-		SHA384:     crypto.SHA384.New,
-		SHA512:     crypto.SHA512.New,
-		BLAKE2b256: newBLAKE2b256,
-		BLAKE2b512: newBLAKE2b512,
-		BLAKE3256:  newBLAKE3256,
-	}
+// algorithm is what the package knows of one: how it hashes, and how many
+// bytes its digest holds.
+type algorithm struct {
+	hash func() hash.Hash
+	size int
+}
 
-	// anchoredEncodedRegexps contains anchored regular expressions for hex-encoded digests.
-	// Note that /A-F/ disallowed.
-	anchoredEncodedRegexps = map[Algorithm]*regexp.Regexp{
-		MD5:        regexp.MustCompile(`^[a-f0-9]{32}$`),
-		SHA1:       regexp.MustCompile("^[a-f0-9]{40}$"),
-		SHA256:     regexp.MustCompile(`^[a-f0-9]{64}$`),
-		SHA384:     regexp.MustCompile(`^[a-f0-9]{96}$`),
-		SHA512:     regexp.MustCompile(`^[a-f0-9]{128}$`),
-		BLAKE2b256: regexp.MustCompile(`^[a-f0-9]{64}$`),
-		BLAKE2b512: regexp.MustCompile(`^[a-f0-9]{128}$`),
-		BLAKE3256:  regexp.MustCompile(`^[a-f0-9]{64}$`),
-	}
-
-	// digestSizes maps algorithms to their expected byte lengths.
-	digestSizes = map[Algorithm]int{
-		MD5:        crypto.MD5.Size(),
-		SHA1:       crypto.SHA1.Size(),
-		SHA256:     crypto.SHA256.Size(),
-		SHA384:     crypto.SHA384.Size(),
-		SHA512:     crypto.SHA512.Size(),
-		BLAKE2b256: blake2b.Size256,
-		BLAKE2b512: blake2b.Size,
-		BLAKE3256:  blake3Size256,
-	}
-)
+//nolint:gochecknoglobals // the algorithm registry
+var algorithms = map[Algorithm]algorithm{
+	MD5:        {crypto.MD5.New, crypto.MD5.Size()},
+	SHA1:       {crypto.SHA1.New, crypto.SHA1.Size()},
+	SHA256:     {crypto.SHA256.New, crypto.SHA256.Size()},
+	SHA384:     {crypto.SHA384.New, crypto.SHA384.Size()},
+	SHA512:     {crypto.SHA512.New, crypto.SHA512.Size()},
+	BLAKE2b256: {newBLAKE2b256, blake2b.Size256},
+	BLAKE2b512: {newBLAKE2b512, blake2b.Size},
+	BLAKE3256:  {newBLAKE3256, blake3Size256},
+}
 
 func newBLAKE2b256() hash.Hash {
 	h, err := blake2b.New256(nil)
@@ -122,12 +100,12 @@ type Algorithm string
 // Hash returns a new hash as used by the algorithm. If not available, the
 // method will panic.
 func (a Algorithm) Hash() hash.Hash {
-	constructor, ok := hashConstructors[a]
+	known, ok := algorithms[a]
 	if !ok {
 		panic(fmt.Sprintf("unknown algorithm: %s", a))
 	}
 
-	return constructor()
+	return known.hash()
 }
 
 // Digest represents a content digest with an algorithm and encoded hash.
@@ -149,13 +127,19 @@ type digest struct {
 //
 //nolint:iface // a nil Digest means none, and callers pass nil for that
 func New(alg Algorithm, raw []byte) (Digest, error) {
-	size, ok := digestSizes[alg]
+	known, ok := algorithms[alg]
 	if !ok {
 		return nil, fmt.Errorf("%w: unknown algorithm %s", fault.ErrInvalidArgument, alg)
 	}
 
-	if len(raw) != size {
-		return nil, fmt.Errorf("%w: expected %d bytes for %s, got %d", fault.ErrInvalidArgument, size, alg, len(raw))
+	if len(raw) != known.size {
+		return nil, fmt.Errorf(
+			"%w: expected %d bytes for %s, got %d",
+			fault.ErrInvalidArgument,
+			known.size,
+			alg,
+			len(raw),
+		)
 	}
 
 	return &digest{
@@ -175,12 +159,14 @@ func FromString(dgst string) (Digest, error) {
 	}
 
 	alg := Algorithm(before)
-	if _, ok := hashConstructors[alg]; !ok {
+
+	known, ok := algorithms[alg]
+	if !ok {
 		return nil, fmt.Errorf("%w: digest %s has unknown algorithm", fault.ErrInvalidArgument, dgst)
 	}
 
 	encoded := after
-	if !anchoredEncodedRegexps[alg].MatchString(encoded) {
+	if len(encoded) != hex.EncodedLen(known.size) || !isLowerHex(encoded) {
 		return nil, fmt.Errorf("%w: digest %s has invalid encoded hash for algorithm", fault.ErrInvalidArgument, dgst)
 	}
 
@@ -188,6 +174,18 @@ func FromString(dgst string) (Digest, error) {
 		algorithm: alg,
 		encoded:   encoded,
 	}, nil
+}
+
+// isLowerHex reports whether s is lowercase hex, the one spelling of an
+// encoded digest: hex.DecodeString would take "A-F" too.
+func isLowerHex(s string) bool {
+	for i := range len(s) {
+		if c := s[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+
+	return true
 }
 
 func (d *digest) Algorithm() Algorithm {

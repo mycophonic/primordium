@@ -20,11 +20,8 @@ import (
 	"encoding/hex"
 )
 
-// HashPath returns a hash from a filepath with low-collision risk.
-// 16 hex characters = 64 bits of entropy.
-// Birthday paradox: ~2^32 (~4 billion) items needed for 50% collision probability.
-// For 100,000 files:
-// P(collision) ≈ n²/(2d) = (10^5)² / (2 × 2^64) ≈ 2.7 × 10^-10.
+// HashPath is a 16-hex-digit BLAKE2b hash of a path, for naming a file after
+// it. Its 64 bits keep the odds of a collision among 100,000 paths near 3e-10.
 func HashPath(filePath string) string {
 	h := BLAKE2b256.Hash()
 	_, _ = h.Write([]byte(filePath))
