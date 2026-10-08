@@ -139,7 +139,7 @@ func formatters() map[format.Kind]format.Formatter {
 	all := map[format.Kind]format.Formatter{}
 
 	for _, kind := range []format.Kind{format.KindJSON, format.KindMarkdown, format.KindConsole} {
-		formatter, err := format.GetFormatter(kind)
+		formatter, err := format.New(kind)
 		if err != nil {
 			panic(err)
 		}
@@ -150,11 +150,11 @@ func formatters() map[format.Kind]format.Formatter {
 	return all
 }
 
-// formatter is the one of a kind, which GetFormatter has for each.
+// formatter is the one of a kind, which New has for each.
 func formatter(t *testing.T, kind format.Kind) format.Formatter {
 	t.Helper()
 
-	made, err := format.GetFormatter(kind)
+	made, err := format.New(kind)
 	if err != nil {
 		t.Fatal(err)
 	}

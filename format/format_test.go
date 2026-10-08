@@ -19,52 +19,18 @@ package format_test
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"testing"
 
-	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/format"
 )
 
-func TestGetFormatter(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		kind    format.Kind
-		wantTyp string
-	}{
-		{format.KindJSON, "*format.JSON"},
-		{format.KindMarkdown, "*format.Markdown"},
-		{format.KindConsole, "*format.Console"},
+// must is a formatter New returned, for the examples.
+func must(formatter format.Formatter, err error) format.Formatter {
+	if err != nil {
+		panic(err)
 	}
 
-	for _, tt := range tests {
-		f, err := format.GetFormatter(tt.kind)
-		if err != nil {
-			t.Fatalf("GetFormatter(%q) returned error: %v", tt.kind, err)
-		}
-
-		if f == nil {
-			t.Fatalf("GetFormatter(%q) returned nil", tt.kind)
-		}
-	}
-}
-
-func TestGetFormatterInvalidKind(t *testing.T) {
-	t.Parallel()
-
-	f, err := format.GetFormatter("bogus")
-	if err == nil {
-		t.Fatal("expected error for invalid kind, got nil")
-	}
-
-	if f != nil {
-		t.Fatalf("expected nil formatter, got %v", f)
-	}
-
-	if !errors.Is(err, fault.ErrInvalidArgument) {
-		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
-	}
+	return formatter
 }
 
 // testData returns a Data struct with nested maps, slices, and scalars.
@@ -93,7 +59,7 @@ func TestJSONRoundTrip(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.JSON{}
+	f := must(format.New(format.KindJSON))
 
 	input := []*format.Data{testData()}
 	if err := f.PrintAll(input, &buf); err != nil {
@@ -123,7 +89,7 @@ func TestJSONEmptyMeta(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.JSON{}
+	f := must(format.New(format.KindJSON))
 
 	if err := f.PrintAll([]*format.Data{{Object: "test.wav"}}, &buf); err != nil {
 		t.Fatalf("PrintAll: %v", err)
@@ -144,7 +110,7 @@ func TestConsoleBasic(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Console{}
+	f := must(format.New(format.KindConsole))
 
 	data := &format.Data{
 		Object: "/music/track.flac",
@@ -169,7 +135,7 @@ func TestConsoleNested(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Console{}
+	f := must(format.New(format.KindConsole))
 
 	data := &format.Data{
 		Object: "test.flac",
@@ -195,7 +161,7 @@ func TestConsoleSlice(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Console{}
+	f := must(format.New(format.KindConsole))
 
 	data := &format.Data{
 		Object: "test.flac",
@@ -219,7 +185,7 @@ func TestConsoleEmptyMeta(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Console{}
+	f := must(format.New(format.KindConsole))
 
 	if err := f.PrintAll([]*format.Data{{Object: "bare.wav"}}, &buf); err != nil {
 		t.Fatalf("PrintAll: %v", err)
@@ -236,7 +202,7 @@ func TestConsoleSeparator(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Console{}
+	f := must(format.New(format.KindConsole))
 
 	data := []*format.Data{
 		{Object: "a.wav"},
@@ -266,7 +232,7 @@ func TestMarkdownTopLevelScalars(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := &format.Data{
 		Object: "track.flac",
@@ -296,7 +262,7 @@ func TestMarkdownNestedMap(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := &format.Data{
 		Object: "track.flac",
@@ -329,7 +295,7 @@ func TestMarkdownSlice(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := &format.Data{
 		Object: "track.flac",
@@ -361,7 +327,7 @@ func TestMarkdownPipeEscaping(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := &format.Data{
 		Object: "test.wav",
@@ -389,7 +355,7 @@ func TestMarkdownEmptyMeta(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	if err := f.PrintAll([]*format.Data{{Object: "bare.wav"}}, &buf); err != nil {
 		t.Fatalf("PrintAll: %v", err)
@@ -406,7 +372,7 @@ func TestMarkdownSeparator(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := []*format.Data{
 		{Object: "a.wav"},
@@ -428,7 +394,7 @@ func TestMarkdownMixedScalarsAndNested(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := &format.Data{
 		Object: "track.flac",
@@ -463,7 +429,7 @@ func TestMarkdownDeepNesting(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Markdown{}
+	f := must(format.New(format.KindMarkdown))
 
 	data := &format.Data{
 		Object: "track.flac",
@@ -511,7 +477,7 @@ func TestConsoleDeepNesting(t *testing.T) {
 
 	var buf bytes.Buffer
 
-	f := &format.Console{}
+	f := must(format.New(format.KindConsole))
 
 	data := &format.Data{
 		Object: "track.flac",

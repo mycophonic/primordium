@@ -255,7 +255,7 @@ func TestKindValues(t *testing.T) {
 func TestUnknownKind(t *testing.T) {
 	t.Parallel()
 
-	if formatter, err := format.GetFormatter("bogus"); !errors.Is(err, fault.ErrInvalidArgument) || formatter != nil {
-		t.Fatalf("GetFormatter(bogus) = %v, %v; want ErrInvalidArgument", formatter, err)
+	if formatter, err := format.New("bogus"); !errors.Is(err, fault.ErrInvalidArgument) || formatter != nil {
+		t.Fatalf("New(bogus) = %v, %v; want ErrInvalidArgument", formatter, err)
 	}
 }

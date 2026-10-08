@@ -24,13 +24,13 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
-// JSON renders the entries as one indented array.
-type JSON struct{}
+// jsonFormatter renders the entries as one indented array.
+type jsonFormatter struct{}
 
 // PrintAll writes all data entries as a JSON array to the writer: an empty
 // array for no entries, and ErrInvalidArgument for a value JSON cannot carry,
 // such as a NaN.
-func (*JSON) PrintAll(data []*Data, writer io.Writer) error {
+func (jsonFormatter) PrintAll(data []*Data, writer io.Writer) error {
 	if data == nil {
 		data = []*Data{}
 	}

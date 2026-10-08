@@ -21,11 +21,11 @@ import (
 	"io"
 )
 
-// Console renders key: value lines, nested values indented under their key.
-type Console struct{}
+// console renders key: value lines, nested values indented under their key.
+type console struct{}
 
 // PrintAll writes all data entries with horizontal rule separators.
-func (*Console) PrintAll(data []*Data, writer io.Writer) error {
+func (console) PrintAll(data []*Data, writer io.Writer) error {
 	out := &printer{writer: writer}
 
 	for i, entry := range data {

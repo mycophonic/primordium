@@ -32,22 +32,24 @@ type Data struct {
 	Meta   map[string]any `json:"meta,omitempty"`
 }
 
-// Formatter defines the interface for output formatters.
+// Formatter renders entries to a writer: JSON as one array, the others one
+// after another with a rule between.
 type Formatter interface {
-	// PrintAll writes multiple data entries to the writer.
-	// For JSON, this outputs an array. For other formats, entries are separated.
+	// PrintAll renders every entry, in order, and returns the first write's
+	// error as ErrWriteFailure.
 	PrintAll(data []*Data, writer io.Writer) error
 }
 
-// GetFormatter returns a formatter for the given format kind.
-func GetFormatter(kind Kind) (Formatter, error) {
+// New returns the formatter of a kind; a Kind that names none is
+// ErrInvalidArgument.
+func New(kind Kind) (Formatter, error) {
 	switch kind {
 	case KindJSON:
-		return &JSON{}, nil
+		return jsonFormatter{}, nil
 	case KindMarkdown:
-		return &Markdown{}, nil
+		return markdown{}, nil
 	case KindConsole:
-		return &Console{}, nil
+		return console{}, nil
 	default:
 		return nil, fmt.Errorf("%w: %s", fault.ErrInvalidArgument, kind)
 	}

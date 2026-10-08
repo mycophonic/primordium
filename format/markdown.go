@@ -22,11 +22,11 @@ import (
 	"strings"
 )
 
-// Markdown renders headings for nested values and tables for scalar fields.
-type Markdown struct{}
+// markdown renders headings for nested values and tables for scalar fields.
+type markdown struct{}
 
 // PrintAll writes all data entries with horizontal rule separators.
-func (*Markdown) PrintAll(data []*Data, writer io.Writer) error {
+func (markdown) PrintAll(data []*Data, writer io.Writer) error {
 	out := &printer{writer: writer}
 
 	for i, entry := range data {
