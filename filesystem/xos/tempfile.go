@@ -21,7 +21,6 @@
 // license that can be found in the LICENSE file.
 
 //nolint:wrapcheck // mirrors os.CreateTemp: its errors as the standard library has them
-//revive:disable:exported
 package xos
 
 import (
@@ -29,6 +28,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/mycophonic/primordium/filesystem/internal"
 )
@@ -44,16 +44,6 @@ const (
 // #nosec G115 G404 -- see above
 func nextRandom() string {
 	return strconv.FormatUint(uint64(uint32(rand.Uint64())), 10)
-}
-
-func lastIndexByteString(s string, c byte) int {
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == c {
-			return i
-		}
-	}
-
-	return -1
 }
 
 // CreateTemp creates a new temporary file in the directory dir,
@@ -107,7 +97,7 @@ func prefixAndSuffix(pattern string) (prefix, suffix string, err error) {
 		}
 	}
 
-	if pos := lastIndexByteString(pattern, '*'); pos != -1 {
+	if pos := strings.LastIndexByte(pattern, '*'); pos != -1 {
 		prefix, suffix = pattern[:pos], pattern[pos+1:]
 	} else {
 		prefix = pattern
