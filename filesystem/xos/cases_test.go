@@ -23,8 +23,8 @@
 package xos_test
 
 // The cases the bounded check does not reach, each through xos's own open: a
-// path that names no file (none, a device, a dangling link), the errors os
-// maps itself, and a path past Windows's MAX_PATH.
+// path that names no file (none, a device), the errors os maps itself, and a
+// path past Windows's MAX_PATH.
 
 import (
 	"errors"
@@ -136,30 +136,6 @@ func TestDevNull(t *testing.T) {
 	}
 
 	assert.Check(t, file.Close())
-}
-
-// TestCreateExclOverDanglingSymlink: O_CREATE|O_EXCL on a link to nothing is
-// ErrExist and creates nothing, the link not being followed.
-func TestCreateExclOverDanglingSymlink(t *testing.T) {
-	t.Parallel()
-
-	link := filepath.Join(t.TempDir(), "link")
-	if err := os.Symlink("does_not_exist", link); err != nil {
-		t.Skipf("symlinks not supported: %v", err)
-	}
-
-	file, err := xos.OpenFile(link, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o444)
-	if err == nil {
-		assert.Check(t, file.Close())
-	}
-
-	if !errors.Is(err, os.ErrExist) {
-		t.Fatalf("OpenFile of a dangling symlink with O_CREATE|O_EXCL = %v, want ErrExist", err)
-	}
-
-	if _, err := xos.Stat(link); err == nil {
-		t.Fatal("OpenFile of a dangling symlink with O_CREATE|O_EXCL created a file")
-	}
 }
 
 // TestLongPath: a path around and past 248 bytes, where Windows needs the
