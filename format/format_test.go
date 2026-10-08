@@ -457,3 +457,84 @@ func TestMarkdownMixedScalarsAndNested(t *testing.T) {
 		t.Fatalf("output mismatch:\ngot:\n%s\nwant:\n%s", buf.String(), want)
 	}
 }
+
+func TestMarkdownDeepNesting(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	f := &format.Markdown{}
+
+	data := &format.Data{
+		Object: "track.flac",
+		Meta: map[string]any{
+			"a": map[string]any{"b": map[string]any{"c": "deep"}},
+			"streams": []any{
+				map[string]any{"channels": 2, "info": map[string]any{"codec": "flac"}},
+				"plain",
+				[]any{"x", "y"},
+			},
+		},
+	}
+
+	if err := f.PrintAll([]*format.Data{data}, &buf); err != nil {
+		t.Fatalf("PrintAll: %v", err)
+	}
+
+	want := "## track.flac\n\n" +
+		"### a\n\n" +
+		"#### b\n\n" +
+		"| Field | Value |\n" +
+		"|-------|-------|\n" +
+		"| c | deep |\n\n" +
+		"### streams\n\n" +
+		"#### Item 1\n\n" +
+		"| Field | Value |\n" +
+		"|-------|-------|\n" +
+		"| channels | 2 |\n\n" +
+		"##### info\n\n" +
+		"| Field | Value |\n" +
+		"|-------|-------|\n" +
+		"| codec | flac |\n\n" +
+		"- plain\n\n" +
+		"#### Item 3\n\n" +
+		"- x\n" +
+		"- y\n\n"
+
+	if buf.String() != want {
+		t.Fatalf("output mismatch:\ngot:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
+
+func TestConsoleDeepNesting(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	f := &format.Console{}
+
+	data := &format.Data{
+		Object: "track.flac",
+		Meta: map[string]any{
+			"streams": []any{map[string]any{"channels": 2}, "plain", []any{"x", []any{"y"}}},
+		},
+	}
+
+	if err := f.PrintAll([]*format.Data{data}, &buf); err != nil {
+		t.Fatalf("PrintAll: %v", err)
+	}
+
+	want := "Path: track.flac\n\n" +
+		"streams:\n" +
+		"  [0]:\n" +
+		"    channels: 2\n" +
+		"  [1]: plain\n" +
+		"  [2]:\n" +
+		"    [0]: x\n" +
+		"    [1]:\n" +
+		"      [0]: y\n"
+
+	if buf.String() != want {
+		t.Fatalf("output mismatch:\ngot:\n%s\nwant:\n%s", buf.String(), want)
+	}
+}
