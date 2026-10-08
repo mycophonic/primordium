@@ -31,6 +31,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/mycophonic/primordium/filesystem/xos"
@@ -471,3 +472,61 @@ func TestSharedDelete(t *testing.T) {
 }
 
 func errorIs(err, target error) bool { return errorKind(err) == errorKind(target) }
+
+// TestTempNamesAreDistinct: "Multiple programs or goroutines calling
+// CreateTemp simultaneously will not choose the same file", and likewise
+// MkdirTemp: every one of many calls racing on one pattern gets a name of its
+// own.
+func TestTempNamesAreDistinct(t *testing.T) {
+	t.Parallel()
+
+	const calls = 64
+
+	dir := t.TempDir()
+
+	var (
+		wg    sync.WaitGroup
+		mu    sync.Mutex
+		names = map[string]bool{}
+	)
+
+	record := func(name string, err error) {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if err != nil {
+			t.Errorf("%v", err)
+
+			return
+		}
+
+		if names[name] {
+			t.Errorf("%q chosen twice", name)
+		}
+
+		names[name] = true
+	}
+
+	for range calls {
+		wg.Go(func() {
+			file, err := xos.CreateTemp(dir, "same*pattern")
+			if err == nil {
+				defer func() { _ = file.Close() }()
+
+				record(file.Name(), nil)
+
+				return
+			}
+
+			record("", err)
+		})
+
+		wg.Go(func() { record(xos.MkdirTemp(dir, "same*pattern")) })
+	}
+
+	wg.Wait()
+
+	if len(names) != 2*calls {
+		t.Fatalf("%d distinct names for %d calls", len(names), 2*calls)
+	}
+}
