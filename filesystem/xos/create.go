@@ -109,9 +109,8 @@ func ReadDir(path string) ([]os.DirEntry, error) {
 	return entries, err //nolint:wrapcheck // Thin wrapper matching os.ReadDir signature.
 }
 
-// Stat returns file info for the named path.
-// Equivalent to os.Stat. On Windows, os.Stat uses GetFileAttributesEx (no
-// handle needed) with fallbacks, matching the stdlib's three-tier approach.
+// Stat is os.Stat, which opens no handle and so needs no FILE_SHARE_DELETE;
+// it is here so a caller of xos need not reach for os.
 //
 //nolint:wrapcheck // Thin wrapper matching os.Stat signature.
 func Stat(path string) (os.FileInfo, error) {
