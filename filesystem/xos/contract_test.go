@@ -40,7 +40,11 @@ type state struct {
 	setup func(t *testing.T, path string)
 }
 
-func states() []state {
+// states are the filesystem states, the two behind a symbolic link only where
+// the platform lets the test make one.
+func states(t *testing.T) []state {
+	t.Helper()
+
 	file := func(data string, mode os.FileMode) func(*testing.T, string) {
 		return func(t *testing.T, path string) {
 			t.Helper()
@@ -55,7 +59,7 @@ func states() []state {
 		}
 	}
 
-	return []state{
+	all := []state{
 		{"missing", func(*testing.T, string) {}},
 		{"empty", file("", 0o644)},
 		{"holding data", file("hello", 0o644)},
@@ -68,6 +72,42 @@ func states() []state {
 			}
 		}},
 	}
+
+	if !canSymlink(t) {
+		return all
+	}
+
+	return append(all,
+		state{"behind a symlink", func(t *testing.T, path string) {
+			t.Helper()
+
+			file("hello", 0o644)(t, filepath.Join(filepath.Dir(path), "real"))
+
+			if err := os.Symlink("real", path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		state{"a dangling symlink", func(t *testing.T, path string) {
+			t.Helper()
+
+			if err := os.Symlink("missing", path); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	)
+}
+
+// canSymlink reports whether the platform lets the test make a symbolic link,
+// which Windows allows only to an administrator or in developer mode.
+func canSymlink(t *testing.T) bool {
+	t.Helper()
+
+	err := os.Symlink("target", filepath.Join(t.TempDir(), "link"))
+	if err != nil {
+		t.Logf("no symbolic links here, so no state behind one: %v", err)
+	}
+
+	return err == nil
 }
 
 // errorKind is what a caller can tell of an error: none, or which of the

@@ -91,7 +91,7 @@ func openAndUse(open func(string, int, os.FileMode) (*os.File, error), path stri
 func TestBoundedOpenFile(t *testing.T) {
 	t.Parallel()
 
-	for _, start := range states() {
+	for _, start := range states(t) {
 		for _, flag := range openFlags() {
 			for _, perm := range []os.FileMode{0o644, 0o444} {
 				ours, theirs := pair(t, start.setup)
@@ -116,7 +116,7 @@ func TestBoundedOpenFile(t *testing.T) {
 func TestBoundedOpenAndCreate(t *testing.T) {
 	t.Parallel()
 
-	for _, start := range states() {
+	for _, start := range states(t) {
 		for name, calls := range map[string][2]func(string) (*os.File, error){
 			"Open":   {xos.Open, os.Open},
 			"Create": {xos.Create, os.Create},
@@ -160,7 +160,7 @@ func sizes() []int { return []int{0, 1, 511, 512, 513, 1023, 1024, 1025, 4097} }
 func TestBoundedReadFile(t *testing.T) {
 	t.Parallel()
 
-	shapes := states()
+	shapes := states(t)
 
 	for _, size := range sizes() {
 		data := strings.Repeat("r", size)
@@ -189,7 +189,7 @@ func TestBoundedReadFile(t *testing.T) {
 func TestBoundedWriteFile(t *testing.T) {
 	t.Parallel()
 
-	for _, start := range states() {
+	for _, start := range states(t) {
 		for _, size := range []int{0, 1, 600} {
 			for _, perm := range []os.FileMode{0o600, 0o644, 0o444} {
 				ours, theirs := pair(t, start.setup)
@@ -280,7 +280,7 @@ func TestBoundedReadDir(t *testing.T) {
 		}
 	}
 
-	for _, start := range states() {
+	for _, start := range states(t) {
 		if start.name == "a directory" {
 			continue
 		}
@@ -307,7 +307,7 @@ func TestBoundedReadDir(t *testing.T) {
 func TestBoundedTruncate(t *testing.T) {
 	t.Parallel()
 
-	for _, start := range states() {
+	for _, start := range states(t) {
 		for _, size := range []int64{-1, 0, 2, 5, 9} {
 			ours, theirs := pair(t, start.setup)
 
@@ -327,7 +327,7 @@ func TestBoundedTruncate(t *testing.T) {
 func TestBoundedStat(t *testing.T) {
 	t.Parallel()
 
-	for _, start := range states() {
+	for _, start := range states(t) {
 		ours, theirs := pair(t, start.setup)
 
 		got, gotErr := xos.Stat(ours)
