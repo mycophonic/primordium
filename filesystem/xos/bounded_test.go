@@ -18,8 +18,9 @@ package xos_test
 
 // The bounded check: every open flag combination, every starting state, every
 // write and read after it; every file size around the read buffer; every
-// directory shape; every temporary-name pattern form; every truncation size.
-// Each xos call is held to its os namesake.
+// directory shape; every temporary-name pattern form; every truncation size;
+// every pair of states a rename goes from and to. Each xos call is held to its
+// os namesake.
 
 import (
 	"bytes"
@@ -431,6 +432,89 @@ func TestBoundedTemp(t *testing.T) {
 			); got != want {
 				t.Fatalf("MkdirTemp(%s dir, %q): xos %q, os %q", dirForm, pattern, got, want)
 			}
+		}
+	}
+}
+
+// TestBoundedRename: from every state to every state, xos.Rename and os.Rename
+// agree on the error and on what both paths hold afterwards.
+func TestBoundedRename(t *testing.T) {
+	t.Parallel()
+
+	for _, from := range states(t) {
+		for _, to := range states(t) {
+			ours, theirs := t.TempDir(), t.TempDir()
+
+			for _, dir := range []string{ours, theirs} {
+				from.setup(t, filepath.Join(dir, "old"))
+				to.setup(t, filepath.Join(dir, "new"))
+			}
+
+			got := errorSeen(xos.Rename(filepath.Join(ours, "old"), filepath.Join(ours, "new")), ours)
+			want := errorSeen(os.Rename(filepath.Join(theirs, "old"), filepath.Join(theirs, "new")), theirs)
+
+			if got != want {
+				t.Fatalf("from %s to %s: xos %q, os %q", from.name, to.name, got, want)
+			}
+
+			for _, name := range []string{"old", "new"} {
+				if got, want := onDisk(filepath.Join(ours, name)), onDisk(filepath.Join(theirs, name)); got != want {
+					t.Fatalf("from %s to %s: xos left %s %q, os %q", from.name, to.name, name, got, want)
+				}
+			}
+		}
+	}
+}
+
+// TestRenameOverHeld: a file held open through xos (FILE_SHARE_DELETE on
+// Windows) is replaced by Rename on every platform, and the holder keeps
+// reading the file it opened; one held through os is replaced where os would
+// replace it, which on Windows is not at all.
+func TestRenameOverHeld(t *testing.T) {
+	t.Parallel()
+
+	for name, open := range map[string]func(string) (*os.File, error){"xos.Open": xos.Open, "os.Open": os.Open} {
+		dir := t.TempDir()
+		oldPath, newPath := filepath.Join(dir, "old"), filepath.Join(dir, "new")
+
+		for path, data := range map[string]string{oldPath: "incoming", newPath: "held"} {
+			if err := os.WriteFile(path, []byte(data), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		holder, err := open(newPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		err = xos.Rename(oldPath, newPath)
+
+		switch {
+		case name == "os.Open" && runtime.GOOS == "windows":
+			if err == nil {
+				t.Fatalf("%s held without FILE_SHARE_DELETE: Rename succeeded, where os refuses", name)
+			}
+		case err != nil:
+			t.Fatalf("%s held: Rename = %v, want the file replaced", name, err)
+		default:
+			// What a file of those bytes looks like here, mode included.
+			reference := filepath.Join(dir, "reference")
+			if err = os.WriteFile(reference, []byte("incoming"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if got, want := onDisk(newPath), onDisk(reference); got != want {
+				t.Fatalf("%s held: the path holds %q after Rename, want %q", name, got, want)
+			}
+
+			if still, readErr := io.ReadAll(holder); readErr != nil || string(still) != "held" {
+				t.Fatalf("%s held: the holder reads %q, %v; want the file it opened", name, still, readErr)
+			}
+		}
+
+		if err = holder.Close(); err != nil {
+			t.Fatal(err)
 		}
 	}
 }

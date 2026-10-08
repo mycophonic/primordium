@@ -18,10 +18,14 @@ package xos_test
 
 // The contract, from xos's docs: each function is its os namesake ("the same
 // filesystem features as golang os package"), and on Windows a file it opens
-// can still be renamed or removed (FILE_SHARE_DELETE). So the os package is
-// the reference: each xos call runs beside its os namesake, on the same
-// filesystem state, and the two agree on what the caller can see: the error's
-// kind, what is read, what ends up on disk, and with what mode.
+// can still be renamed or removed (FILE_SHARE_DELETE), and, on a volume with
+// the POSIX-semantics rename (NTFS from Windows 10 1709; FAT and exFAT have
+// none, and there xos.Rename is os.Rename), Rename replaces a file another
+// handle holds open that way, as a rename does on Unix. So the os
+// package is the reference: each xos call runs beside its os namesake, on the
+// same filesystem state, and the two agree on what the caller can see: the
+// error's kind, what is read, what ends up on disk, and with what mode; the
+// one place they part is the held file, where xos answers as Unix does.
 
 import (
 	"errors"
