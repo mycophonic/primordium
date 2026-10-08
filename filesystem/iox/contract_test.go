@@ -24,11 +24,11 @@ package iox_test
 //     error; a source that does is outside this contract, as io.Reader
 //     discourages it and tells the caller it means "nothing happened", so a
 //     wrapper may pass it on (bufio's io.ErrNoProgress is a safeguard beyond
-// it). A source may return io.EOF with its last bytes or after them. A source may return bytes and an error together:
-// the caller sees
-//     that error once, where the stream had it, before any byte past it; a
-//     small forward SeekCurrent within the buffered bytes keeps it, any other
-//     seek that succeeds drops it, as it belonged to the old position.
+//     it). A source may return io.EOF with its last bytes or after them. A
+//     source may return bytes and an error together: the caller sees that
+//     error once, where the stream had it, before any byte past it; a small
+//     forward SeekCurrent within the buffered bytes keeps it, any other seek
+//     that succeeds drops it, as it belonged to the old position.
 //   - io.Seeker: Seek returns the new offset from the start, as the stream
 //     itself would; "seeking to an offset before the start of the file is an
 //     error", and a failed Seek leaves the position where it was.
