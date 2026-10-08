@@ -70,13 +70,10 @@ func platformTryLock(path string, lockType lockType) (*os.File, error) {
 		return nil, err
 	}
 
-	// Use LOCK_NB for non-blocking
-
 	err = syscall.Flock(int(file.Fd()), int(lockType)|syscall.LOCK_NB)
 	if err != nil {
 		closeErr := file.Close()
 
-		// Convert EWOULDBLOCK to our sentinel error
 		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
 			return nil, errors.Join(ErrLockWouldBlock, closeErr)
 		}
@@ -87,11 +84,9 @@ func platformTryLock(path string, lockType lockType) (*os.File, error) {
 	return file, nil
 }
 
-// cleanupLockSidecar removes the sidecar lock file created by platformLock.
-// On Unix, flock operates on the path itself, so there is no sidecar to clean up.
+// cleanupLockSidecar has nothing to remove: flock locks the path itself.
 func cleanupLockSidecar(_ string) {}
 
-//nolint:wrapcheck // the platform layer; the portable functions wrap
 func platformUnlock(file *os.File) (err error) {
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {

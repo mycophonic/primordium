@@ -74,7 +74,6 @@ func platformTryLock(path string, lockType lockType) (file *os.File, err error) 
 		return nil, err
 	}
 
-	// Use LOCKFILE_FAIL_IMMEDIATELY for non-blocking
 	if err = windows.LockFileEx(
 		windows.Handle(file.Fd()),
 		uint32(lockType)|windows.LOCKFILE_FAIL_IMMEDIATELY,
@@ -93,14 +92,12 @@ func platformTryLock(path string, lockType lockType) (file *os.File, err error) 
 	return file, nil
 }
 
-// cleanupLockSidecar removes the sidecar lock file created by platformLock.
-// On Windows, platformLock creates path+".lock" as a separate file. After
-// Unlock closes the handle, this file must be explicitly removed.
+// cleanupLockSidecar removes the lock file platformLock keeps beside the
+// path, which Unlock's close leaves behind.
 func cleanupLockSidecar(path string) {
 	_ = os.Remove(path + ".lock")
 }
 
-//nolint:wrapcheck // the platform layer; the portable functions wrap
 func platformUnlock(file *os.File) (err error) {
 	defer func() {
 		if closeErr := file.Close(); closeErr != nil {

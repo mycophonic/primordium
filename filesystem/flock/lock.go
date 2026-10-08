@@ -30,8 +30,8 @@ import (
 // Lock places an advisory write lock on the file, blocking until it can be
 // locked.
 //
-// If Lock returns nil, no other process will be able to place a read or write
-// lock on the file until this process exits, closes f, or calls Unlock on it.
+// If Lock returns no error, no other process will be able to place a read or
+// write lock on the file until this process exits or calls Unlock on it.
 func Lock(path string) (*os.File, error) {
 	file, err := platformLock(path, writeLock)
 	if err != nil {
@@ -43,8 +43,8 @@ func Lock(path string) (*os.File, error) {
 
 // ReadOnlyLock places an advisory read lock on the file, blocking until it can be locked.
 //
-// If ReadOnlyLock returns nil, no other process will be able to place a write lock on
-// the file until this process exits, closes f, or calls Unlock on it.
+// If ReadOnlyLock returns no error, no other process will be able to place a
+// write lock on the file until this process exits or calls Unlock on it.
 func ReadOnlyLock(path string) (*os.File, error) {
 	file, err := platformLock(path, readLock)
 	if err != nil {
@@ -58,8 +58,8 @@ func ReadOnlyLock(path string) (*os.File, error) {
 //
 // If the lock cannot be acquired immediately because another process holds a
 // conflicting lock, TryLock returns ErrLockWouldBlock.
-// If TryLock returns nil error, no other process will be able to place a read or write
-// lock on the file until this process exits, closes f, or calls Unlock on it.
+// If TryLock returns no error, no other process will be able to place a read
+// or write lock on the file until this process exits or calls Unlock on it.
 func TryLock(path string) (*os.File, error) {
 	file, err := platformTryLock(path, writeLock)
 	if err != nil {
@@ -75,8 +75,8 @@ func TryLock(path string) (*os.File, error) {
 //
 // If the lock cannot be acquired immediately because another process holds a
 // conflicting lock, TryReadOnlyLock returns ErrLockWouldBlock.
-// If TryReadOnlyLock returns nil error, no other process will be able to place a write
-// lock on the file until this process exits, closes f, or calls Unlock on it.
+// If TryReadOnlyLock returns no error, no other process will be able to place
+// a write lock on the file until this process exits or calls Unlock on it.
 func TryReadOnlyLock(path string) (*os.File, error) {
 	file, err := platformTryLock(path, readLock)
 	if err != nil {
@@ -130,7 +130,8 @@ func WithReadOnlyLock(path string, function func() error) (err error) {
 	return function()
 }
 
-// Cleanup exist solely because of windows (can't lock a dir, so, uses sidecar file that requires manual rm).
+// Cleanup removes the lock file kept beside path on Windows, once every lock
+// on it is released; elsewhere there is none to remove.
 func Cleanup(path string) {
 	cleanupLockSidecar(path)
 }
