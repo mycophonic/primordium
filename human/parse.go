@@ -18,16 +18,12 @@ package human
 
 import (
 	"fmt"
-	"math"
-	"strconv"
+	"math/big"
 	"strings"
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 )
-
-// float64Bits is the bit size strconv.ParseFloat parses a float64 at.
-const float64Bits = 64
 
 // ParseSize reads a size written as a number and an optional unit symbol:
 // "32", "32B", "32.5 kB", "17MiB". The unit alone decides the value; case
@@ -53,19 +49,20 @@ func ParseSize(size string) (int64, error) {
 		return 0, fmt.Errorf("%w: %w: %q in %q", fault.ErrInvalidArgument, ErrInvalidUnit, symbol, size)
 	}
 
-	value, err := strconv.ParseFloat(number, float64Bits)
-	if err != nil {
-		return 0, fmt.Errorf("%w: %w: %q: %w", fault.ErrInvalidArgument, ErrInvalidSize, size, err)
-	}
+	// Exact, in integers: the number's digits over a power of ten, times the
+	// factor. Through a float64, "1.001kB" is 1000.9999999999999 and
+	// truncates to 1000; 741 of the 99,999 three-decimal kB sizes do.
+	whole, fraction, _ := strings.Cut(number, ".")
 
-	// float64(math.MaxInt64) rounds up to 2^63, the first value an int64
-	// cannot hold; converting one at or past it gives no defined result.
-	value *= factor
-	if value >= float64(math.MaxInt64) {
+	value, _ := new(big.Int).SetString(whole+fraction, decimalBase)
+	value.Mul(value, big.NewInt(factor))
+	value.Quo(value, new(big.Int).Exp(big.NewInt(decimalBase), big.NewInt(int64(len(fraction))), nil))
+
+	if !value.IsInt64() {
 		return 0, fmt.Errorf("%w: %w: %q does not fit an int64", fault.ErrInvalidArgument, ErrInvalidSize, size)
 	}
 
-	return int64(value), nil
+	return value.Int64(), nil
 }
 
 // split cuts size where its number ends, dropping one space before the unit.
@@ -99,7 +96,7 @@ func digits(s string) bool {
 
 // unitFactor is the number of bytes one symbol counts, whatever its case; an
 // empty symbol is a byte.
-func unitFactor(symbol string) (float64, bool) {
+func unitFactor(symbol string) (int64, bool) {
 	switch strings.ToLower(symbol) {
 	case "", "b":
 		return 1, true
