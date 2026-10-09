@@ -19,100 +19,67 @@
 package mmap
 
 import (
-	"fmt"
 	"os"
-	"syscall"
 	"unsafe"
 
-	"github.com/mycophonic/primordium/fault"
+	"golang.org/x/sys/windows"
 )
 
-// Mapping holds the Windows file Mapping handle and base address.
-type Mapping struct {
-	handle syscall.Handle
+// view is what the platform keeps of a mapping besides its bytes: on Windows,
+// the file-mapping handle and the view's address, which Unmap needs.
+type view struct {
+	handle windows.Handle
 	addr   uintptr
 }
 
-// MapFile maps the file into read-write shared memory.
-func MapFile(file *os.File, size int) ([]byte, Mapping, error) {
-	if size <= 0 {
-		return nil, Mapping{}, fmt.Errorf("%w: mmap size must be positive, got %d", fault.ErrInvalidArgument, size)
-	}
-
-	handle, err := syscall.CreateFileMapping(
-		syscall.Handle(file.Fd()),
+func mapView(file *os.File, size int) ([]byte, view, error) {
+	handle, err := windows.CreateFileMapping(
+		windows.Handle(file.Fd()),
 		nil,
-		syscall.PAGE_READWRITE,
-		uint32(uint64(size)>>32),
-		uint32(size), // #nosec G115 -- size validated positive above
+		windows.PAGE_READWRITE,
+		uint32(uint64(size)>>32), // #nosec G115 -- the high and low words of a positive size
+		uint32(size),             // #nosec G115
 		nil,
 	)
 	if err != nil {
-		return nil, Mapping{}, fmt.Errorf("%w: CreateFileMapping: %w", fault.ErrSystemFailure, err)
+		return nil, view{}, err //nolint:wrapcheck // the platform layer; Map wraps
 	}
 
-	addr, err := syscall.MapViewOfFile(
-		handle,
-		syscall.FILE_MAP_READ|syscall.FILE_MAP_WRITE,
-		0,
-		0,
-		uintptr(size),
-	)
+	addr, err := windows.MapViewOfFile(handle, windows.FILE_MAP_READ|windows.FILE_MAP_WRITE, 0, 0, uintptr(size))
 	if err != nil {
-		_ = syscall.CloseHandle(handle) // best-effort cleanup on the failure path
+		_ = windows.CloseHandle(handle)
 
-		return nil, Mapping{}, fmt.Errorf("%w: MapViewOfFile: %w", fault.ErrSystemFailure, err)
+		return nil, view{}, err //nolint:wrapcheck // the platform layer; Map wraps
 	}
 
-	//nolint:govet // unsafeptr: uintptr→Pointer from MapViewOfFile, pinned by OS mapping
-	data := unsafe.Slice( // #nosec G103 -- uintptr to Pointer from MapViewOfFile, pinned by the OS mapping
-		(*byte)(unsafe.Pointer(addr)), // #nosec G103
+	//nolint:govet // unsafeptr: the address is a view the OS keeps mapped until UnmapViewOfFile
+	data := unsafe.Slice(
+		(*byte)(unsafe.Pointer(addr)),
 		size,
-	)
+	) // #nosec G103 -- the view's address, as MapViewOfFile returns it
 
-	return data, Mapping{handle: handle, addr: addr}, nil
+	return data, view{handle: handle, addr: addr}, nil
 }
 
-// UnmapFile unmaps previously mapped memory and closes the Mapping handle.
-func UnmapFile(_ []byte, mapping Mapping) error {
-	if mapping.addr == 0 {
-		return nil
+// syncView is FlushViewOfFile, which writes the pages to the file, then
+// FlushFileBuffers, which takes them to the disk: the first alone leaves
+// them in the filesystem's cache.
+func syncView(data []byte, file *os.File, _ view) error {
+	address := uintptr(unsafe.Pointer(&data[0])) // #nosec G103 -- the region's address, as the call takes it
+
+	if err := windows.FlushViewOfFile(address, uintptr(len(data))); err != nil {
+		return err //nolint:wrapcheck // the platform layer; Sync wraps
 	}
 
-	unmapErr := syscall.UnmapViewOfFile(mapping.addr)
-
-	closeErr := syscall.CloseHandle(mapping.handle)
-
-	if unmapErr != nil {
-		return fmt.Errorf("%w: UnmapViewOfFile: %w", fault.ErrSystemFailure, unmapErr)
-	}
-
-	if closeErr != nil {
-		return fmt.Errorf("%w: CloseHandle: %w", fault.ErrSystemFailure, closeErr)
-	}
-
-	return nil
+	return windows.FlushFileBuffers(windows.Handle(file.Fd())) //nolint:wrapcheck // the platform layer; Sync wraps
 }
 
-// SyncFile flushes the mapped region to disk.
-// On Unix, msync(MS_SYNC) provides full durability; f is unused.
-// On Windows, FlushFileBuffers is called after FlushViewOfFile to
-// ensure data reaches physical disk, not just the filesystem cache.
-func SyncFile(data []byte, file *os.File) error {
-	if len(data) == 0 {
-		return nil
+func unmapView(_ []byte, v view) error {
+	err := windows.UnmapViewOfFile(v.addr)
+
+	if closeErr := windows.CloseHandle(v.handle); err == nil {
+		err = closeErr
 	}
 
-	if err := syscall.FlushViewOfFile(
-		uintptr(unsafe.Pointer(&data[0])), // #nosec G103 -- required for the mmap syscall interop
-		uintptr(len(data)),
-	); err != nil {
-		return fmt.Errorf("%w: FlushViewOfFile: %w", fault.ErrSystemFailure, err)
-	}
-
-	if err := syscall.FlushFileBuffers(syscall.Handle(file.Fd())); err != nil {
-		return fmt.Errorf("%w: FlushFileBuffers: %w", fault.ErrSystemFailure, err)
-	}
-
-	return nil
+	return err
 }

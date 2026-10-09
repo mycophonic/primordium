@@ -14,5 +14,6 @@
    limitations under the License.
 */
 
-// Package mmap provides primitives to map / unmap and sync a file.
+// Package mmap maps a file's bytes into memory: read-write, shared with the
+// file and with every other mapping of it, and written through on demand.
 package mmap

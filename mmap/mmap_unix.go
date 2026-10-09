@@ -1,4 +1,4 @@
-//go:build unix
+//go:build !windows
 
 /*
    Copyright Mycophonic.
@@ -19,69 +19,27 @@
 package mmap
 
 import (
-	"fmt"
 	"os"
-	"syscall"
-	"unsafe"
 
-	"github.com/mycophonic/primordium/fault"
+	"golang.org/x/sys/unix"
 )
 
-// Mapping holds platform-specific mmap state. Unix needs no extra state.
-type Mapping struct{}
+// view is what the platform keeps of a mapping besides its bytes: on Unix,
+// nothing, the bytes are the mapping.
+type view struct{}
 
-// MapFile maps the file into read-write shared memory.
-func MapFile(file *os.File, size int) ([]byte, Mapping, error) {
-	if size <= 0 {
-		return nil, Mapping{}, fmt.Errorf("%w: mmap size must be positive, got %d", fault.ErrInvalidArgument, size)
-	}
+func mapView(file *os.File, size int) ([]byte, view, error) {
+	data, err := unix.Mmap(int(file.Fd()), 0, size, unix.PROT_READ|unix.PROT_WRITE, unix.MAP_SHARED)
 
-	data, err := syscall.Mmap(
-		int(file.Fd()),
-		0,
-		size,
-		syscall.PROT_READ|syscall.PROT_WRITE,
-		syscall.MAP_SHARED,
-	)
-	if err != nil {
-		return nil, Mapping{}, fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
-	}
-
-	return data, Mapping{}, nil
+	return data, view{}, err //nolint:wrapcheck // the platform layer; Map wraps
 }
 
-// UnmapFile unmaps previously mapped memory.
-func UnmapFile(data []byte, _ Mapping) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	if err := syscall.Munmap(data); err != nil {
-		return fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
-	}
-
-	return nil
+// syncView is msync(MS_SYNC): the pages are written and the call returns
+// when they are on the file.
+func syncView(data []byte, _ *os.File, _ view) error {
+	return unix.Msync(data, unix.MS_SYNC) //nolint:wrapcheck // the platform layer; Sync wraps
 }
 
-// SyncFile flushes the mapped region to disk.
-// On Unix, msync(MS_SYNC) provides full durability; f is unused.
-// On Windows, FlushFileBuffers is called after FlushViewOfFile to
-// ensure data reaches physical disk, not just the filesystem cache.
-func SyncFile(data []byte, _ *os.File) error {
-	if len(data) == 0 {
-		return nil
-	}
-
-	// #nosec G103 -- unsafe.Pointer required by msync syscall interface; data is a live mmap'd slice
-	_, _, errno := syscall.Syscall(
-		syscall.SYS_MSYNC,
-		uintptr(unsafe.Pointer(&data[0])),
-		uintptr(len(data)),
-		syscall.MS_SYNC,
-	)
-	if errno != 0 {
-		return fmt.Errorf("%w: msync: %w", fault.ErrSystemFailure, errno)
-	}
-
-	return nil
+func unmapView(data []byte, _ view) error {
+	return unix.Munmap(data) //nolint:wrapcheck // the platform layer; Unmap wraps
 }
