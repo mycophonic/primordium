@@ -77,7 +77,7 @@ func TestDecimalSize(t *testing.T) {
 		{3.42 * bytesize.GB, "3.42GB"},
 		{5.372 * bytesize.TB, "5.372TB"},
 		{2.22 * bytesize.PB, "2.22PB"},
-		{10000000000000 * bytesize.PB, "1e+04YB"},
+		{10000000000000 * bytesize.PB, "10000YB"},
 	} {
 		assert.Equal(t, human.DecimalSize(tc.size), tc.want, "DecimalSize(%v)", tc.size)
 	}
@@ -115,7 +115,7 @@ func TestBinarySize(t *testing.T) {
 		{3.42 * bytesize.GiB, "3.42GiB"},
 		{5.372 * bytesize.TiB, "5.372TiB"},
 		{2.22 * bytesize.PiB, "2.22PiB"},
-		{bytesize.KiB * bytesize.KiB * bytesize.KiB * bytesize.KiB * bytesize.KiB * bytesize.PiB, "1.049e+06YiB"},
+		{bytesize.KiB * bytesize.KiB * bytesize.KiB * bytesize.KiB * bytesize.KiB * bytesize.PiB, "1049000YiB"},
 	} {
 		assert.Equal(t, human.BinarySize(tc.size), tc.want, "BinarySize(%v)", tc.size)
 	}
