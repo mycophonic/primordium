@@ -77,15 +77,15 @@ type Index struct {
 	lockPath    string
 	journalPath string
 	dataFile    *os.File
-	data        []byte // mmap'd region
-	mstate      mmap.Mapping
+	mapping     *mmap.Mapping
+	data        []byte // the mapping's bytes
 	cap         uint64
 	maxCap      uint64
 	valSize     int
 
 	// Lock file: mmap'd reader PID slots for stale-reader detection.
-	lockData     []byte // mmap'd lock file
-	lockMstate   mmap.Mapping
+	lockMapping  *mmap.Mapping
+	lockData     []byte // the lock mapping's bytes
 	lockDataFile *os.File
 	localReaders atomic.Int32 // per-process reader goroutine count
 	readerSlot   atomic.Int32 // claimed PID slot index, -1 if none
@@ -223,16 +223,16 @@ func (idx *Index) Close() error {
 	idx.clearReaderSlot()
 
 	if idx.data != nil {
-		if err := mmap.SyncFile(idx.data, idx.dataFile); err != nil {
+		if err := idx.mapping.Sync(); err != nil {
 			errs = append(errs, fmt.Errorf("%w: sync: %w", fault.ErrWriteFailure, err))
 		}
 
-		if err := mmap.UnmapFile(idx.data, idx.mstate); err != nil {
+		if err := idx.mapping.Unmap(); err != nil {
 			errs = append(errs, fmt.Errorf("%w: unmap: %w", fault.ErrFilesystemFailure, err))
 		}
 
 		idx.data = nil
-		idx.mstate = mmap.Mapping{}
+		idx.mapping = nil
 	}
 
 	if idx.dataFile != nil {
@@ -244,12 +244,12 @@ func (idx *Index) Close() error {
 	}
 
 	if idx.lockData != nil {
-		if err := mmap.UnmapFile(idx.lockData, idx.lockMstate); err != nil {
+		if err := idx.lockMapping.Unmap(); err != nil {
 			errs = append(errs, fmt.Errorf("%w: unmap lock: %w", fault.ErrFilesystemFailure, err))
 		}
 
 		idx.lockData = nil
-		idx.lockMstate = mmap.Mapping{}
+		idx.lockMapping = nil
 	}
 
 	if idx.lockDataFile != nil {
@@ -444,7 +444,7 @@ func (idx *Index) Sync() error {
 		return nil
 	}
 
-	if err := mmap.SyncFile(idx.data, idx.dataFile); err != nil {
+	if err := idx.mapping.Sync(); err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrWriteFailure, err)
 	}
 
@@ -483,7 +483,7 @@ func (idx *Index) mmapLockFile() error {
 		return fmt.Errorf("%w: open lock file for mmap: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	data, mstate, err := mmap.MapFile(lockFile, lockFileSize)
+	mapping, err := mmap.Map(lockFile, lockFileSize)
 	if err != nil {
 		_ = lockFile.Close()
 
@@ -491,8 +491,8 @@ func (idx *Index) mmapLockFile() error {
 	}
 
 	idx.lockDataFile = lockFile
-	idx.lockData = data
-	idx.lockMstate = mstate
+	idx.lockMapping = mapping
+	idx.lockData = mapping.Bytes()
 
 	return nil
 }
@@ -717,13 +717,13 @@ func (idx *Index) mmapDataFile() error {
 		return fmt.Errorf("%w: file too small: %d bytes", fault.ErrInvalidArgument, size)
 	}
 
-	data, mstate, err := mmap.MapFile(idx.dataFile, int(size))
+	mapping, err := mmap.Map(idx.dataFile, int(size))
 	if err != nil {
 		return fmt.Errorf("%w: mmap: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	idx.data = data
-	idx.mstate = mstate
+	idx.mapping = mapping
+	idx.data = mapping.Bytes()
 
 	return nil
 }
@@ -875,12 +875,14 @@ func (idx *Index) growLocked() error {
 	}
 
 	// Map the grown file. On failure the old mapping is still intact.
-	newData, newMstate, err := mmap.MapFile(idx.dataFile, int(newSize))
+	newMapping, err := mmap.Map(idx.dataFile, int(newSize))
 	if err != nil {
 		_ = os.Remove(idx.journalPath)
 
 		return fmt.Errorf("%w: mmap new: %w", fault.ErrFilesystemFailure, err)
 	}
+
+	newData := newMapping.Bytes()
 
 	// Zero the data region in the new mapping and write a fresh header.
 	for i := range newData[headerSize:] {
@@ -918,9 +920,9 @@ func (idx *Index) growLocked() error {
 	marshalHeader(newData, newHdr)
 
 	// Swap: atomically transition idx from old mapping to new.
-	oldData, oldMstate := idx.data, idx.mstate
+	oldMapping := idx.mapping
 	idx.data = newData
-	idx.mstate = newMstate
+	idx.mapping = newMapping
 	idx.cap = newCap
 
 	// Restore the write lock word in the new mapping.
@@ -928,12 +930,12 @@ func (idx *Index) growLocked() error {
 	atomic.StoreUint64(idx.lockWordPtr(), lockWriteFlag|(uint64(os.Getpid())<<lockPIDShift))
 
 	// Unmap old — best-effort; leaked mappings are reclaimed on process exit.
-	_ = mmap.UnmapFile(oldData, oldMstate)
+	_ = oldMapping.Unmap()
 
 	// --- End in-place grow ---
 
 	// Flush to disk so the data file is durable before deleting the journal.
-	if err := mmap.SyncFile(idx.data, idx.dataFile); err != nil {
+	if err := idx.mapping.Sync(); err != nil {
 		return fmt.Errorf("%w: sync after grow: %w", fault.ErrWriteFailure, err)
 	}
 
@@ -966,12 +968,14 @@ func (idx *Index) reopenLocked() error {
 		return fmt.Errorf("%w: file too small: %d bytes", fault.ErrInvalidArgument, newSize)
 	}
 
-	newData, newMstate, err := mmap.MapFile(newFile, int(newSize))
+	newMapping, err := mmap.Map(newFile, int(newSize))
 	if err != nil {
 		_ = newFile.Close()
 
 		return fmt.Errorf("%w: mmap for reopen: %w", fault.ErrFilesystemFailure, err)
 	}
+
+	newData := newMapping.Bytes()
 
 	// Restore write lock in the new mapping before swap.
 	// #nosec G103 G115 -- PIDs are always positive; 31-bit PID field cannot overflow
@@ -980,14 +984,14 @@ func (idx *Index) reopenLocked() error {
 		lockWriteFlag|(uint64(os.Getpid())<<lockPIDShift))
 
 	// Swap: save old state, install new.
-	oldData, oldMstate, oldFile := idx.data, idx.mstate, idx.dataFile
+	oldMapping, oldFile := idx.mapping, idx.dataFile
 	idx.data = newData
-	idx.mstate = newMstate
+	idx.mapping = newMapping
 	idx.dataFile = newFile
 	idx.cap = idx.readHeader().Capacity
 
 	// Clean up old mapping and fd — best-effort.
-	_ = mmap.UnmapFile(oldData, oldMstate)
+	_ = oldMapping.Unmap()
 	_ = oldFile.Close()
 
 	return nil
