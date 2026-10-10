@@ -19,6 +19,7 @@ package transporter_test
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -848,6 +849,66 @@ func TestDefaultTransportTakenAtFirstRequest(t *testing.T) {
 	assert.Check(t, resp.Body.Close())
 
 	assert.Assert(t, dialed.Load(), "the request did not use http.DefaultTransport's configuration")
+}
+
+// TestLegacyTLS checks that a client's TLS is its own: against a server at
+// TLS 1.2 with P-256 as its only key exchange, a client at the process's
+// default (1.3, X25519 hybrids only) fails the handshake, one with LegacyTLS
+// completes it, and the process's default is as it was for the clients made
+// after.
+//
+//nolint:paralleltest // replaces the process-wide default transport
+func TestLegacyTLS(t *testing.T) {
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.TLS = &tls.Config{ // a server that speaks no TLS 1.3 and no X25519
+		MaxVersion:       tls.VersionTLS12,
+		CurvePreferences: []tls.CurveID{tls.CurveP256},
+	}
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	// As network.SetDefaults leaves it, trusting the test server's certificate.
+	curves := []tls.CurveID{tls.X25519MLKEM768, tls.X25519}
+	configured := &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion:       tls.VersionTLS13,
+		CurvePreferences: curves,
+		RootCAs:          srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
+	}}
+
+	previous := http.DefaultTransport
+	http.DefaultTransport = configured //nolint:reassign // the configuration under test
+
+	t.Cleanup(func() {
+		configured.CloseIdleConnections()
+
+		http.DefaultTransport = previous //nolint:reassign // restores the configuration under test
+	})
+
+	// refused: the server alerts on the version, and there is no response.
+	refused := func(opts transporter.Options) {
+		t.Helper()
+
+		resp, err := doGet(t.Context(), t, newClient(t, opts), srv.URL)
+		if resp != nil {
+			_ = resp.Body.Close()
+		}
+
+		assert.ErrorContains(t, err, "protocol version not supported")
+	}
+
+	refused(transporter.Options{})
+
+	resp, err := doGet(t.Context(), t, newClient(t, transporter.Options{LegacyTLS: true}), srv.URL)
+	assert.NilError(t, err)
+	assert.Check(t, resp.Body.Close())
+	assert.Equal(t, resp.StatusCode, http.StatusOK)
+	assert.Equal(t, resp.TLS.Version, uint16(tls.VersionTLS12))
+
+	refused(transporter.Options{})
+	assert.Equal(t, configured.TLSClientConfig.MinVersion, uint16(tls.VersionTLS13))
+	assert.DeepEqual(t, configured.TLSClientConfig.CurvePreferences, curves)
 }
 
 func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {

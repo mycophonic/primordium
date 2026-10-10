@@ -30,6 +30,14 @@ type Options struct {
 	InitialBackoff time.Duration // Doubles each retry with ±25% jitter.
 	MaxBackoff     time.Duration // Cap on Retry-After values; anything beyond is treated as failure.
 	UserAgent      string
+
+	// LegacyTLS gives this client TLS as Go defaults it: 1.2 and every key
+	// exchange and cipher suite Go offers, for a server that speaks no TLS
+	// 1.3 or no X25519. The process's default (network.SetDefaults) is 1.3
+	// with post-quantum hybrid key exchange only; set this for that server
+	// alone, the other clients keep the default. Go's floor is the
+	// browsers': what it cannot reach, nothing reaches.
+	LegacyTLS bool
 }
 
 // NewClient returns a standard *http.Client backed by a transport that handles

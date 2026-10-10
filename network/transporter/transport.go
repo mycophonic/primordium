@@ -18,6 +18,7 @@ package transporter
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"io"
 	"log/slog"
@@ -43,6 +44,7 @@ type retryTransport struct {
 	initBackoff time.Duration
 	maxBackoff  time.Duration
 	userAgent   string
+	legacyTLS   bool // the clone gets Go's default TLS
 }
 
 func newRetryTransport(opts Options) *retryTransport {
@@ -51,12 +53,13 @@ func newRetryTransport(opts Options) *retryTransport {
 		initBackoff: opts.InitialBackoff,
 		maxBackoff:  opts.MaxBackoff,
 		userAgent:   opts.UserAgent,
+		legacyTLS:   opts.LegacyTLS,
 	}
 
 	transport.base = sync.OnceValue(func() http.RoundTripper {
 		transport.baseTaken.Store(true)
 
-		return ownTransport()
+		return ownTransport(transport.legacyTLS)
 	})
 
 	if opts.Parallelism > 0 {
@@ -85,12 +88,24 @@ func newRetryTransport(opts Options) *retryTransport {
 // The clone drops whatever wraps the *http.Transport: network.SetDefaults'
 // wrapper adds only a header this client never sets and a log line. One that
 // cannot be cloned is shared, as nothing else carries its configuration.
-func ownTransport() http.RoundTripper {
-	if cloner, ok := http.DefaultTransport.(interface{ Clone() *http.Transport }); ok {
-		return cloner.Clone()
+// LegacyTLS resets the clone's TLS config, which Clone copied, to Go's
+// defaults for the version, key exchange and cipher suites, and nothing else:
+// the roots and certificates stay, and http.DefaultTransport is untouched.
+func ownTransport(legacyTLS bool) http.RoundTripper {
+	cloner, ok := http.DefaultTransport.(interface{ Clone() *http.Transport })
+	if !ok {
+		return http.DefaultTransport
 	}
 
-	return http.DefaultTransport
+	transport := cloner.Clone()
+
+	if config := transport.TLSClientConfig; legacyTLS && config != nil {
+		config.MinVersion = tls.VersionTLS12
+		config.CurvePreferences = nil
+		config.CipherSuites = nil
+	}
+
+	return transport
 }
 
 // RoundTrip implements http.RoundTripper.
