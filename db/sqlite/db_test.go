@@ -185,7 +185,7 @@ func TestOpenInvalidDriver(t *testing.T) {
 	}
 
 	if !errors.Is(err, sqlite.ErrOpen) {
-		t.Fatalf("expected base.ErrOpen, got: %v", err)
+		t.Fatalf("expected ErrOpen, got: %v", err)
 	}
 }
 
@@ -204,7 +204,7 @@ func TestOpenFailingPragma(t *testing.T) {
 	}
 
 	if !errors.Is(err, sqlite.ErrOpen) {
-		t.Fatalf("expected base.ErrOpen, got: %v", err)
+		t.Fatalf("expected ErrOpen, got: %v", err)
 	}
 }
 
@@ -474,7 +474,7 @@ func TestExecStatementsCancelledContext(t *testing.T) {
 	}
 
 	if !errors.Is(err, sqlite.ErrWrite) {
-		t.Fatalf("expected base.ErrWrite, got: %v", err)
+		t.Fatalf("expected ErrWrite, got: %v", err)
 	}
 }
 

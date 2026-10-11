@@ -22,8 +22,8 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
-// Sentinel aliases for database operations, re-exported from fault
-// so callers can use errors.Is without importing fault directly.
+// The errors this package returns, each wrapping its fault class: ErrOpen and
+// ErrClose are the package's own, ErrRead and ErrWrite are fault's.
 var (
 	ErrOpen  = fmt.Errorf("%w: sqlite open failure", fault.ErrFilesystemFailure)
 	ErrClose = fmt.Errorf("%w: sqlite close failure", fault.ErrFilesystemFailure)

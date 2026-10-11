@@ -89,7 +89,8 @@ var PragmasReadWrite = Pragmas{
 // is disposable, so crash safety is traded for speed. One connection: the
 // exclusive lock would hold a second one off.
 //
-// Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
+// Requires up to 4 GiB RAM for the page cache. The 8 GiB asked of mmap_size
+// is capped at SQLite's compiled maximum, 2 GiB in the pure-Go and cgo drivers.
 //
 //nolint:gochecknoglobals // an exported preset, copied by value
 var PragmasImport = Pragmas{
@@ -115,7 +116,8 @@ var PragmasImport = Pragmas{
 // Opening a WAL-mode database with journal_mode=OFF implicitly checkpoints the
 // existing WAL, so no separate wal_checkpoint call is needed afterward.
 //
-// Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
+// Requires up to 4 GiB RAM for the page cache. The 8 GiB asked of mmap_size
+// is capped at SQLite's compiled maximum, 2 GiB in the pure-Go and cgo drivers.
 //
 //nolint:gochecknoglobals // an exported preset, copied by value
 var PragmasVacuum = Pragmas{
