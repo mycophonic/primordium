@@ -9,7 +9,7 @@ require (
 	github.com/aws/smithy-go v1.28.4
 	github.com/forkcloser/blake3 v1.0.1
 	github.com/forkcloser/xz v1.0.2
-	github.com/getsentry/sentry-go v0.49.0
+	github.com/getsentry/sentry-go v0.50.0
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/klauspost/compress v1.20.1
 	github.com/klauspost/cpuid/v2 v2.4.0
