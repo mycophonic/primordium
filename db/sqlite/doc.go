@@ -14,5 +14,7 @@
    limitations under the License.
 */
 
-// Package sqlite provides shared SQLite database wrapper along with the default pure go driver.
+// Package sqlite opens SQLite databases with a pragma preset applied to every
+// connection of the pool, through the pure-Go driver by default (Open) or a
+// named one (OpenWithDriver).
 package sqlite

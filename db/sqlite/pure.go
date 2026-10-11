@@ -19,10 +19,11 @@ package sqlite
 import (
 	"context"
 
-	_ "modernc.org/sqlite" // Pure-Go SQLite driver (read-only / serve side).
+	_ "modernc.org/sqlite" // the pure-Go driver, registered as "sqlite"
 )
 
-// Open opens or creates a SQLite database using the pure-Go modernc driver.
+// Open opens or creates a SQLite database with the pure-Go driver and
+// PragmasReadOnly.
 func Open(ctx context.Context, path string) (*DB, error) {
 	return OpenWithDriver(ctx, "sqlite", path, PragmasReadOnly)
 }
