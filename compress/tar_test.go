@@ -245,6 +245,78 @@ func TestTar_NonexistentSource(t *testing.T) {
 	}
 }
 
+// TestTar_LeavesSymlinksOut: a symlink in the source is not an entry, and
+// does not break the archive; the regular file beside it is archived.
+func TestTar_LeavesSymlinksOut(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	srcDir := filepath.Join(baseDir, "src")
+
+	if err := os.MkdirAll(srcDir, filesystem.DirPermissionsPrivate); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := filesystem.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(filepath.Join(srcDir, "file.txt"), filepath.Join(srcDir, "link")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	names := entryNames(t, compress.Tar(baseDir, "src"))
+
+	assert.DeepEqual(t, names, []string{"src", "src/file.txt"})
+}
+
+// TestTar_LinkedRoot: a relDir that is a symlink to a directory archives that
+// directory, under relDir's name.
+func TestTar_LinkedRoot(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	realDir := filepath.Join(t.TempDir(), "real")
+
+	if err := os.MkdirAll(realDir, filesystem.DirPermissionsPrivate); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := filesystem.WriteFile(filepath.Join(realDir, "file.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(realDir, filepath.Join(baseDir, "link")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	names := entryNames(t, compress.Tar(baseDir, "link"))
+
+	assert.DeepEqual(t, names, []string{"link", "link/file.txt"})
+}
+
+// entryNames reads the archive and returns its entry names, in order.
+func entryNames(t *testing.T, archive io.ReadCloser) []string {
+	t.Helper()
+
+	defer func() { assert.Check(t, archive.Close()) }()
+
+	tarReader := tar.NewReader(archive)
+
+	var names []string
+
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			return names
+		}
+
+		assert.NilError(t, err)
+
+		names = append(names, header.Name)
+	}
+}
+
 func TestTar_EmptyDirectory(t *testing.T) {
 	t.Parallel()
 
