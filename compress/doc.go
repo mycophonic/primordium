@@ -23,8 +23,4 @@
 //	import _ "github.com/mycophonic/primordium/compress/xz"
 //	import _ "github.com/mycophonic/primordium/compress/bzip2"
 //	import _ "github.com/mycophonic/primordium/compress/lz4"
-//
-// Or import all formats via laccase:
-//
-//	import _ "github.com/mycophonic/laccase/compress"
 package compress

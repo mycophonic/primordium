@@ -30,7 +30,10 @@ import (
 
 // Tar returns a reader that yields a tar archive of baseDir/relDir.
 // Archive entries are rooted at relDir, preserving the directory structure
-// relative to baseDir. The caller must close the returned ReadCloser.
+// relative to baseDir. Regular files and directories are archived, as Untar
+// extracts; a symlink, a device or a pipe is left out, except that relDir
+// itself may be a symlink to the directory to archive. The caller must close
+// the returned ReadCloser.
 func Tar(baseDir, relDir string) io.ReadCloser {
 	pipeReader, pipeWriter := io.Pipe()
 
@@ -42,16 +45,21 @@ func Tar(baseDir, relDir string) io.ReadCloser {
 }
 
 func writeTar(writer io.Writer, baseDir, relDir string) error {
-	srcDir := filepath.Join(baseDir, relDir)
+	// The root is resolved: Walk lstats it, and a root that is a symlink would
+	// be one entry the filter below leaves out, an empty archive in silence.
+	root, err := filepath.EvalSymlinks(filepath.Join(baseDir, relDir))
+	if err != nil {
+		return fmt.Errorf("resolve: %w", err)
+	}
 
 	tarWriter := tar.NewWriter(writer)
 
-	err := filepath.Walk(srcDir, func(path string, info os.FileInfo, walkErr error) error {
+	err = filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 
-		return writeTarEntry(tarWriter, baseDir, path, info)
+		return writeTarEntry(tarWriter, root, relDir, path, info)
 	})
 	if err != nil {
 		return fmt.Errorf("walk: %w", err)
@@ -64,17 +72,22 @@ func writeTar(writer io.Writer, baseDir, relDir string) error {
 	return nil
 }
 
-// writeTarEntry writes one walked path: its header, named relative to
-// baseDir, and for a regular file its content.
-func writeTarEntry(tarWriter *tar.Writer, baseDir, path string, info os.FileInfo) error {
-	// Build relative path from baseDir so the archive preserves the directory structure.
-	relPath, err := filepath.Rel(baseDir, path)
+// writeTarEntry writes one walked path: its header, named relDir plus the
+// path under root, and for a regular file its content. Anything else is left
+// out: FileInfoHeader would describe a symlink as one with no target and no
+// size, and Open would then copy the target's content into that entry.
+func writeTarEntry(tarWriter *tar.Writer, root, relDir, path string, info os.FileInfo) error {
+	if !info.IsDir() && !info.Mode().IsRegular() {
+		return nil
+	}
+
+	relPath, err := filepath.Rel(root, path)
 	if err != nil {
 		return fmt.Errorf("rel path: %w", err)
 	}
 
-	// Use forward slashes in tar entries.
-	relPath = strings.ReplaceAll(relPath, string(os.PathSeparator), "/")
+	// Tar entries use forward slashes.
+	relPath = filepath.ToSlash(filepath.Join(relDir, relPath))
 
 	header, err := tar.FileInfoHeader(info, "")
 	if err != nil {
@@ -130,11 +143,13 @@ func Untar(reader io.Reader, destDir string) error {
 }
 
 // untarEntry extracts the entry header describes, whose content tarReader is
-// positioned at, refusing a name that escapes destDir.
+// positioned at, refusing a name that escapes destDir. A name for destDir
+// itself ("./", the first entry of most archives) is inside it.
 func untarEntry(tarReader *tar.Reader, header *tar.Header, destDir string) error {
+	destDir = filepath.Clean(destDir)
 	target := filepath.Join(destDir, filepath.Clean(header.Name))
 
-	if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+	if target != destDir && !strings.HasPrefix(target, destDir+string(os.PathSeparator)) {
 		return fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
 	}
 

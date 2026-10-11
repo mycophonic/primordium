@@ -245,6 +245,121 @@ func TestTar_NonexistentSource(t *testing.T) {
 	}
 }
 
+// TestTar_LeavesSymlinksOut: a symlink in the source is not an entry, and
+// does not break the archive; the regular file beside it is archived.
+func TestTar_LeavesSymlinksOut(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	srcDir := filepath.Join(baseDir, "src")
+
+	if err := os.MkdirAll(srcDir, filesystem.DirPermissionsPrivate); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := filesystem.WriteFile(filepath.Join(srcDir, "file.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(filepath.Join(srcDir, "file.txt"), filepath.Join(srcDir, "link")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	names := entryNames(t, compress.Tar(baseDir, "src"))
+
+	assert.DeepEqual(t, names, []string{"src", "src/file.txt"})
+}
+
+// TestTar_LinkedRoot: a relDir that is a symlink to a directory archives that
+// directory, under relDir's name.
+func TestTar_LinkedRoot(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+	realDir := filepath.Join(t.TempDir(), "real")
+
+	if err := os.MkdirAll(realDir, filesystem.DirPermissionsPrivate); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := filesystem.WriteFile(filepath.Join(realDir, "file.txt"), []byte("content"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Symlink(realDir, filepath.Join(baseDir, "link")); err != nil {
+		t.Skipf("cannot create a symlink here: %v", err)
+	}
+
+	names := entryNames(t, compress.Tar(baseDir, "link"))
+
+	assert.DeepEqual(t, names, []string{"link", "link/file.txt"})
+}
+
+// TestUntar_RootEntry: "./" and the names under it, as most archives are laid
+// out, extract into destDir; the root entry is destDir itself, not an escape.
+func TestUntar_RootEntry(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+
+	tarWriter := tar.NewWriter(&buf)
+
+	assert.NilError(t, tarWriter.WriteHeader(&tar.Header{Name: "./", Typeflag: tar.TypeDir, Mode: 0o755}))
+	assert.NilError(t, tarWriter.WriteHeader(&tar.Header{Name: "./a.txt", Typeflag: tar.TypeReg, Mode: 0o644, Size: 1}))
+
+	_, err := tarWriter.Write([]byte("x"))
+	assert.NilError(t, err)
+	assert.NilError(t, tarWriter.Close())
+
+	destDir := t.TempDir()
+	assert.NilError(t, compress.Untar(&buf, destDir))
+
+	got, err := xos.ReadFile(filepath.Join(destDir, "a.txt"))
+	assert.NilError(t, err)
+	assert.Equal(t, string(got), "x")
+}
+
+// TestTar_RoundtripWholeBase: Tar(baseDir, "") archives baseDir itself, whose
+// root entry is ".", and Untar takes it.
+func TestTar_RoundtripWholeBase(t *testing.T) {
+	t.Parallel()
+
+	baseDir := t.TempDir()
+
+	if err := filesystem.WriteFile(filepath.Join(baseDir, "test.bin"), []byte("whole"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	destDir := t.TempDir()
+	assert.NilError(t, compress.Untar(compress.Tar(baseDir, ""), destDir))
+
+	got, err := xos.ReadFile(filepath.Join(destDir, "test.bin"))
+	assert.NilError(t, err)
+	assert.Equal(t, string(got), "whole")
+}
+
+// entryNames reads the archive and returns its entry names, in order.
+func entryNames(t *testing.T, archive io.ReadCloser) []string {
+	t.Helper()
+
+	defer func() { assert.Check(t, archive.Close()) }()
+
+	tarReader := tar.NewReader(archive)
+
+	var names []string
+
+	for {
+		header, err := tarReader.Next()
+		if errors.Is(err, io.EOF) {
+			return names
+		}
+
+		assert.NilError(t, err)
+
+		names = append(names, header.Name)
+	}
+}
+
 func TestTar_EmptyDirectory(t *testing.T) {
 	t.Parallel()
 
