@@ -19,6 +19,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"errors"
 	"fmt"
 	"math"
@@ -30,9 +31,11 @@ import (
 // Pragmas holds SQLite PRAGMA statements and connection pool settings
 // to apply when opening a database.
 //
-// Statements are executed in order. Order matters: some pragmas (e.g. page_size,
-// auto_vacuum) must be set before the first write to the database, so they must
-// appear before pragmas that implicitly write (e.g. journal_mode).
+// A PRAGMA is a connection's setting, not the database's, so the statements
+// run on every connection the pool opens, in order. Order matters: some
+// pragmas (page_size, auto_vacuum) must be set before the first write to the
+// database, so they must appear before pragmas that implicitly write
+// (journal_mode).
 type Pragmas struct {
 	Statements []string
 	MaxConns   uint // 0 = database/sql default (unlimited).
@@ -83,10 +86,8 @@ var PragmasReadWrite = Pragmas{
 
 // PragmasImport configures aggressive settings for expendable work databases.
 // Disables journaling and fsync for maximum write throughput. The work database
-// is disposable, so crash safety is traded for speed.
-//
-// Pins the connection pool to a single connection so that all subsequent
-// operations (imports, indexing) share the same pragmas.
+// is disposable, so crash safety is traded for speed. One connection: the
+// exclusive lock would hold a second one off.
 //
 // Requires up to 4 GiB RAM for the page cache and 8 GiB address space for mmap.
 //
@@ -134,8 +135,8 @@ var PragmasVacuum = Pragmas{
 // destPath must not already exist; SQLite will refuse to overwrite an
 // existing file. Callers that want in-place compaction should vacuum
 // into a temporary file and rename it over the original.
-func VacuumInto(ctx context.Context, driver, path, destPath string) (err error) {
-	store, err := OpenWithDriver(ctx, driver, path, PragmasVacuum)
+func VacuumInto(ctx context.Context, driverName, path, destPath string) (err error) {
+	store, err := OpenWithDriver(ctx, driverName, path, PragmasVacuum)
 	if err != nil {
 		return err
 	}
@@ -159,27 +160,89 @@ type DB struct {
 	conn *sql.DB
 }
 
-// OpenWithDriver opens or creates a SQLite database at path using the named driver
-// and applies the given pragma configuration.
-func OpenWithDriver(ctx context.Context, driver, path string, pragmas Pragmas) (*DB, error) {
-	conn, err := sql.Open(driver, path)
+// OpenWithDriver opens or creates a SQLite database at path using the named
+// driver and applies the pragma configuration to every connection the pool
+// opens. The first connection is opened here, so a path or a pragma the
+// driver refuses fails the open.
+func OpenWithDriver(ctx context.Context, driverName, path string, pragmas Pragmas) (*DB, error) {
+	// sql.Open resolves the name without connecting; the driver.Driver is what
+	// the connector needs.
+	named, err := sql.Open(driverName, path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: open: %w", ErrOpen, err)
 	}
+
+	_ = named.Close() // nothing was connected
+
+	conn := sql.OpenDB(&connector{base: named.Driver(), dsn: path, statements: pragmas.Statements})
 
 	if pragmas.MaxConns > 0 {
 		conn.SetMaxOpenConns(int(min(pragmas.MaxConns, uint(math.MaxInt))))
 	}
 
-	for _, pragma := range pragmas.Statements {
-		if _, err := conn.ExecContext(ctx, pragma); err != nil {
-			_ = conn.Close()
+	if err := conn.PingContext(ctx); err != nil {
+		_ = conn.Close()
 
-			return nil, fmt.Errorf("%w: %s: %w", ErrOpen, pragma, err)
-		}
+		return nil, fmt.Errorf("%w: %w", ErrOpen, err)
 	}
 
 	return &DB{conn: conn}, nil
+}
+
+// connector opens the driver's connections and runs the pragma statements on
+// each: database/sql opens as many as the pool needs, and replaces one it
+// finds bad, and a pragma run once through the pool reached one of them only.
+type connector struct {
+	base       driver.Driver
+	dsn        string
+	statements []string
+}
+
+func (c *connector) Connect(ctx context.Context) (driver.Conn, error) {
+	conn, err := c.base.Open(c.dsn)
+	if err != nil {
+		return nil, fmt.Errorf("open: %w", err)
+	}
+
+	for _, statement := range c.statements {
+		if err := execute(ctx, conn, statement); err != nil {
+			_ = conn.Close()
+
+			return nil, fmt.Errorf("%s: %w", statement, err)
+		}
+	}
+
+	return conn, nil
+}
+
+func (c *connector) Driver() driver.Driver {
+	return c.base
+}
+
+// execute runs one statement on a raw connection: through ExecerContext when
+// the driver has it and takes the statement, else prepared, as database/sql
+// itself falls back.
+func execute(ctx context.Context, conn driver.Conn, statement string) error {
+	if execer, ok := conn.(driver.ExecerContext); ok {
+		_, err := execer.ExecContext(ctx, statement, nil)
+		if !errors.Is(err, driver.ErrSkip) {
+			return err //nolint:wrapcheck // Connect names the statement
+		}
+	}
+
+	stmt, err := conn.Prepare(statement)
+	if err != nil {
+		return fmt.Errorf("prepare: %w", err)
+	}
+
+	defer func() { _ = stmt.Close() }() // a statement run once; its close error carries nothing
+
+	//nolint:staticcheck // SA1019: driver.Stmt.Exec is the fallback database/sql itself keeps
+	if _, err := stmt.Exec(nil); err != nil {
+		return fmt.Errorf("exec: %w", err)
+	}
+
+	return nil
 }
 
 // Conn returns the underlying *sql.DB for domain-specific operations.

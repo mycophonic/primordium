@@ -18,17 +18,123 @@ package sqlite_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"path/filepath"
 	"testing"
 
-	_ "modernc.org/sqlite" // Pure-Go SQLite driver for tests.
+	"gotest.tools/v3/assert"
+	_ "modernc.org/sqlite" // the pure-Go driver, for the tests
 
 	"github.com/mycophonic/primordium/db/sqlite"
 	"github.com/mycophonic/primordium/filesystem"
 )
 
 const testDriver = "sqlite"
+
+// querier is what *sql.DB and *sql.Conn share, for reading a pragma back.
+type querier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// pragma reads one pragma's value on conn, as text.
+func pragma(ctx context.Context, t *testing.T, conn querier, name string) string {
+	t.Helper()
+
+	var value string
+
+	assert.NilError(t, conn.QueryRowContext(ctx, "PRAGMA "+name).Scan(&value), name)
+
+	return value
+}
+
+// TestPragmasOnEveryConnection: a PRAGMA is a connection's setting, so every
+// connection the pool opens has the preset, not only the first.
+func TestPragmasOnEveryConnection(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+
+	db, err := sqlite.OpenWithDriver(ctx, testDriver, filepath.Join(t.TempDir(), "pool.db"), sqlite.Pragmas{
+		MaxConns:   2,
+		Statements: []string{"PRAGMA busy_timeout = 5000"},
+	})
+	assert.NilError(t, err)
+
+	t.Cleanup(func() { _ = db.Close() })
+
+	first, err := db.Conn().Conn(ctx)
+	assert.NilError(t, err)
+
+	t.Cleanup(func() { _ = first.Close() })
+
+	second, err := db.Conn().Conn(ctx)
+	assert.NilError(t, err)
+
+	t.Cleanup(func() { _ = second.Close() })
+
+	assert.Equal(t, pragma(ctx, t, first, "busy_timeout"), "5000")
+	assert.Equal(t, pragma(ctx, t, second, "busy_timeout"), "5000")
+}
+
+// TestPresetsLand reads every preset back from the connection: each pragma a
+// preset states is what the connection reports, in the order the preset runs
+// them (page_size and auto_vacuum take only before the first write).
+func TestPresetsLand(t *testing.T) {
+	t.Parallel()
+
+	presets := map[string]struct {
+		pragmas sqlite.Pragmas
+		want    map[string]string
+		mmap    bool // asks 8 GiB of mmap_size, which SQLite caps at its compiled maximum: set is the contract
+	}{
+		"ReadOnly": {sqlite.PragmasReadOnly, map[string]string{
+			"journal_mode": "wal", "synchronous": "1", "cache_size": "-65536", "busy_timeout": "5000",
+		}, false},
+		"ReadWrite": {
+			sqlite.PragmasReadWrite,
+			map[string]string{
+				"journal_mode": "wal",
+				"synchronous":  "2",
+				"foreign_keys": "1",
+				"cache_size":   "-65536",
+				"busy_timeout": "5000",
+			},
+			false,
+		},
+		"Import": {sqlite.PragmasImport, map[string]string{
+			"page_size": "16384", "auto_vacuum": "0", "foreign_keys": "0", "journal_mode": "off", "synchronous": "0",
+			"locking_mode": "exclusive", "temp_store": "2", "threads": "8", "cache_size": "-4194304",
+		}, true},
+		"Vacuum": {sqlite.PragmasVacuum, map[string]string{
+			"journal_mode": "off", "synchronous": "0", "locking_mode": "exclusive", "temp_store": "2",
+			"cache_size": "-4194304",
+		}, true},
+	}
+
+	for name, preset := range presets {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+
+			path := filepath.Join(t.TempDir(), "preset.db")
+
+			db, err := sqlite.OpenWithDriver(ctx, testDriver, path, preset.pragmas)
+			assert.NilError(t, err)
+
+			t.Cleanup(func() { _ = db.Close() })
+
+			for pragmaName, want := range preset.want {
+				assert.Equal(t, pragma(ctx, t, db.Conn(), pragmaName), want, pragmaName)
+			}
+
+			if preset.mmap {
+				assert.Assert(t, pragma(ctx, t, db.Conn(), "mmap_size") != "0", "mmap_size not set")
+			}
+		})
+	}
+}
 
 func openTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
@@ -222,7 +328,7 @@ func TestExecStatementsAtomicity(t *testing.T) {
 	}
 
 	if !errors.Is(err, sqlite.ErrWrite) {
-		t.Fatalf("expected base.ErrWrite, got: %v", err)
+		t.Fatalf("expected ErrWrite, got: %v", err)
 	}
 
 	var count int
@@ -368,7 +474,7 @@ func TestExecStatementsCancelledContext(t *testing.T) {
 	}
 
 	if !errors.Is(err, sqlite.ErrWrite) {
-		t.Fatalf("expected ErrWrite, got: %v", err)
+		t.Fatalf("expected base.ErrWrite, got: %v", err)
 	}
 }
 
@@ -400,6 +506,6 @@ func TestVacuumIntoExistingDest(t *testing.T) {
 	}
 
 	if !errors.Is(err, sqlite.ErrWrite) {
-		t.Fatalf("expected base.ErrWrite, got: %v", err)
+		t.Fatalf("expected ErrWrite, got: %v", err)
 	}
 }
