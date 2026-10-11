@@ -143,11 +143,13 @@ func Untar(reader io.Reader, destDir string) error {
 }
 
 // untarEntry extracts the entry header describes, whose content tarReader is
-// positioned at, refusing a name that escapes destDir.
+// positioned at, refusing a name that escapes destDir. A name for destDir
+// itself ("./", the first entry of most archives) is inside it.
 func untarEntry(tarReader *tar.Reader, header *tar.Header, destDir string) error {
+	destDir = filepath.Clean(destDir)
 	target := filepath.Join(destDir, filepath.Clean(header.Name))
 
-	if !strings.HasPrefix(target, filepath.Clean(destDir)+string(os.PathSeparator)) {
+	if target != destDir && !strings.HasPrefix(target, destDir+string(os.PathSeparator)) {
 		return fmt.Errorf("%w: %s", ErrPathTraversal, header.Name)
 	}
 
