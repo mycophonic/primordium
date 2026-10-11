@@ -16,226 +16,28 @@
 
 package compress_test
 
+// The example the properties cannot state: lz4's skippable frame after the
+// data, which a blob store appends as sector padding.
+
 import (
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"io"
-	"os"
-	"path/filepath"
 	"testing"
 
-	"github.com/forkcloser/xz"
-	"github.com/klauspost/compress/zstd"
-	"github.com/klauspost/pgzip"
 	"github.com/pierrec/lz4/v4"
-	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/compress"
 	_ "github.com/mycophonic/primordium/compress/bzip2"
 	_ "github.com/mycophonic/primordium/compress/gzip"
 	_ "github.com/mycophonic/primordium/compress/lz4"
 	_ "github.com/mycophonic/primordium/compress/xz"
-	"github.com/mycophonic/primordium/fault"
 )
 
 var errBoom = errors.New("boom")
 
 const testPayload = "the quick brown fox jumps over the lazy dog"
-
-func TestCompressDecompress_Roundtrip(t *testing.T) {
-	t.Parallel()
-
-	input := bytes.NewReader([]byte(testPayload))
-
-	compressed, err := compress.Compress(input)
-	if err != nil {
-		t.Fatalf("Compress: %v", err)
-	}
-
-	defer func() { assert.Check(t, compressed.Close()) }()
-
-	decompressed, err := compress.Decompress(compressed)
-	if err != nil {
-		t.Fatalf("Decompress: %v", err)
-	}
-
-	got, err := io.ReadAll(decompressed)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-
-	if err := decompressed.Close(); err != nil {
-		t.Fatalf("Close decompressed: %v", err)
-	}
-
-	if string(got) != testPayload {
-		t.Errorf("got %q, want %q", got, testPayload)
-	}
-}
-
-func TestDecompress_LZ4(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	lw := lz4.NewWriter(&buf)
-
-	_, writeErr := lw.Write([]byte(testPayload))
-	assert.NilError(t, writeErr)
-	assert.Check(t, lw.Close())
-
-	rc, err := compress.Decompress(&buf)
-	if err != nil {
-		t.Fatalf("Decompress: %v", err)
-	}
-	defer func() { assert.Check(t, rc.Close()) }()
-
-	got, _ := io.ReadAll(rc)
-	if string(got) != testPayload {
-		t.Errorf("lz4: got %q, want %q", got, testPayload)
-	}
-}
-
-func TestDecompress_Zstd(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	enc, err := zstd.NewWriter(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, writeErr := enc.Write([]byte(testPayload))
-	assert.NilError(t, writeErr)
-	assert.Check(t, enc.Close())
-
-	rc, err := compress.Decompress(&buf)
-	if err != nil {
-		t.Fatalf("Decompress: %v", err)
-	}
-	defer func() { assert.Check(t, rc.Close()) }()
-
-	got, _ := io.ReadAll(rc)
-	if string(got) != testPayload {
-		t.Errorf("zstd: got %q, want %q", got, testPayload)
-	}
-}
-
-func TestDecompress_Gzip(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	gw := pgzip.NewWriter(&buf)
-
-	_, writeErr := gw.Write([]byte(testPayload))
-	assert.NilError(t, writeErr)
-	assert.Check(t, gw.Close())
-
-	rc, err := compress.Decompress(&buf)
-	if err != nil {
-		t.Fatalf("Decompress: %v", err)
-	}
-	defer func() { assert.Check(t, rc.Close()) }()
-
-	got, _ := io.ReadAll(rc)
-	if string(got) != testPayload {
-		t.Errorf("gzip: got %q, want %q", got, testPayload)
-	}
-}
-
-func TestDecompress_XZ(t *testing.T) {
-	t.Parallel()
-
-	var buf bytes.Buffer
-
-	xw, err := xz.NewWriter(&buf)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	_, writeErr := xw.Write([]byte(testPayload))
-	assert.NilError(t, writeErr)
-	assert.Check(t, xw.Close())
-
-	rc, err := compress.Decompress(&buf)
-	if err != nil {
-		t.Fatalf("Decompress: %v", err)
-	}
-	defer func() { assert.Check(t, rc.Close()) }()
-
-	got, _ := io.ReadAll(rc)
-	if string(got) != testPayload {
-		t.Errorf("xz: got %q, want %q", got, testPayload)
-	}
-}
-
-func TestDecompress_Bzip2(t *testing.T) {
-	t.Parallel()
-
-	// The standard library reads bzip2 but cannot write it.
-	bz2Data, err := os.ReadFile(filepath.Join("testdata", "payload.bz2"))
-	if err != nil {
-		t.Fatalf("fixture: %v", err)
-	}
-
-	rc, err := compress.Decompress(bytes.NewReader(bz2Data))
-	if err != nil {
-		t.Fatalf("Decompress: %v", err)
-	}
-	defer func() { assert.Check(t, rc.Close()) }()
-
-	got, err := io.ReadAll(rc)
-	if err != nil {
-		t.Fatalf("ReadAll: %v", err)
-	}
-
-	if string(got) != testPayload {
-		t.Errorf("bzip2: got %q, want %q", got, testPayload)
-	}
-}
-
-func TestDecompress_UnknownFormat(t *testing.T) {
-	t.Parallel()
-
-	_, err := compress.Decompress(bytes.NewReader([]byte{0x00, 0x01, 0x02, 0x03, 0x04, 0x05}))
-	if !errors.Is(err, fault.ErrNotImplemented) {
-		t.Fatalf("expected fault.ErrNotImplemented, got: %v", err)
-	}
-}
-
-func TestDecompress_EmptyInput(t *testing.T) {
-	t.Parallel()
-
-	_, err := compress.Decompress(bytes.NewReader(nil))
-	if !errors.Is(err, fault.ErrReadFailure) {
-		t.Fatalf("expected fault.ErrReadFailure, got: %v", err)
-	}
-}
-
-func TestCompress_ReaderError(t *testing.T) {
-	t.Parallel()
-
-	failing := &failingReader{err: errBoom}
-
-	compressed, err := compress.Compress(failing)
-	if err != nil {
-		t.Fatalf("Compress: %v", err)
-	}
-
-	defer func() { assert.Check(t, compressed.Close()) }()
-
-	_, err = io.ReadAll(compressed)
-	if err == nil {
-		t.Fatal("expected error from failing reader")
-	}
-
-	if !errors.Is(err, errBoom) {
-		t.Fatalf("expected errBoom, got: %v", err)
-	}
-}
 
 type failingReader struct {
 	err error
@@ -243,17 +45,6 @@ type failingReader struct {
 
 func (r *failingReader) Read([]byte) (int, error) {
 	return 0, r.err
-}
-
-func TestDecompress_PartialPeek(t *testing.T) {
-	t.Parallel()
-
-	// 2 bytes is shorter than any magic (min 4 bytes for zstd).
-	// Decompress should still return a meaningful error, not panic.
-	_, err := compress.Decompress(bytes.NewReader([]byte{0xAB, 0xCD}))
-	if !errors.Is(err, fault.ErrNotImplemented) {
-		t.Fatalf("expected fault.ErrNotImplemented for partial peek, got: %v", err)
-	}
 }
 
 // TestDecompress_LZ4ParallelMultiBlock exercises the concurrent decode path
