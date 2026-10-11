@@ -28,16 +28,6 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
-/*
-Not yet migrated — zstd compression (upload):
-
-  ┌───────────────────────────────┬──────────────┬──────────────────────────────────┐
-  │           Location            │   Function   │               What               │
-  ├───────────────────────────────┼──────────────┼──────────────────────────────────┤
-  │ cc0/primo/cc0r2/upload.go:105 │ compressZstd │ File → zstd temp file (pre-upload│
-  └───────────────────────────────┴──────────────┴──────────────────────────────────┘
-*/
-
 // Decompressor creates a decompressed reader from a compressed stream.
 type Decompressor func(io.Reader) (io.ReadCloser, error)
 
