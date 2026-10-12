@@ -14,12 +14,10 @@
    limitations under the License.
 */
 
-// Package simd provides SIMD-accelerated operations for float32 slices.
-//
-// On arm64, operations use NEON vector instructions.
-// On amd64, operations use SSE instructions with runtime cpuid detection
-// for future AVX2 dispatch.
-// On other architectures, a pure Go scalar fallback is used.
+// Package simd provides SIMD-accelerated operations for float32 slices:
+// NEON on arm64, SSE on amd64, a scalar loop elsewhere. The sums are
+// accumulated in lanes, so a result may differ from the scalar sum in its
+// last bits; callers compare with a tolerance, never for equality.
 //
 // All functions are safe for concurrent use.
 package simd
