@@ -194,7 +194,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			}
 
 			if err := resetBody(req); err != nil {
-				return nil, fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
+				return nil, fmt.Errorf("%w: %w", err, lastErr)
 			}
 		}
 
@@ -337,10 +337,18 @@ func (t *retryTransport) backoffDuration(attempt int) time.Duration {
 	return time.Duration(float64(backoff) * jitter)
 }
 
-// resetBody rewinds the request body for retry. No-op for bodyless requests (GET).
+// resetBody rewinds the request body for a retry. A request without a body
+// needs nothing. One with a body the client cannot replay (no GetBody: a
+// stream, a pipe, a file) cannot be retried: the first attempt consumed it,
+// and a retry would send an empty body and report whatever the server made
+// of that as success.
 func resetBody(req *http.Request) error {
-	if req.Body == nil || req.GetBody == nil {
+	if req.Body == nil || req.Body == http.NoBody {
 		return nil
+	}
+
+	if req.GetBody == nil {
+		return fmt.Errorf("%w: request body cannot be replayed for a retry", fault.ErrInvalidArgument)
 	}
 
 	body, err := req.GetBody()
