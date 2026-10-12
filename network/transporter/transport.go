@@ -233,8 +233,9 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			"url", req.URL.String(),
 		)
 
+		// 401 is not among them: this client attaches no credential and has no
+		// way to change one between attempts, so a retry asks the same question.
 		retryable := resp.StatusCode == http.StatusTooManyRequests ||
-			resp.StatusCode == http.StatusUnauthorized ||
 			resp.StatusCode >= http.StatusInternalServerError
 		if !retryable {
 			if elapsed > slowRequestThreshold {
