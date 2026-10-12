@@ -298,9 +298,10 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 	return nil, lastErr
 }
 
-// refill sends a token into the limiter channel at the configured rate.
+// refill sends a token into the limiter channel at the configured rate. A
+// rate past one per nanosecond is one per nanosecond: a ticker refuses zero.
 func (t *retryTransport) refill(ctx context.Context, maxPerSecond int) {
-	interval := time.Second / time.Duration(maxPerSecond)
+	interval := max(time.Second/time.Duration(maxPerSecond), time.Nanosecond)
 	ticker := time.NewTicker(interval)
 
 	defer ticker.Stop()
