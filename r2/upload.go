@@ -256,15 +256,18 @@ func (cli *Client) loadOrCreateUpload(
 			return cli.createUpload(ctx, objectKey, totalSize, opts, statePath)
 		}
 
-		// Verify the upload still exists on R2.
+		// Verify the upload still exists on R2: one that expired or was
+		// aborted starts fresh; any other failure to ask is returned, with the
+		// state kept, so a transient error does not cost the parts uploaded.
 		parts, listErr := cli.listParts(ctx, objectKey, state.UploadID)
-		if listErr != nil {
-			// Upload expired or was aborted — start fresh.
-			cli.abortUpload(ctx, objectKey, state.UploadID)
-
+		if errors.Is(listErr, fault.ErrNotFound) {
 			_ = os.Remove(statePath)
 
 			return cli.createUpload(ctx, objectKey, totalSize, opts, statePath)
+		}
+
+		if listErr != nil {
+			return nil, listErr
 		}
 
 		// Reconcile: trust R2 as source of truth.
@@ -393,10 +396,6 @@ func (cli *Client) listParts(ctx context.Context, key, uploadID string) ([]compl
 
 		resp, err := cli.under.ListParts(ctx, input)
 		if err != nil {
-			if _, ok := errors.AsType[*types.NoSuchUpload](err); ok {
-				return nil, fmt.Errorf("upload %q expired or aborted: %w", uploadID, err)
-			}
-
 			return nil, mapErr(err)
 		}
 
