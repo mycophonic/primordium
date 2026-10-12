@@ -41,8 +41,9 @@ import (
 
 // MultipartOptions controls the behaviour of Upload.
 type MultipartOptions struct {
-	// PartSize is the number of bytes per part (default 100 MiB, minimum 5 MiB).
-	// All parts except the last will be exactly this size.
+	// PartSize is the number of bytes per part: 100 MiB when zero, and never
+	// below R2's minimum of 5 MiB. All parts except the last are exactly this
+	// size; an object takes at most 10,000 parts.
 	PartSize int64
 
 	// StateDir is the directory where upload-state JSON files are persisted
@@ -478,7 +479,10 @@ func completedSet(parts []completedPart) map[int32]bool {
 }
 
 func normaliseOptions(opts MultipartOptions) MultipartOptions {
-	if opts.PartSize < minPartSize {
+	switch {
+	case opts.PartSize <= 0:
+		opts.PartSize = defaultPartSize
+	case opts.PartSize < minPartSize:
 		opts.PartSize = minPartSize
 	}
 
