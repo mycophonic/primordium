@@ -31,8 +31,8 @@ import (
 	"testing"
 
 	"github.com/forkcloser/xz"
+	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
-	"github.com/klauspost/pgzip"
 	"github.com/pierrec/lz4/v4"
 	"gotest.tools/v3/assert"
 
@@ -64,7 +64,7 @@ func encoders() map[string]encoder {
 
 			var buf bytes.Buffer
 
-			write(tb, pgzip.NewWriter(&buf), payload)
+			write(tb, gzip.NewWriter(&buf), payload)
 
 			return buf.Bytes()
 		},
@@ -201,12 +201,6 @@ func TestTruncatedStreams(t *testing.T) {
 		for _, cut := range []string{"middle", "trailer"} {
 			t.Run(name+"/"+cut, func(t *testing.T) {
 				t.Parallel()
-
-				if name == "gzip" && cut == "trailer" {
-					t.Skip(
-						"pgzip reads a stream whose trailer is wholly missing as complete; upstream defect, decision pending",
-					)
-				}
 
 				whole := encode(t, payload(256*bytesize.KiB+1))
 

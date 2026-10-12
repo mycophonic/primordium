@@ -12,7 +12,6 @@ require (
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/klauspost/compress v1.20.1
-	github.com/klauspost/pgzip v1.2.7
 	github.com/lmittmann/tint v1.2.1
 	github.com/mattn/go-isatty v0.0.24
 	github.com/pierrec/lz4/v4 v4.1.33
