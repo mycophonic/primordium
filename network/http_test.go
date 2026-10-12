@@ -130,6 +130,29 @@ func TestRoundTripper_LogsRetryableStatus(t *testing.T) {
 	}
 }
 
+// TestRoundTripper_TransportError: a request that cannot be sent is the
+// transport's error, not a response.
+func TestRoundTripper_TransportError(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	url := server.URL
+	server.Close()
+
+	client := &http.Client{Transport: network.NewTransport()}
+
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
+
+	resp, err := client.Do(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	assert.Assert(t, err != nil, "a closed server answered")
+}
+
 func TestNewTransport_ClonesIndependently(t *testing.T) {
 	t.Parallel()
 

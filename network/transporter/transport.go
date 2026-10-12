@@ -194,7 +194,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			}
 
 			if err := resetBody(req); err != nil {
-				return nil, fmt.Errorf("%w: %w", fault.ErrNetworkCommunication, err)
+				return nil, fmt.Errorf("%w: %w", err, lastErr)
 			}
 		}
 
@@ -233,8 +233,9 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			"url", req.URL.String(),
 		)
 
+		// 401 is not among them: this client attaches no credential and has no
+		// way to change one between attempts, so a retry asks the same question.
 		retryable := resp.StatusCode == http.StatusTooManyRequests ||
-			resp.StatusCode == http.StatusUnauthorized ||
 			resp.StatusCode >= http.StatusInternalServerError
 		if !retryable {
 			if elapsed > slowRequestThreshold {
@@ -298,9 +299,10 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 	return nil, lastErr
 }
 
-// refill sends a token into the limiter channel at the configured rate.
+// refill sends a token into the limiter channel at the configured rate. A
+// rate past one per nanosecond is one per nanosecond: a ticker refuses zero.
 func (t *retryTransport) refill(ctx context.Context, maxPerSecond int) {
-	interval := time.Second / time.Duration(maxPerSecond)
+	interval := max(time.Second/time.Duration(maxPerSecond), time.Nanosecond)
 	ticker := time.NewTicker(interval)
 
 	defer ticker.Stop()
@@ -337,10 +339,18 @@ func (t *retryTransport) backoffDuration(attempt int) time.Duration {
 	return time.Duration(float64(backoff) * jitter)
 }
 
-// resetBody rewinds the request body for retry. No-op for bodyless requests (GET).
+// resetBody rewinds the request body for a retry. A request without a body
+// needs nothing. One with a body the client cannot replay (no GetBody: a
+// stream, a pipe, a file) cannot be retried: the first attempt consumed it,
+// and a retry would send an empty body and report whatever the server made
+// of that as success.
 func resetBody(req *http.Request) error {
-	if req.Body == nil || req.GetBody == nil {
+	if req.Body == nil || req.Body == http.NoBody {
 		return nil
+	}
+
+	if req.GetBody == nil {
+		return fmt.Errorf("%w: request body cannot be replayed for a retry", fault.ErrInvalidArgument)
 	}
 
 	body, err := req.GetBody()

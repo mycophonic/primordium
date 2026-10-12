@@ -43,8 +43,8 @@ var (
 		"hmac-sha2-512-etm@openssh.com",
 	}
 
-	// defaultSSHHostKeyAlgorithms provides the list of algorithms we support for host keys.
-	// Note: this WILL break on ancient / misconfigured systems.
+	// defaultSSHHostKeyAlgorithms: ed25519 only, so a host with an RSA or
+	// ECDSA key alone is refused, by design.
 	defaultSSHHostKeyAlgorithms = []string{
 		ssh.KeyAlgoED25519,
 	}
@@ -56,11 +56,9 @@ var (
 	// considering the connection dead.
 	defaultSSHKeepaliveTimeout = 15 * time.Second
 
-	// defaultIdentityFiles defines the well-known private key we might consider.
+	// defaultIdentityFiles are the private keys a client may offer: ed25519,
+	// in software or on a security key, matching the host key policy.
 	defaultIdentityFiles = []string{
-		// "~/.ssh/id_rsa",
-		// "~/.ssh/id_ecdsa",
-		// "~/.ssh/id_ecdsa_sk",
 		"~/.ssh/id_ed25519",
 		"~/.ssh/id_ed25519_sk",
 	}
