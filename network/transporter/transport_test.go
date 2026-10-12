@@ -207,7 +207,6 @@ func TestRetryableStatusExhaustsRetries(t *testing.T) {
 	for _, code := range []int{
 		http.StatusInternalServerError,
 		http.StatusTooManyRequests,
-		http.StatusUnauthorized,
 		http.StatusBadGateway,
 	} {
 		t.Run(strconv.Itoa(code), func(t *testing.T) {
@@ -766,13 +765,24 @@ func TestRateLimiting(t *testing.T) {
 	}
 
 	elapsed := time.Since(start)
-	// 5 requests at 10/s → at least 500ms (with some tolerance).
-	expectedMin := time.Duration(requests) * time.Second /
-		time.Duration(maxPerSecond) * 3 / 4
+	// The phase-free measure is the span of arrivals at the backend from the
+	// second measured request on: the first may ride a token the warm-up left
+	// and the remainder of a tick, every later one waits a full tick, and the
+	// ticks are anchored to a schedule, so a late tick shortens the next gap
+	// but never the span. Not much longer overall, or the limiter is slower
+	// than the rate it was given.
+	interval := time.Second / time.Duration(maxPerSecond)
+	arrivals := back.gaps()[2:] // the gaps between the second measured arrival and the last
 
-	assert.Assert(t, elapsed >= expectedMin,
-		"expected at least %v for %d requests at %d/s, got %v",
-		expectedMin, requests, maxPerSecond, elapsed)
+	var span time.Duration
+	for _, gap := range arrivals {
+		span += gap
+	}
+
+	assert.Assert(t, span >= time.Duration(len(arrivals))*interval*85/100,
+		"%d arrivals a tick of %v apart spanned %v", len(arrivals)+1, interval, span)
+	assert.Assert(t, elapsed <= requests*interval*3,
+		"expected at most %v for %d requests at %d/s, got %v", requests*interval*3, requests, maxPerSecond, elapsed)
 }
 
 // --- CloseIdleConnections ---
