@@ -20,7 +20,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/klauspost/pgzip"
+	"github.com/klauspost/compress/gzip"
 
 	"github.com/mycophonic/primordium/compress"
 	"github.com/mycophonic/primordium/fault"
@@ -31,12 +31,12 @@ func init() {
 	compress.Register("gzip", []byte{0x1F, 0x8B}, New)
 }
 
-// New returns a gzip decompressed reader.
+// New returns a gzip decompressed reader, decoding ahead of its consumer.
 func New(reader io.Reader) (io.ReadCloser, error) {
-	gr, err := pgzip.NewReader(reader)
+	decoder, err := gzip.NewReader(reader)
 	if err != nil {
 		return nil, fmt.Errorf("%w: gzip decoder: %w", fault.ErrReadFailure, err)
 	}
 
-	return gr, nil
+	return compress.ReadAhead(decoder), nil
 }

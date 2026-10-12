@@ -28,7 +28,7 @@ func init() {
 	compress.Register("bzip2", []byte{0x42, 0x5A, 0x68}, New)
 }
 
-// New returns a bzip2 decompressed reader.
+// New returns a bzip2 decompressed reader, decoding ahead of its consumer.
 func New(reader io.Reader) (io.ReadCloser, error) {
-	return io.NopCloser(gobzip2.NewReader(reader)), nil
+	return compress.ReadAhead(io.NopCloser(gobzip2.NewReader(reader))), nil
 }
