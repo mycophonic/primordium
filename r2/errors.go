@@ -17,6 +17,7 @@
 package r2
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -30,7 +31,16 @@ import (
 
 // mapErr classifies an AWS SDK error into an appropriate fault sentinel.
 func mapErr(err error) error {
-	// Context cancellation / deadline exceeded.
+	// A context that ended: the SDK wraps the context's own error in its
+	// operation error, and only sometimes in a CanceledError.
+	if errors.Is(err, context.Canceled) {
+		return fmt.Errorf("%w: %w", fault.ErrCancelled, err)
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %w", fault.ErrTimeout, err)
+	}
+
 	if _, ok := errors.AsType[*smithy.CanceledError](err); ok {
 		return fmt.Errorf("%w: %w", fault.ErrCancelled, err)
 	}

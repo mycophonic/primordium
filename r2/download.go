@@ -37,7 +37,7 @@ import (
 // Temporary files are kept in tempDir/key during the download.
 // On successful completion both the data file and its ETag sidecar
 // are moved from tempDir to dataDir.
-// Both directories must reside on the same filesystem (os.Rename is used).
+// Both directories must reside on the same filesystem: the move is a rename.
 func (cli *Client) Download(ctx context.Context, objectKey, tempDir, dataDir string) error {
 	if err := validateObjectKey(objectKey); err != nil {
 		return err
@@ -204,11 +204,11 @@ func (cli *Client) fetchInto(ctx context.Context, objectKey, tempFile string, of
 }
 
 func (paths downloadPaths) moveToData() error {
-	if err := os.Rename(paths.tempFile, paths.dataFile); err != nil {
+	if err := xos.Rename(paths.tempFile, paths.dataFile); err != nil {
 		return fmt.Errorf("move data file: %w", err)
 	}
 
-	if err := os.Rename(paths.tempETag, paths.dataETag); err != nil {
+	if err := xos.Rename(paths.tempETag, paths.dataETag); err != nil {
 		return fmt.Errorf("move etag file: %w", err)
 	}
 

@@ -41,8 +41,9 @@ import (
 
 // MultipartOptions controls the behaviour of Upload.
 type MultipartOptions struct {
-	// PartSize is the number of bytes per part (default 100 MiB, minimum 5 MiB).
-	// All parts except the last will be exactly this size.
+	// PartSize is the number of bytes per part: 100 MiB when zero, and never
+	// below R2's minimum of 5 MiB. All parts except the last are exactly this
+	// size; an object takes at most 10,000 parts.
 	PartSize int64
 
 	// StateDir is the directory where upload-state JSON files are persisted
@@ -255,15 +256,18 @@ func (cli *Client) loadOrCreateUpload(
 			return cli.createUpload(ctx, objectKey, totalSize, opts, statePath)
 		}
 
-		// Verify the upload still exists on R2.
+		// Verify the upload still exists on R2: one that expired or was
+		// aborted starts fresh; any other failure to ask is returned, with the
+		// state kept, so a transient error does not cost the parts uploaded.
 		parts, listErr := cli.listParts(ctx, objectKey, state.UploadID)
-		if listErr != nil {
-			// Upload expired or was aborted — start fresh.
-			cli.abortUpload(ctx, objectKey, state.UploadID)
-
+		if errors.Is(listErr, fault.ErrNotFound) {
 			_ = os.Remove(statePath)
 
 			return cli.createUpload(ctx, objectKey, totalSize, opts, statePath)
+		}
+
+		if listErr != nil {
+			return nil, listErr
 		}
 
 		// Reconcile: trust R2 as source of truth.
@@ -392,10 +396,6 @@ func (cli *Client) listParts(ctx context.Context, key, uploadID string) ([]compl
 
 		resp, err := cli.under.ListParts(ctx, input)
 		if err != nil {
-			if _, ok := errors.AsType[*types.NoSuchUpload](err); ok {
-				return nil, fmt.Errorf("upload %q expired or aborted: %w", uploadID, err)
-			}
-
 			return nil, mapErr(err)
 		}
 
@@ -455,14 +455,8 @@ func saveState(statePath string, state *uploadState) error {
 		return fmt.Errorf("encode upload state: %w", err)
 	}
 
-	tmpPath := statePath + ".tmp"
-
-	if err := filesystem.WriteFile(tmpPath, data, filesystem.FilePermissionsPrivate); err != nil {
-		return fmt.Errorf("write temp state: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, statePath); err != nil {
-		return fmt.Errorf("rename state: %w", err)
+	if err := filesystem.WriteFile(statePath, data, filesystem.FilePermissionsPrivate); err != nil {
+		return fmt.Errorf("write state: %w", err)
 	}
 
 	return nil
@@ -478,7 +472,10 @@ func completedSet(parts []completedPart) map[int32]bool {
 }
 
 func normaliseOptions(opts MultipartOptions) MultipartOptions {
-	if opts.PartSize < minPartSize {
+	switch {
+	case opts.PartSize <= 0:
+		opts.PartSize = defaultPartSize
+	case opts.PartSize < minPartSize:
 		opts.PartSize = minPartSize
 	}
 
