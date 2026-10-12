@@ -455,14 +455,8 @@ func saveState(statePath string, state *uploadState) error {
 		return fmt.Errorf("encode upload state: %w", err)
 	}
 
-	tmpPath := statePath + ".tmp"
-
-	if err := filesystem.WriteFile(tmpPath, data, filesystem.FilePermissionsPrivate); err != nil {
-		return fmt.Errorf("write temp state: %w", err)
-	}
-
-	if err := os.Rename(tmpPath, statePath); err != nil {
-		return fmt.Errorf("rename state: %w", err)
+	if err := filesystem.WriteFile(statePath, data, filesystem.FilePermissionsPrivate); err != nil {
+		return fmt.Errorf("write state: %w", err)
 	}
 
 	return nil
