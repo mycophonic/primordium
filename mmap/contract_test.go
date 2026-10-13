@@ -38,19 +38,19 @@ import (
 )
 
 // fileOf creates a file of size bytes, zero-filled, open read-write.
-func fileOf(t *testing.T, size int) *os.File {
-	t.Helper()
+func fileOf(tb testing.TB, size int) *os.File {
+	tb.Helper()
 
-	file, err := xos.OpenFile(filepath.Join(t.TempDir(), "mapped"), os.O_CREATE|os.O_RDWR, 0o644)
+	file, err := xos.OpenFile(filepath.Join(tb.TempDir(), "mapped"), os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
 	if err = file.Truncate(int64(size)); err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 
-	t.Cleanup(func() { _ = file.Close() })
+	tb.Cleanup(func() { _ = file.Close() })
 
 	return file
 }
