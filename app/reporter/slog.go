@@ -26,30 +26,20 @@ import (
 	"github.com/getsentry/sentry-go"
 )
 
-// sentryHandler decorates an inner slog.Handler, mirroring every record to Sentry
-// on top of writing it through inner (the console handler). Records at ERROR level
-// and above are captured as Sentry events (issues); everything below is recorded as
-// a breadcrumb — buffered context Sentry attaches to the next event, so the log
-// trail that led to an error travels with it. inner always runs, so console output
-// is unchanged; nothing is swallowed.
-//
-// This is the errors→issues + logs→breadcrumbs pattern: it keeps issue volume low
-// (only real errors become alertable events) while preserving the surrounding log
-// context for free. It does NOT use Sentry's separate Logs product.
+// sentryHandler mirrors every record to Sentry and passes it to inner, the
+// console handler: ERROR and above as events, the rest as breadcrumbs that
+// travel with the next event. inner always runs; nothing is swallowed.
 type sentryHandler struct {
 	inner  slog.Handler
 	attrs  []slog.Attr
 	groups []string
 }
 
-// newSentryHandler wraps inner so slog output is mirrored to Sentry. Initialize
-// installs it as the process default after sentry.Init (the client must exist first).
 func newSentryHandler(inner slog.Handler) slog.Handler {
 	return &sentryHandler{inner: inner}
 }
 
-// Enabled mirrors the inner handler, so Sentry sees exactly the records the console
-// shows — one LOG_LEVEL governs both; Handle routes by level.
+// Enabled is inner's: one level governs the console and Sentry.
 func (h *sentryHandler) Enabled(ctx context.Context, level slog.Level) bool {
 	return h.inner.Enabled(ctx, level)
 }
@@ -97,10 +87,9 @@ func (h *sentryHandler) WithGroup(name string) slog.Handler {
 	}
 }
 
-// collect flattens the handler's accumulated attrs plus the record's own into a
-// Sentry data map (open groups become dotted key prefixes) and returns the first
-// error-typed value it finds, so an ERROR record logged with an `err` attribute is
-// captured as a real exception (grouped, stacktraced) rather than a bare message.
+// collect flattens the handler's attrs and the record's into one map, open
+// groups as dotted prefixes, and returns the first error-typed value: that
+// error is what Sentry groups and stack-traces, not the message.
 func (h *sentryHandler) collect(rec slog.Record) (map[string]any, error) {
 	prefix := ""
 	if len(h.groups) > 0 {
@@ -135,9 +124,8 @@ func (h *sentryHandler) collect(rec slog.Record) (map[string]any, error) {
 	return data, errVal
 }
 
-// captureErrorEvent sends an ERROR-level record to Sentry as an event, scoped with the
-// record's attributes under a "log" context. A captured error value becomes a
-// proper exception; otherwise the message is captured.
+// captureErrorEvent sends the record as an event with its attributes under
+// the "log" context: the error value when there is one, else the message.
 func captureErrorEvent(rec slog.Record, data map[string]any, err error) {
 	sentry.WithScope(func(scope *sentry.Scope) {
 		scope.SetLevel(sentryLevel(rec.Level))
