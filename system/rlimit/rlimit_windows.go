@@ -1,5 +1,3 @@
-//go:build windows
-
 /*
    Copyright Mycophonic.
 
@@ -18,5 +16,6 @@
 
 package rlimit
 
-// RaiseNoFileLimit is a no-op on Windows.
+// RaiseNoFileLimit does nothing: Windows has no per-process open-file limit
+// to raise or to inherit.
 func RaiseNoFileLimit() {}
