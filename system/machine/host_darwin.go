@@ -66,7 +66,7 @@ func Host() (Info, error) {
 		RAMAvailable: ramAvail,
 		CPUCores:     cores,
 		CPUModel:     cpuModel,
-		Tier:         classify(cores, ram),
+		Tier:         Classify(cores, ram),
 	}, nil
 }
 
