@@ -24,6 +24,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -1677,10 +1678,9 @@ func TestStaleWriterRecovery(t *testing.T) {
 		t.Fatalf("close: %v", err)
 	}
 
-	// Simulate a stale writer: set write flag + a dead PID in the lock word.
-	// PID 2 is typically a kernel thread (not a user process), so
-	// isProcessAlive(2) returns false for non-root users on most systems.
-	// Use a high PID that is almost certainly not alive.
+	// A stale writer: the write flag and a PID that is not alive. The lock
+	// word is the header's one native-endian field, read through atomics as
+	// the CPU lays it out; big-endian bytes would carry no write flag here.
 	deadPID := uint64(4_000_000)
 	lockWord := (uint64(1) << 63) | (deadPID << 32)
 
@@ -1691,7 +1691,7 @@ func TestStaleWriterRecovery(t *testing.T) {
 
 	var buf [8]byte
 
-	binary.BigEndian.PutUint64(buf[:], lockWord)
+	binary.NativeEndian.PutUint64(buf[:], lockWord)
 
 	if _, err = dataFile.WriteAt(buf[:], 40); err != nil {
 		t.Fatalf("write lock word: %v", err)
@@ -1790,7 +1790,7 @@ func TestStaleReaderRecovery(t *testing.T) {
 
 	var buf [8]byte
 
-	binary.BigEndian.PutUint64(buf[:], 1) // reader count = 1, no write flag
+	binary.NativeEndian.PutUint64(buf[:], 1) // reader count = 1, no write flag; native, as the atomics read it
 
 	if _, err = dataFile.WriteAt(buf[:], 40); err != nil {
 		t.Fatalf("write lock word: %v", err)
@@ -1883,5 +1883,89 @@ func TestNewCreatesParentDirectory(t *testing.T) {
 
 	if rec.Timestamp != 100 {
 		t.Fatalf("timestamp = %d, want 100", rec.Timestamp)
+	}
+}
+
+// TestLiveWriterIsNotTakenOver: a writer that exists but may not be
+// signalled (PID 1 on Unix, the System process on Windows) is alive, and a
+// reader waits for it instead of taking its lock; the lock word cleared
+// through the file releases the reader.
+func TestLiveWriterIsNotTakenOver(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "test.idx")
+
+	idx, err := index.New(path, nil)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+
+	if err = idx.Put(1, testValue(1), 100); err != nil {
+		t.Fatalf("put: %v", err)
+	}
+
+	if err = idx.Close(); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+
+	livePID := uint64(1)
+	if runtime.GOOS == "windows" {
+		livePID = 4
+	}
+
+	writeLockWord := func(word uint64) {
+		t.Helper()
+
+		dataFile, openErr := xos.OpenFile(path, os.O_RDWR, 0)
+		if openErr != nil {
+			t.Fatalf("open data file: %v", openErr)
+		}
+
+		var buf [8]byte
+
+		binary.NativeEndian.PutUint64(buf[:], word)
+
+		if _, writeErr := dataFile.WriteAt(buf[:], 40); writeErr != nil {
+			t.Fatalf("write lock word: %v", writeErr)
+		}
+
+		if closeErr := dataFile.Close(); closeErr != nil {
+			t.Fatalf("close data file: %v", closeErr)
+		}
+	}
+
+	writeLockWord((uint64(1) << 63) | (livePID << 32))
+
+	idx2, err := index.New(path, nil)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+
+	defer func() { assert.Check(t, idx2.Close()) }()
+
+	done := make(chan error, 1)
+
+	go func() {
+		_, _, err := idx2.Get(1)
+		done <- err
+	}()
+
+	// Past the stale-PID threshold (a thousand spins, a millisecond each
+	// after the first hundred) the reader has checked the PID and kept waiting.
+	select {
+	case err := <-done:
+		t.Fatalf("Get returned (%v) with a live writer holding the lock", err)
+	case <-time.After(2 * time.Second):
+	}
+
+	writeLockWord(0)
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("get after the writer released: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("Get did not return after the lock word was cleared")
 	}
 }

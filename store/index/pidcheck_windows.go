@@ -18,13 +18,18 @@
 
 package index
 
-import "syscall"
+import (
+	"errors"
+	"syscall"
+)
 
-// processQueryLimitedInformation is the minimum access right needed to
-// query whether a process exists. Not defined in the syscall package.
+// processQueryLimitedInformation is the least access that answers whether a
+// process exists; the syscall package does not define it.
 const processQueryLimitedInformation = 0x1000
 
-// isProcessAlive reports whether a process with the given PID exists.
+// isProcessAlive reports whether pid exists. Access denied means the
+// process is there and not ours to open, which is alive: a live writer
+// taken for dead hands its lock to a second writer.
 func isProcessAlive(pid int) bool {
 	handle, err := syscall.OpenProcess(
 		processQueryLimitedInformation,
@@ -32,10 +37,10 @@ func isProcessAlive(pid int) bool {
 		uint32(pid), // #nosec G115 -- PIDs are non-negative
 	)
 	if err != nil {
-		return false
+		return errors.Is(err, syscall.ERROR_ACCESS_DENIED)
 	}
 
-	_ = syscall.CloseHandle(handle) // best-effort close of a probe handle
+	_ = syscall.CloseHandle(handle) // a probe handle: a close error carries nothing
 
 	return true
 }
