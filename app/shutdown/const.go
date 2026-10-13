@@ -18,4 +18,6 @@ package shutdown
 
 import "time"
 
+// shutdownTimeout bounds the handlers after a signal; a handler that hangs
+// would otherwise hold a process the operator asked to stop.
 const shutdownTimeout = 10 * time.Second

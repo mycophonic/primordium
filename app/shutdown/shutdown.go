@@ -28,75 +28,56 @@ import (
 	"time"
 )
 
-//nolint:gochecknoglobals // Shutdown state.
+//nolint:gochecknoglobals // the process's one shutdown state
 var (
-	shutdownHandlers []func()
-	shutdownMu       sync.Mutex
-	shutdownOnce     sync.Once
-	setDefaultsOnce  sync.Once
+	handlers  []func()
+	cancels   []context.CancelFunc
+	mu        sync.Mutex
+	once      sync.Once
+	listening sync.Once
 )
 
-// SetDefaults registers signal handlers, exit with timeout.
-// Safe to call multiple times; only the first call has effect.
+// SetDefaults returns a context cancelled by the first shutdown signal. After
+// the cancellation the handlers run, with ten seconds to finish, and the
+// process exits with 128 plus the signal's number, or 1 when they run out of
+// time. The listener is installed once; every context handed out is cancelled.
 func SetDefaults(parent context.Context) context.Context {
 	ctx, cancel := context.WithCancel(parent)
 
-	setDefaultsOnce.Do(func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, shutdownSignals...)
+	mu.Lock()
 
-		go func() {
-			sig := <-sigChan
-			signal.Stop(sigChan)
-			cancel()
+	cancels = append(cancels, cancel)
+	mu.Unlock()
 
-			// Run shutdown handlers with timeout.
-			done := make(chan struct{})
+	listening.Do(func() {
+		signals := make(chan os.Signal, 1)
+		signal.Notify(signals, shutdownSignals...)
 
-			go func() {
-				Shutdown()
-				close(done)
-			}()
-
-			select {
-			case <-done:
-				// Graceful shutdown completed, use conventional signal exit code (128 + signal number).
-				if syssig, ok := sig.(syscall.Signal); ok {
-					//nolint:mnd // 128 + signal is conventional.
-					os.Exit(128 + int(syssig)) //revive:disable-line:deep-exit
-				}
-
-				os.Exit(0) //revive:disable-line:deep-exit
-			case <-time.After(shutdownTimeout):
-				slog.ErrorContext(ctx, "shutdown timed out, some operations may not have completed cleanly")
-				os.Exit(1) //revive:disable-line:deep-exit
-			}
-		}()
+		go exitOnSignal(signals)
 	})
 
 	return ctx
 }
 
-// Register adds a handler to be run on shutdown.
+// Register adds a handler to run on shutdown, after those registered before it.
 func Register(handler func()) {
-	shutdownMu.Lock()
+	mu.Lock()
 
-	shutdownHandlers = append(shutdownHandlers, handler)
-
-	shutdownMu.Unlock()
+	handlers = append(handlers, handler)
+	mu.Unlock()
 }
 
-// Shutdown executes handlers in reverse order, exactly once.
+// Shutdown runs the handlers in reverse order of registration, once; a later
+// call returns when the first has finished. A handler must not call it: it
+// would wait for itself.
 func Shutdown() {
-	shutdownOnce.Do(func() {
-		shutdownMu.Lock()
+	once.Do(func() {
+		mu.Lock()
+		registered := slices.Clone(handlers)
+		mu.Unlock()
 
-		handlers := make([]func(), len(shutdownHandlers))
-		copy(handlers, shutdownHandlers)
-		shutdownMu.Unlock()
-
-		for _, v := range slices.Backward(handlers) {
-			v()
+		for _, handler := range slices.Backward(registered) {
+			handler()
 		}
 	})
 }
@@ -105,8 +86,8 @@ func Shutdown() {
 // it runs Shutdown and exits with code 1. On normal return, it runs
 // Shutdown and exits with code 0.
 //
-// Shutdown is called outside the recovery scope — if a handler panics,
-// it crashes with a stack trace rather than being silently swallowed.
+// Shutdown is called outside the recovery scope: a handler that panics
+// crashes with a stack trace rather than being silently swallowed.
 //
 // Run never returns.
 func Run(ctx context.Context, function func(context.Context) error) {
@@ -146,4 +127,38 @@ func Go(function func()) {
 
 		function()
 	}()
+}
+
+// exitOnSignal waits for the first signal, cancels every context, runs the
+// handlers under the deadline and exits. A second signal during the handlers
+// gets the runtime's default treatment, since the listener has stopped.
+func exitOnSignal(signals chan os.Signal) {
+	sig := <-signals
+	signal.Stop(signals)
+
+	mu.Lock()
+	for _, cancel := range cancels {
+		cancel()
+	}
+	mu.Unlock()
+
+	done := make(chan struct{})
+
+	go func() {
+		Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		if syssig, ok := sig.(syscall.Signal); ok {
+			//nolint:mnd // 128 + signal is the shell convention
+			os.Exit(128 + int(syssig)) //revive:disable-line:deep-exit
+		}
+
+		os.Exit(0) //revive:disable-line:deep-exit
+	case <-time.After(shutdownTimeout):
+		slog.Error("shutdown timed out, some operations may not have completed cleanly")
+		os.Exit(1) //revive:disable-line:deep-exit
+	}
 }
