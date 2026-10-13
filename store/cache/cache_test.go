@@ -21,6 +21,9 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"sync"
 	"testing"
 	"time"
@@ -1948,5 +1951,120 @@ func TestCache_AcquireFilePinSurvivesGC(t *testing.T) {
 
 	if _, err := xos.Stat(pin.Path); err == nil {
 		t.Fatal("released blob survived GC despite being over quota")
+	}
+}
+
+// commit writes content into the cache and drains its reader, so the entry
+// is committed and unheld.
+func commit(t *testing.T, blobCache *cache.Cache, content []byte) {
+	t.Helper()
+
+	reader, writer, err := blobCache.Acquire(computeDigest(content))
+	if err != nil {
+		t.Fatalf("Acquire() error: %v", err)
+	}
+
+	if writer == nil {
+		t.Fatal("Acquire(): no writer for new content")
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Go(func() {
+		_, _ = io.ReadAll(reader)
+		_ = reader.Close()
+	})
+
+	_, _ = writer.Write(content)
+
+	if err = writer.Close(); err != nil {
+		t.Fatalf("writer.Close() error: %v", err)
+	}
+
+	wg.Wait()
+}
+
+// ageDataFile sets the modification time of the data file holding content
+// to when, found by its bytes so the test needs no layout.
+func ageDataFile(t *testing.T, root string, content []byte, when time.Time) {
+	t.Helper()
+
+	aged := false
+
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Name() != "data" {
+			return err
+		}
+
+		data, readErr := os.ReadFile(path)
+		if readErr != nil {
+			return readErr
+		}
+
+		if bytes.Equal(data, content) {
+			aged = true
+
+			return os.Chtimes(path, when, when)
+		}
+
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !aged {
+		t.Fatal("the content's data file was not found")
+	}
+}
+
+// TestCache_GC_EvictsOldestFirst: over quota by one entry, the oldest
+// committed entry goes and the newer one stays, whatever their names order.
+func TestCache_GC_EvictsOldestFirst(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	blobCache := cache.New(root, 150)
+
+	older := bytes.Repeat([]byte{'o'}, 100)
+	newer := bytes.Repeat([]byte{'n'}, 100)
+
+	commit(t, blobCache, older)
+	commit(t, blobCache, newer)
+	ageDataFile(t, root, older, time.Now().Add(-2*time.Hour))
+	ageDataFile(t, root, newer, time.Now().Add(-time.Hour))
+
+	stats, err := blobCache.GarbageCollect()
+	if err != nil {
+		t.Fatalf("GarbageCollect() error: %v", err)
+	}
+
+	if stats.EntriesFreed != 1 || stats.BytesFreed != 100 || stats.Remaining != 100 {
+		t.Fatalf("stats %+v, want one entry of 100 bytes freed, 100 remaining", stats)
+	}
+
+	if blobCache.Exists(computeDigest(older)) {
+		t.Error("the older entry survived")
+	}
+
+	if !blobCache.Exists(computeDigest(newer)) {
+		t.Error("the newer entry was evicted")
+	}
+
+	// The same two the other way round: age, not name, decides.
+	root = t.TempDir()
+	blobCache = cache.New(root, 150)
+
+	commit(t, blobCache, older)
+	commit(t, blobCache, newer)
+	ageDataFile(t, root, newer, time.Now().Add(-2*time.Hour))
+	ageDataFile(t, root, older, time.Now().Add(-time.Hour))
+
+	if _, err = blobCache.GarbageCollect(); err != nil {
+		t.Fatalf("GarbageCollect() error: %v", err)
+	}
+
+	if !blobCache.Exists(computeDigest(older)) || blobCache.Exists(computeDigest(newer)) {
+		t.Error("the entry aged older did not go first")
 	}
 }
