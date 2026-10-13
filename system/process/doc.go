@@ -14,5 +14,6 @@
    limitations under the License.
 */
 
-// Package process provides base system utilities related to process management.
+// Package process stops a child process: a request to exit, a bounded wait,
+// then a kill.
 package process
