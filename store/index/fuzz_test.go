@@ -33,11 +33,15 @@ func FuzzJournal(f *testing.F) {
 	f.Add([]byte("short"))
 	f.Add(make([]byte, 24))
 	f.Add(append(bytes.Repeat([]byte{0xff}, 16), 0, 65, 0, 0, 0, 0, 0, 0))
+	// A capacity of zero, then a count whose product with the record width
+	// wraps to the bytes present: both the header's word, neither real.
+	f.Add(append(make([]byte, 16), 0, 65, 0, 0, 0, 0, 0, 0))
+	f.Add(append(append(bytes.Repeat([]byte{0x30}, 9), 0, 0, 0, 0, 0, 0, 0), bytes.Repeat([]byte{0x30}, 8)...))
 
 	f.Fuzz(func(t *testing.T, journal []byte) {
 		path := filepath.Join(t.TempDir(), "test.idx")
 
-		idx, err := index.New(path, &index.Options{InitialCap: 16})
+		idx, err := index.New(path, &index.Options{InitialCap: 16, MaxCap: 1 << 20})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -54,7 +58,9 @@ func FuzzJournal(f *testing.F) {
 			t.Fatal(err)
 		}
 
-		idx, err = index.New(path, &index.Options{InitialCap: 16})
+		// MaxCap bounds the capacity a journal may name, so an input that passes
+		// the checks does not build a table of billions of buckets.
+		idx, err = index.New(path, &index.Options{InitialCap: 16, MaxCap: 1 << 20})
 		if err != nil {
 			// A journal that parses but describes another index is refused;
 			// that is a clean failure, not a corruption.
