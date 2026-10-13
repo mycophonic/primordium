@@ -89,6 +89,11 @@ type Index struct {
 	lockDataFile *os.File
 	localReaders atomic.Int32 // per-process reader goroutine count
 	readerSlot   atomic.Int32 // claimed PID slot index, -1 if none
+	// slotMu makes a reader-count transition and its slot change one step:
+	// without it a goroutine leaving at 1→0 clears the slot a goroutine
+	// arriving at 0→1 has just claimed, and that reader is invisible to a
+	// writer's stale-reader check.
+	slotMu sync.Mutex
 }
 
 // Record represents a single entry in the index.
@@ -1119,11 +1124,15 @@ func (idx *Index) allReaderPIDsDead() bool {
 func (idx *Index) rlock() {
 	idx.mu.RLock()
 
-	// Track per-process reader count. On the 0→1 transition, claim a PID
-	// slot in the lock file so writers can detect stale readers.
+	// The 0→1 transition claims a PID slot, so writers can tell this process
+	// has readers.
+	idx.slotMu.Lock()
+
 	if idx.localReaders.Add(1) == 1 {
 		idx.claimReaderSlot()
 	}
+
+	idx.slotMu.Unlock()
 
 	ptr := idx.lockWordPtr()
 
@@ -1161,11 +1170,13 @@ func (idx *Index) rlock() {
 func (idx *Index) runlock() {
 	atomic.AddUint64(idx.lockWordPtr(), ^uint64(0))
 
-	// Track per-process reader count. On the 1→0 transition, clear our
-	// PID slot so writers know this process has no active readers.
+	idx.slotMu.Lock()
+
 	if idx.localReaders.Add(-1) == 0 {
 		idx.clearReaderSlot()
 	}
+
+	idx.slotMu.Unlock()
 
 	idx.mu.RUnlock()
 }
