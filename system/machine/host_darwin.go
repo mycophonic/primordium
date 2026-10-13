@@ -26,7 +26,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"golang.org/x/sys/unix"
 
@@ -38,8 +37,8 @@ import (
 func Host() (Info, error) {
 	home := dirs.HomeDir()
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(home, &stat); err != nil {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(home, &stat); err != nil {
 		return Info{}, fmt.Errorf("%w: statfs: %w", fault.ErrSystemFailure, err)
 	}
 
@@ -53,7 +52,7 @@ func Host() (Info, error) {
 		return Info{}, err
 	}
 
-	cpuModel, err := syscall.Sysctl("machdep.cpu.brand_string")
+	cpuModel, err := unix.Sysctl("machdep.cpu.brand_string")
 	if err != nil {
 		return Info{}, fmt.Errorf("%w: sysctl cpu brand: %w", fault.ErrSystemFailure, err)
 	}
