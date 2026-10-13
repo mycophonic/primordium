@@ -14,7 +14,6 @@
    limitations under the License.
 */
 
-// Package term provides thin, cross-platform helpers for interacting with
-// terminals. It wraps mattn/go-isatty so callers get consistent behavior,
-// including detection of Cygwin/MSYS2 pseudo-terminals on Windows.
+// Package term answers whether a file descriptor is a terminal, counting the
+// Cygwin and MSYS2 pseudo-terminals that Windows reports as pipes.
 package term

@@ -18,14 +18,9 @@ package term
 
 import "github.com/mattn/go-isatty"
 
-// IsTerminal reports whether the file descriptor is a terminal.
-//
-// Beyond the ordinary termios/console check, it also treats a Cygwin/MSYS2
-// pseudo-terminal (Git Bash, mintty) as a terminal — which plain
-// isatty.IsTerminal and golang.org/x/term.IsTerminal both miss on Windows,
-// where such a pty is a named pipe rather than a console. On every non-Windows
-// platform isatty.IsCygwinTerminal is a constant false, so there this reduces
-// to the ordinary terminal check.
+// IsTerminal reports whether fd is a terminal. On Windows a Cygwin or MSYS2
+// pseudo-terminal (Git Bash, mintty) is a named pipe, which the console check
+// alone misses; it is a terminal here.
 func IsTerminal(fd uintptr) bool {
 	return isatty.IsTerminal(fd) || isatty.IsCygwinTerminal(fd)
 }
