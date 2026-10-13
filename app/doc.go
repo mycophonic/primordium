@@ -14,5 +14,7 @@
    limitations under the License.
 */
 
-// Package app provides application lifecycle helpers (initialization for filesystem, network, logger) and shutdown.
+// Package app sets a process up the way every mycophonic program is: the
+// filesystem defaults and locations under its name, the logger, the network
+// defaults, the crash reporter, the file limit, and the shutdown handlers.
 package app
