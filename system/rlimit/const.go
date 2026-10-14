@@ -18,9 +18,6 @@
 
 package rlimit
 
-// desiredNofile is a safety-net floor, not the actual limit inherited by
-// children.  In practice, the inherited limit is whatever the OS hard
-// limit is (minus one), which is typically much higher (1048576 on Linux,
-// unlimited on macOS).  This constant only matters when the hard limit
-// itself is unusually low (e.g., a misconfigured container).
+// desiredNofile is the floor for the soft limit, reached when the hard limit
+// allows; a soft limit already above it is kept.
 const desiredNofile = 65536

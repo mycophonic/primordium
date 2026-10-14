@@ -16,6 +16,12 @@
 
 package machine
 
+import (
+	"fmt"
+
+	"github.com/mycophonic/primordium/bytesize"
+)
+
 // Info holds host machine characteristics.
 type Info struct {
 	// Disk space on the volume where the user home directory lives.
@@ -28,35 +34,48 @@ type Info struct {
 
 	// CPU.
 	CPUCores int    // logical cores
-	CPUModel string // brand string (e.g. "Apple M1 Max")
+	CPUModel string // brand string (e.g. "Apple M1 Max"); "" where the platform has none
 
-	// Classification derived from cores and RAM.
+	// Classify(CPUCores, RAMTotal).
 	Tier Tier
 }
 
 // Tier classifies machine capability.
 type Tier int
 
-// Capability tiers derived from core count and total RAM.
+// The tiers, from the logical core count and the RAM: low is 4 cores or
+// fewer, or 8 GiB or less; high is 9 cores or more and 32 GiB or more; mid
+// is the rest.
 const (
-	TierLow  Tier = iota // ≤4 cores OR ≤8 GB RAM
-	TierMid              // 5–8 cores AND 9–31 GB RAM
-	TierHigh             // ≥9 cores AND ≥32 GB RAM
+	TierLow Tier = iota
+	TierMid
+	TierHigh
 )
 
 func (t Tier) String() string {
-	return [...]string{
-		"low", "mid", "high",
-	}[t]
+	switch t {
+	case TierLow:
+		return "low"
+	case TierMid:
+		return "mid"
+	case TierHigh:
+		return "high"
+	default:
+		return fmt.Sprintf("tier(%d)", int(t))
+	}
 }
 
-// classify returns the tier based on core count and total RAM.
-func classify(cores int, ramBytes uint64) Tier {
-	if cores >= highMinCores && (ramBytes >= highMinRAM) {
+// Classify is the tier of a machine with cores logical cores and ram bytes
+// of memory as the kernel reports it. Linux and Windows report the RAM they
+// keep, below the installed size by what they reserve, so ram is rounded up
+// to the whole GiB before the thresholds apply: anything above the GiB below
+// the high threshold is that threshold, and the low one is already a bound.
+func Classify(cores int, ram uint64) Tier {
+	if cores >= highMinCores && ram > highMinRAM-bytesize.GiB {
 		return TierHigh
 	}
 
-	if cores <= lowMaxCores || ramBytes <= lowMaxRAM {
+	if cores <= lowMaxCores || ram <= lowMaxRAM {
 		return TierLow
 	}
 

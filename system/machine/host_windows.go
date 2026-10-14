@@ -21,14 +21,17 @@ package machine
 import (
 	"fmt"
 	"runtime"
-	"syscall"
+	"strings"
 	"unsafe"
+
+	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/registry"
 
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/dirs"
 )
 
-// memoryStatusEx mirrors the Windows MEMORYSTATUSEX structure.
+// memoryStatusEx is MEMORYSTATUSEX, which x/sys/windows does not bind.
 type memoryStatusEx struct {
 	length               uint32
 	memoryLoad           uint32
@@ -41,12 +44,8 @@ type memoryStatusEx struct {
 	availExtendedVirtual uint64
 }
 
-//nolint:gochecknoglobals // lazily bound system procedures
-var (
-	modkernel32              = syscall.NewLazyDLL("kernel32.dll")
-	procGetDiskFreeSpaceEx   = modkernel32.NewProc("GetDiskFreeSpaceExW")
-	procGlobalMemoryStatusEx = modkernel32.NewProc("GlobalMemoryStatusEx")
-)
+//nolint:gochecknoglobals // a lazily bound system procedure
+var procGlobalMemoryStatusEx = windows.NewLazySystemDLL("kernel32.dll").NewProc("GlobalMemoryStatusEx")
 
 // Host returns information about the current machine.
 func Host() (Info, error) {
@@ -72,25 +71,23 @@ func Host() (Info, error) {
 		RAMAvailable: ramAvail,
 		CPUCores:     cores,
 		CPUModel:     cpuModel,
-		Tier:         classify(cores, ramTotal),
+		Tier:         Classify(cores, ramTotal),
 	}, nil
 }
 
-// diskSpace returns the total and available bytes for the volume containing path.
+// diskSpace returns the total bytes of the volume holding path and the
+// bytes available to the caller, which quotas may hold below the volume's
+// free bytes.
 func diskSpace(path string) (total, free uint64, err error) {
-	pathPtr, err := syscall.UTF16PtrFromString(path)
+	pathPtr, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return 0, 0, fmt.Errorf("%w: utf16 path: %w", fault.ErrSystemFailure, err)
 	}
 
-	ret, _, callErr := procGetDiskFreeSpaceEx.Call(
-		uintptr(unsafe.Pointer(pathPtr)), // #nosec G103 -- required for Win32 syscall interop
-		uintptr(unsafe.Pointer(&free)),   // #nosec G103
-		uintptr(unsafe.Pointer(&total)),  // #nosec G103
-		0,
-	)
-	if ret == 0 {
-		return 0, 0, fmt.Errorf("%w: GetDiskFreeSpaceEx: %w", fault.ErrSystemFailure, callErr)
+	var totalFree uint64
+
+	if err := windows.GetDiskFreeSpaceEx(pathPtr, &free, &total, &totalFree); err != nil {
+		return 0, 0, fmt.Errorf("%w: GetDiskFreeSpaceEx: %w", fault.ErrSystemFailure, err)
 	}
 
 	return total, free, nil
@@ -103,8 +100,8 @@ func physicalMemory() (total, available uint64, err error) {
 	mem.length = uint32(unsafe.Sizeof(mem))
 
 	ret, _, callErr := procGlobalMemoryStatusEx.Call(
-		uintptr(unsafe.Pointer(&mem)),
-	) // #nosec G103 -- required for Win32 syscall interop
+		uintptr(unsafe.Pointer(&mem)), // #nosec G103 -- the Win32 call takes the struct's address
+	)
 	if ret == 0 {
 		return 0, 0, fmt.Errorf("%w: GlobalMemoryStatusEx: %w", fault.ErrSystemFailure, callErr)
 	}
@@ -112,56 +109,24 @@ func physicalMemory() (total, available uint64, err error) {
 	return mem.totalPhys, mem.availPhys, nil
 }
 
-// readCPUModel reads the processor brand string from the Windows registry.
+// readCPUModel reads the processor brand string from the registry, or ""
+// when it cannot; the string is padded with leading spaces on many CPUs.
 func readCPUModel() string {
-	var hKey syscall.Handle
-
-	subkey, err := syscall.UTF16PtrFromString(
+	key, err := registry.OpenKey(
+		registry.LOCAL_MACHINE,
 		`HARDWARE\DESCRIPTION\System\CentralProcessor\0`,
+		registry.QUERY_VALUE,
 	)
 	if err != nil {
 		return ""
 	}
 
-	if err = syscall.RegOpenKeyEx(
-		syscall.HKEY_LOCAL_MACHINE, subkey, 0, syscall.KEY_READ, &hKey,
-	); err != nil {
-		return ""
-	}
+	defer func() { _ = key.Close() }() // a read-only key: a close error carries nothing
 
-	defer func() { _ = syscall.RegCloseKey(hKey) }() // a read-only key: a close error carries nothing
-
-	valueName, err := syscall.UTF16PtrFromString("ProcessorNameString")
+	model, _, err := key.GetStringValue("ProcessorNameString")
 	if err != nil {
 		return ""
 	}
 
-	// Query required buffer size.
-	var dataType, dataSize uint32
-
-	if err := syscall.RegQueryValueEx(
-		hKey, valueName, nil, &dataType, nil, &dataSize,
-	); err != nil {
-		return ""
-	}
-
-	if dataSize == 0 {
-		return ""
-	}
-
-	// Read the value.
-	buf := make([]uint16, dataSize/2) // bytes to uint16 elements
-
-	if err := syscall.RegQueryValueEx(
-		hKey,
-		valueName,
-		nil,
-		&dataType,
-		(*byte)(unsafe.Pointer(&buf[0])), // #nosec G103
-		&dataSize,                        // #nosec G103 -- required for the registry syscall interop
-	); err != nil {
-		return ""
-	}
-
-	return syscall.UTF16ToString(buf)
+	return strings.TrimSpace(model)
 }

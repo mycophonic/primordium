@@ -1,4 +1,4 @@
-//go:build unix
+//go:build !windows
 
 /*
    Copyright Mycophonic.
@@ -19,21 +19,31 @@
 package process
 
 import (
+	"fmt"
 	"log/slog"
 	"os"
 	"syscall"
 	"time"
+
+	"github.com/mycophonic/primordium/fault"
 )
 
-// StopProcess sends SIGTERM, waits up to shutdownTimeout for the process to
-// exit (via the exited channel), then sends SIGKILL.
+// StopProcess sends proc SIGTERM and waits up to shutdownTimeout for exited,
+// which the caller closes when its Wait returns; then SIGKILL and up to ten
+// seconds more, after which ErrTimeout. A nil proc is nothing to stop; a nil
+// exited is ErrInvalidArgument, since it could never close; a shutdownTimeout
+// of zero or less kills at once.
 func StopProcess(proc *os.Process, shutdownTimeout time.Duration, exited <-chan struct{}) error {
+	if exited == nil {
+		return fmt.Errorf("%w: StopProcess needs the channel closed when the process exits", fault.ErrInvalidArgument)
+	}
+
 	if proc == nil {
 		return nil
 	}
 
 	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		// Process may have already exited.
+		// Already gone, or being reaped: its Wait is about to return.
 		return waitForExit(exited)
 	}
 
@@ -48,8 +58,6 @@ func StopProcess(proc *os.Process, shutdownTimeout time.Duration, exited <-chan 
 
 		if err := proc.Kill(); err != nil {
 			slog.Warn("SIGKILL failed", "error", err)
-
-			return waitForExit(exited)
 		}
 
 		return waitForExit(exited)

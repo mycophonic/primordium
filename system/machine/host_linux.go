@@ -24,7 +24,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
@@ -36,8 +37,8 @@ import (
 func Host() (Info, error) {
 	home := dirs.HomeDir()
 
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(home, &stat); err != nil {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(home, &stat); err != nil {
 		return Info{}, fmt.Errorf("%w: statfs: %w", fault.ErrSystemFailure, err)
 	}
 
@@ -58,7 +59,7 @@ func Host() (Info, error) {
 		RAMAvailable: ramAvail,
 		CPUCores:     cores,
 		CPUModel:     cpuModel,
-		Tier:         classify(cores, ramTotal),
+		Tier:         Classify(cores, ramTotal),
 	}, nil
 }
 

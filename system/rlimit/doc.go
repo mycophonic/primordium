@@ -14,8 +14,6 @@
    limitations under the License.
 */
 
-// Package rlimit raises the RLIMIT_NOFILE soft limit and ensures exec'd
-// subprocesses inherit the raised value.  This is necessary because the
-// Go runtime (1.19+) restores the original low limit before exec'ing
-// children unless an explicit syscall.Setrlimit has been made.
+// Package rlimit raises this process's open-file limit and makes the children
+// it starts inherit it.
 package rlimit
