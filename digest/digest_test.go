@@ -474,3 +474,44 @@ func TestEveryAlgorithmRoundTrips(t *testing.T) {
 		})
 	}
 }
+
+// TestDigestIsAValue: two digests of the same content are equal with ==,
+// of other content or another algorithm not; the zero value is no digest,
+// with an empty String, and no digest New or FromString returns is zero.
+func TestDigestIsAValue(t *testing.T) {
+	t.Parallel()
+
+	raw := digest.SHA256.Hash().Sum(nil)
+
+	first, err := digest.New(digest.SHA256, raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	second, err := digest.FromString(first.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first != second {
+		t.Fatalf("%v != %v, the same content", first, second)
+	}
+
+	otherRaw := digest.SHA256.Hash()
+	_, _ = otherRaw.Write([]byte("other"))
+
+	other, err := digest.New(digest.SHA256, otherRaw.Sum(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if first == other {
+		t.Fatal("digests of different content are equal")
+	}
+
+	var none digest.Digest
+
+	if !none.IsZero() || none.String() != "" || first.IsZero() {
+		t.Fatalf("zero: IsZero %t String %q; real: IsZero %t", none.IsZero(), none.String(), first.IsZero())
+	}
+}

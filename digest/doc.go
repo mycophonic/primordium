@@ -14,5 +14,6 @@
    limitations under the License.
 */
 
-// Package digest provides core types for digest handling and content-addressable storage.
+// Package digest names content: an Algorithm and a Digest, the hash of some
+// content under it, a value compared with == whose zero value is no digest.
 package digest

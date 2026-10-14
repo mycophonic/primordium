@@ -175,9 +175,9 @@ func (s *Store) GarbageCollect() (cache.GCStats, error) {
 
 // Acquire returns cached content for the given identifier, or fetches it on cache miss.
 //
-// When dgst is non-nil, content streams directly into cache and the reader is returned
+// With a digest, content streams directly into cache and the reader is returned
 // immediately — the caller can read while the fetch is still in progress.
-// When dgst is nil, the index is consulted for a previously stored digest. If neither
+// Without one, the index is consulted for a previously stored digest. If neither
 // is available, content is buffered to compute the digest before caching.
 //
 // The returned reader must be closed by the caller.
@@ -191,21 +191,21 @@ func (s *Store) Acquire(identifier string, dgst digest.Digest, fetch FetchFunc) 
 		return nil, time.Time{}, err
 	}
 
-	if indexedDgst != nil {
+	if !indexedDgst.IsZero() {
 		slog.Debug("index hit", "identifier", identifier, "digest", indexedDgst.String())
 	} else {
 		slog.Debug("index miss", "identifier", identifier)
 	}
 
 	// (a) Caller provided a digest — go straight to cache.
-	if dgst != nil {
+	if !dgst.IsZero() {
 		slog.Debug("using caller digest", "identifier", identifier, "digest", dgst.String())
 
 		return s.fetchWithDigest(place, dgst, indexedDgst, rec.Timestamp, fetch)
 	}
 
 	// (b) No caller digest — use the indexed one if available.
-	if indexedDgst != nil {
+	if !indexedDgst.IsZero() {
 		slog.Debug("using indexed digest", "identifier", identifier, "digest", indexedDgst.String())
 
 		return s.fetchWithDigest(place, indexedDgst, indexedDgst, rec.Timestamp, fetch)
@@ -233,7 +233,7 @@ func (s *Store) AcquireFile(
 	place := slotOf(identifier)
 
 	resolved := dgst
-	if resolved == nil {
+	if resolved.IsZero() {
 		var err error
 
 		_, resolved, err = s.lookup(place)
@@ -243,7 +243,7 @@ func (s *Store) AcquireFile(
 	}
 
 	// Warm path: the blob is committed and merely needs pinning.
-	if resolved != nil {
+	if !resolved.IsZero() {
 		pin, err := s.cache.AcquireFile(resolved)
 		if err == nil {
 			return pin, nil
@@ -258,7 +258,7 @@ func (s *Store) AcquireFile(
 	// Miss. With a digest in hand (caller-provided, or indexed but its blob
 	// reclaimed), the regular Acquire fetches and verifies through the cache
 	// pipe; draining the reader waits for the rename-commit.
-	if resolved != nil {
+	if !resolved.IsZero() {
 		reader, _, err := s.Acquire(identifier, dgst, fetch)
 		if err != nil {
 			return nil, err
@@ -295,7 +295,7 @@ func (s *Store) Invalidate(identifier string) error {
 	place := slotOf(identifier)
 
 	// Another identifier's entry under the same key is not ours to remove.
-	if _, dgst, err := s.lookup(place); err != nil || dgst == nil {
+	if _, dgst, err := s.lookup(place); err != nil || dgst.IsZero() {
 		return err
 	}
 
@@ -376,7 +376,7 @@ func (s *Store) commitDigestless(place slot, fetch FetchFunc) (*cache.PinnedFile
 // through the cache pipe — the reader is returned immediately and receives
 // data as the fetch progresses.
 // The index is only written when the entry is missing or maps to a different digest.
-// indexedDgst/indexedTS are the previously stored digest and timestamp (indexedDgst may be nil).
+// indexedDgst/indexedTS are the previously stored digest and timestamp (indexedDgst may be zero).
 func (s *Store) fetchWithDigest(
 	place slot,
 	dgst digest.Digest,
@@ -433,7 +433,7 @@ func (s *Store) fetchWithDigest(
 	slog.Debug("cache hit", "digest", dgst.String())
 
 	// Cache hit — preserve existing timestamp if the index already matches.
-	if indexedDgst != nil && dgst.String() == indexedDgst.String() {
+	if dgst == indexedDgst {
 		return reader, time.Unix(0, indexedTS), nil
 	}
 
@@ -532,12 +532,12 @@ func (s *Store) fetchAndHash(
 func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 	dir := filepath.Join(s.root, stagingDir)
 	if err := os.MkdirAll(dir, filesystem.DirPermissionsPrivate); err != nil {
-		return nil, nil, fmt.Errorf("%w: staging dir: %w", fault.ErrFilesystemFailure, err)
+		return nil, digest.Digest{}, fmt.Errorf("%w: staging dir: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	file, err := xos.CreateTemp(dir, "blob-*")
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: staging file: %w", fault.ErrFilesystemFailure, err)
+		return nil, digest.Digest{}, fmt.Errorf("%w: staging file: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	if err = os.Remove(file.Name()); err != nil {
@@ -553,7 +553,7 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 	if err != nil {
 		_ = file.Close()
 
-		return nil, nil, fmt.Errorf("%w: read: %w", fault.ErrReadFailure, err)
+		return nil, digest.Digest{}, fmt.Errorf("%w: read: %w", fault.ErrReadFailure, err)
 	}
 
 	slog.Debug("content staged, computing digest", "size", written)
@@ -561,14 +561,14 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 	if _, err = file.Seek(0, io.SeekStart); err != nil {
 		_ = file.Close()
 
-		return nil, nil, fmt.Errorf("%w: rewind staging file: %w", fault.ErrFilesystemFailure, err)
+		return nil, digest.Digest{}, fmt.Errorf("%w: rewind staging file: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	dgst, err := digest.New(digest.BLAKE3256, hasher.Sum(nil))
 	if err != nil {
 		_ = file.Close()
 
-		return nil, nil, fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
+		return nil, digest.Digest{}, fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
 
 	return file, dgst, nil
@@ -595,7 +595,7 @@ func encodeValue(place slot, dgst digest.Digest) []byte {
 // decodeValue is the confirmation and the digest an index value encodes.
 func decodeValue(value []byte) (uint64, digest.Digest, error) {
 	if len(value) < confirmSize+1 {
-		return 0, nil, fmt.Errorf("%w: index value of %d bytes", fault.ErrInvalidArgument, len(value))
+		return 0, digest.Digest{}, fmt.Errorf("%w: index value of %d bytes", fault.ErrInvalidArgument, len(value))
 	}
 
 	confirm := binary.BigEndian.Uint64(value)
@@ -603,23 +603,23 @@ func decodeValue(value []byte) (uint64, digest.Digest, error) {
 
 	algID := value[0]
 	if algID == 0 {
-		return 0, nil, fmt.Errorf("%w: zero algorithm ID", fault.ErrInvalidArgument)
+		return 0, digest.Digest{}, fmt.Errorf("%w: zero algorithm ID", fault.ErrInvalidArgument)
 	}
 
 	alg, ok := algorithmFromID[algID]
 	if !ok {
-		return 0, nil, fmt.Errorf("%w: unknown algorithm ID %d", fault.ErrInvalidArgument, algID)
+		return 0, digest.Digest{}, fmt.Errorf("%w: unknown algorithm ID %d", fault.ErrInvalidArgument, algID)
 	}
 
 	size := alg.Hash().Size()
 	if len(value) < 1+size {
-		return 0, nil, fmt.Errorf("%w: value too short for %s: need %d, have %d",
+		return 0, digest.Digest{}, fmt.Errorf("%w: value too short for %s: need %d, have %d",
 			fault.ErrInvalidArgument, alg, 1+size, len(value))
 	}
 
 	dgst, err := digest.New(alg, value[1:1+size])
 	if err != nil {
-		return 0, nil, fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
+		return 0, digest.Digest{}, fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
 	}
 
 	return confirm, dgst, nil
@@ -644,22 +644,22 @@ func slotOf(identifier string) slot {
 	}
 }
 
-// lookup is the identifier's record and digest, or a zero record and a nil
+// lookup is the identifier's record and digest, or a zero record and a zero
 // digest when the index has none for it: no record under its key, or
 // another identifier's, which the next write replaces.
 func (s *Store) lookup(place slot) (index.Record, digest.Digest, error) {
 	rec, found, err := s.idx.Get(place.key)
 	if err != nil {
-		return index.Record{}, nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
+		return index.Record{}, digest.Digest{}, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
 	}
 
 	if !found {
-		return index.Record{}, nil, nil
+		return index.Record{}, digest.Digest{}, nil
 	}
 
 	confirm, dgst, err := decodeValue(rec.Value)
 	if err != nil || confirm != place.confirm {
-		return index.Record{}, nil, nil //nolint:nilerr // an unreadable record is no record, and is written over
+		return index.Record{}, digest.Digest{}, nil //nolint:nilerr // an unreadable record is no record, and is written over
 	}
 
 	return rec, dgst, nil
