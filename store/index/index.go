@@ -167,13 +167,6 @@ func New(path string, opts *Options) (*Index, error) {
 	// Unlock closes the lock file whatever happens, which releases the lock.
 	defer func() { _ = flock.Unlock(setupLock) }()
 
-	// If a previous grow was interrupted, rebuild the data file from the
-	// journal before proceeding. The setup lock ensures no other process
-	// can race with recovery.
-	if err = recoverFromJournal(path, idx.journalPath, idx.valSize, idx.maxCap); err != nil {
-		return nil, err
-	}
-
 	_, err = xos.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		if err = idx.create(initialCap); err != nil {
@@ -190,8 +183,28 @@ func New(path string, opts *Options) (*Index, error) {
 
 	idx.dataFile = dataFile
 
-	if err := idx.mmapDataFile(); err != nil {
+	// A grow a writer died in has left its journal: the table is rebuilt
+	// from it before the header is read, under the setup lock, the way a
+	// peer that takes the dead writer's lock rebuilds it, in the file every
+	// live holder has mapped. The rebuild maps the file itself, sized to
+	// the journal: a file the writer never got to size is too small to map.
+	journal, found, err := readJournalFor(idx.journalPath, idx.valSize, idx.maxCap)
+	if err != nil {
 		return nil, err
+	}
+
+	if found {
+		err = idx.rebuild(journal)
+	} else {
+		err = idx.mmapDataFile()
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if found {
+		idx.freeDeadWritersWord()
 	}
 
 	hdr := idx.readHeader()
@@ -640,37 +653,6 @@ func readJournal(path string, capLimit uint64) (journalData, error) {
 	return journalData{NewCap: newCap, ValSize: valSz, Records: records}, nil
 }
 
-// recoverFromJournal rebuilds the data file from a grow journal left by a
-// previous interrupted grow. No journal is a no-op; a corrupt one, a partial
-// write before the crash or a capacity the index would refuse, is deleted
-// and the existing data file used as it is. The rebuilt table is written
-// beside the data file and renamed over it after the sync, so a failure or
-// a crash midway leaves the previous file and the journal for the next New.
-func recoverFromJournal(dataPath, journalPath string, valSize int, maxCap uint64) error {
-	journal, found, err := readJournalFor(journalPath, valSize, maxCap)
-	if err != nil || !found {
-		return err
-	}
-
-	recoverPath := dataPath + ".recover"
-
-	if err := writeRecovered(recoverPath, journal, valSize); err != nil {
-		_ = os.Remove(recoverPath)
-
-		return err
-	}
-
-	if err := xos.Rename(recoverPath, dataPath); err != nil {
-		_ = os.Remove(recoverPath)
-
-		return fmt.Errorf("%w: install recovered data file: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	_ = os.Remove(journalPath)
-
-	return nil
-}
-
 // readJournalFor is the journal to replay for an index of valSize and maxCap,
 // if there is one: none, or a corrupt one, which is deleted, is not found; a
 // journal of another value width is an error.
@@ -704,89 +686,6 @@ func readJournalFor(journalPath string, valSize int, maxCap uint64) (journalData
 	}
 
 	return journal, true, nil
-}
-
-// writeRecovered writes the journal's table to path, sized to its capacity
-// and filled record by record, never built in memory: the capacity is a
-// word read off disk.
-func writeRecovered(path string, journal journalData, valSize int) error {
-	recSize := int64(1 + keySize + valSize + tsSize)
-	// #nosec G115 -- NewCap is at most maxJournalCap, checked in readJournal
-	fileSize := int64(headerSize) + int64(journal.NewCap)*recSize
-
-	file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, filesystem.FilePermissionsPrivate)
-	if err != nil {
-		return fmt.Errorf("%w: create recovered data file: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	defer func() { _ = file.Close() }() // data synced; a close error is not actionable
-
-	if err = file.Truncate(fileSize); err != nil {
-		return fmt.Errorf("%w: size recovered data file: %w", fault.ErrWriteFailure, err)
-	}
-
-	count, err := placeRecords(file, journal, valSize)
-	if err != nil {
-		return err
-	}
-
-	head := make([]byte, headerSize)
-	marshalHeader(head, header{
-		Magic:   magic,
-		Version: version,
-		// #nosec G115 -- valSize is validated to be in [1, 65535] in New
-		ValSize:  uint16(valSize),
-		Capacity: journal.NewCap,
-		Count:    count,
-	})
-
-	if _, err = file.WriteAt(head, 0); err != nil {
-		return fmt.Errorf("%w: write recovered header: %w", fault.ErrWriteFailure, err)
-	}
-
-	if err = file.Sync(); err != nil {
-		return fmt.Errorf("%w: sync recovered data: %w", fault.ErrWriteFailure, err)
-	}
-
-	return nil
-}
-
-// placeRecords writes the journal's records into the recovered file at their
-// buckets, remembering the buckets taken since the file is not read back,
-// and returns how many it placed.
-func placeRecords(file *os.File, journal journalData, valSize int) (uint64, error) {
-	newCap := journal.NewCap
-	recSize := int64(1 + keySize + valSize + tsSize)
-	occupied := make(map[uint64]struct{}, len(journal.Records))
-	record := make([]byte, recSize)
-
-	var count uint64
-
-	for _, rec := range journal.Records {
-		start := rec.Key % newCap
-
-		for j := range newCap {
-			bucket := (start + j) % newCap
-			if _, taken := occupied[bucket]; taken {
-				continue
-			}
-
-			occupied[bucket] = struct{}{}
-
-			marshalRecord(record, 0, rec.Key, rec.Value, valSize, rec.Timestamp)
-
-			// #nosec G115 -- bucket < newCap <= maxJournalCap
-			if _, err := file.WriteAt(record, int64(headerSize)+int64(bucket)*recSize); err != nil {
-				return 0, fmt.Errorf("%w: write recovered record: %w", fault.ErrWriteFailure, err)
-			}
-
-			count++
-
-			break
-		}
-	}
-
-	return count, nil
 }
 
 func (idx *Index) mmapDataFile() error {
@@ -939,8 +838,8 @@ func (idx *Index) growLocked() error {
 	defer func() { _ = flock.Unlock(setupLock) }()
 
 	// Write journal before any data-file modification. If the process
-	// crashes after this point, recoverFromJournal rebuilds the data
-	// file from the journal on next New.
+	// crashes after this point, the next New, or a peer that takes the
+	// lock, rebuilds the table from the journal.
 	if err = writeJournal(idx.journalPath, newCap, idx.valSize, records); err != nil {
 		_ = os.Remove(idx.journalPath)
 
@@ -1380,13 +1279,7 @@ func (idx *Index) wlock() error {
 
 // recoverTakenOver replays the journal a dead writer left, with its lock
 // word now this process's and the setup lock held against New and a grow.
-// The table is rebuilt the way the grow builds it, in this process's own
-// mapping of the file every live holder has mapped: the file is extended if
-// the writer died before sizing it and never shrunk, the records go in, the
-// header's counts last, and the word, inside every holder's mapping, is
-// never written. The holders wait on it meanwhile and find the new capacity
-// when it is theirs, as after any grow. A crash midway leaves the journal
-// for the next taker, who starts over.
+// A crash midway leaves the journal for the next taker, who starts over.
 func (idx *Index) recoverTakenOver() error {
 	setupLock, err := flock.Lock(idx.lockPath)
 	if err != nil {
@@ -1400,10 +1293,21 @@ func (idx *Index) recoverTakenOver() error {
 		return err
 	}
 
+	return idx.rebuild(journal)
+}
+
+// rebuild replays a journal into this process's mapping, the way the grow
+// builds the table, in the file every live holder has mapped: the file is
+// extended if the writer died before sizing it and never shrunk, the records
+// go in, the header's counts last, and the lock word, inside every holder's
+// mapping, is never written. The holders wait on it meanwhile and find the
+// new capacity when it is theirs, as after any grow. The journal goes last,
+// so a crash midway leaves it for the next rebuild, which starts over.
+func (idx *Index) rebuild(journal journalData) error {
 	// #nosec G115 -- NewCap is at most maxJournalCap, checked in readJournal
 	size := int64(headerSize) + int64(journal.NewCap)*idx.recordSize()
 
-	if err = idx.mapAtLeast(size); err != nil {
+	if err := idx.mapAtLeast(size); err != nil {
 		return err
 	}
 
@@ -1437,7 +1341,7 @@ func (idx *Index) recoverTakenOver() error {
 	})
 	idx.cap = journal.NewCap
 
-	if err = idx.mapping.Sync(); err != nil {
+	if err := idx.mapping.Sync(); err != nil {
 		return fmt.Errorf("%w: sync recovered table: %w", fault.ErrWriteFailure, err)
 	}
 
@@ -1446,9 +1350,34 @@ func (idx *Index) recoverTakenOver() error {
 	return nil
 }
 
+// freeDeadWritersWord clears the lock word a rebuilt table keeps from the
+// writer that died in the grow, so that the first operation after New does
+// not wait out the stale threshold to take it over. Under the setup lock a
+// journal belongs to a dead writer, unless a taker has already made the word
+// its own: that taker is alive and keeps it.
+func (idx *Index) freeDeadWritersWord() {
+	word := atomic.LoadUint64(idx.lockWordPtr())
+	if word&lockWriteFlag == 0 {
+		return
+	}
+
+	writerPID := int((word & lockPIDMask) >> lockPIDShift)
+	if writerPID == 0 || sameProcess(writerPID, atomic.LoadUint64(idx.writerStartPtr())) {
+		return
+	}
+
+	// The start goes first, as on release: a word freed beside the dead
+	// writer's start would pair that start with whoever takes the word next.
+	// A taker that slips in before the start is zeroed is demoted to PID-only
+	// liveness for its hold, and the CAS then fails on the moved word.
+	atomic.StoreUint64(idx.writerStartPtr(), 0)
+	atomic.CompareAndSwapUint64(idx.lockWordPtr(), word, 0)
+}
+
 // mapAtLeast makes the data file and this process's mapping of it at least
 // size bytes, as a grow does: the file is extended, never shrunk, and a new
-// mapping of the same file replaces the old, the lock word in it unchanged.
+// mapping of the same file replaces the old, if any, the lock word in it
+// unchanged.
 func (idx *Index) mapAtLeast(size int64) error {
 	info, err := idx.dataFile.Stat()
 	if err != nil {
@@ -1463,7 +1392,7 @@ func (idx *Index) mapAtLeast(size int64) error {
 		size = info.Size()
 	}
 
-	if int64(len(idx.data)) >= size {
+	if idx.mapping != nil && int64(len(idx.data)) >= size {
 		return nil
 	}
 
@@ -1472,9 +1401,11 @@ func (idx *Index) mapAtLeast(size int64) error {
 		return fmt.Errorf("%w: mmap for recovery: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	old := idx.mapping
+	if old := idx.mapping; old != nil {
+		_ = old.Unmap()
+	}
+
 	idx.mapping, idx.data = mapping, mapping.Bytes()
-	_ = old.Unmap()
 
 	return nil
 }
