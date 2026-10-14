@@ -647,32 +647,9 @@ func readJournal(path string, capLimit uint64) (journalData, error) {
 // beside the data file and renamed over it after the sync, so a failure or
 // a crash midway leaves the previous file and the journal for the next New.
 func recoverFromJournal(dataPath, journalPath string, valSize int, maxCap uint64) error {
-	_, err := xos.Stat(journalPath)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
-	}
-
-	if err != nil {
-		return fmt.Errorf("%w: stat journal: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	capLimit := maxJournalCap
-	if maxCap != 0 && maxCap < capLimit {
-		capLimit = maxCap
-	}
-
-	journal, err := readJournal(journalPath, capLimit)
-	if err != nil {
-		_ = os.Remove(journalPath)
-
-		return nil //nolint:nilerr // a corrupt journal is dropped and the data file used as it is
-	}
-
-	if journal.ValSize != valSize {
-		_ = os.Remove(journalPath)
-
-		return fmt.Errorf("%w: journal valSize %d does not match expected %d",
-			fault.ErrInvalidArgument, journal.ValSize, valSize)
+	journal, found, err := readJournalFor(journalPath, valSize, maxCap)
+	if err != nil || !found {
+		return err
 	}
 
 	recoverPath := dataPath + ".recover"
@@ -692,6 +669,41 @@ func recoverFromJournal(dataPath, journalPath string, valSize int, maxCap uint64
 	_ = os.Remove(journalPath)
 
 	return nil
+}
+
+// readJournalFor is the journal to replay for an index of valSize and maxCap,
+// if there is one: none, or a corrupt one, which is deleted, is not found; a
+// journal of another value width is an error.
+func readJournalFor(journalPath string, valSize int, maxCap uint64) (journalData, bool, error) {
+	_, err := xos.Stat(journalPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return journalData{}, false, nil
+	}
+
+	if err != nil {
+		return journalData{}, false, fmt.Errorf("%w: stat journal: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	capLimit := maxJournalCap
+	if maxCap != 0 && maxCap < capLimit {
+		capLimit = maxCap
+	}
+
+	journal, err := readJournal(journalPath, capLimit)
+	if err != nil {
+		_ = os.Remove(journalPath)
+
+		return journalData{}, false, nil //nolint:nilerr // a corrupt journal is dropped and the data file used as it is
+	}
+
+	if journal.ValSize != valSize {
+		_ = os.Remove(journalPath)
+
+		return journalData{}, false, fmt.Errorf("%w: journal valSize %d does not match expected %d",
+			fault.ErrInvalidArgument, journal.ValSize, valSize)
+	}
+
+	return journal, true, nil
 }
 
 // writeRecovered writes the journal's table to path, sized to its capacity
@@ -915,8 +927,9 @@ func (idx *Index) growLocked() error {
 		}
 	}
 
-	// Take the setup lock to exclude concurrent New (which checks for
-	// the journal during recovery). Released after the journal is deleted.
+	// Take the setup lock to exclude a concurrent New and a peer's takeover
+	// recovery, both of which look for the journal. Released after the
+	// journal is deleted.
 	setupLock, err := flock.Lock(idx.lockPath)
 	if err != nil {
 		return fmt.Errorf("%w: lock for grow: %w", fault.ErrFilesystemFailure, err)
@@ -1068,35 +1081,36 @@ func (idx *Index) reopenLocked() error {
 	return nil
 }
 
-// reopenFile acquires the write lock and reopens the file if the
-// mapping is stale. Used by the reader path (rlockFresh) which must
-// release its read lock before reopening.
-func (idx *Index) reopenFile() error {
-	idx.wlock()
-
-	// Another goroutine may have already reopened.
-	if idx.readHeader().Capacity == idx.cap {
-		idx.wunlock()
-
-		return nil
-	}
-
-	if err := idx.reopenLocked(); err != nil {
-		idx.wunlock()
-
+// refresh takes the write lock, which recovers a dead writer's grow on the
+// way, reopens the file if another process grew it, and lets go. The reader
+// path goes through it when its lock could not be taken or its mapping is
+// behind.
+func (idx *Index) refresh() error {
+	if err := idx.wlock(); err != nil {
 		return err
 	}
 
-	idx.wunlock()
+	defer idx.wunlock()
 
-	return nil
+	if idx.readHeader().Capacity == idx.cap {
+		return nil
+	}
+
+	return idx.reopenLocked()
 }
 
 // rlockFresh acquires a read lock, reopening the file first if another
-// process has grown the table since this Index last mapped it.
+// process has grown the table since this Index last mapped it, and recovering
+// through the write lock what a dead writer left.
 func (idx *Index) rlockFresh() error {
 	for {
-		idx.rlock()
+		if !idx.rlock() {
+			if err := idx.refresh(); err != nil {
+				return err
+			}
+
+			continue
+		}
 
 		if idx.readHeader().Capacity == idx.cap {
 			return nil
@@ -1104,7 +1118,7 @@ func (idx *Index) rlockFresh() error {
 
 		idx.runlock()
 
-		if err := idx.reopenFile(); err != nil {
+		if err := idx.refresh(); err != nil {
 			return err
 		}
 	}
@@ -1113,7 +1127,9 @@ func (idx *Index) rlockFresh() error {
 // wlockFresh acquires a write lock, reopening the file first if another
 // process has grown the table since this Index last mapped it.
 func (idx *Index) wlockFresh() error {
-	idx.wlock()
+	if err := idx.wlock(); err != nil {
+		return err
+	}
 
 	if idx.readHeader().Capacity == idx.cap {
 		return nil
@@ -1143,8 +1159,23 @@ func (idx *Index) readerSlotPtr(slot int) *uint32 {
 	return (*uint32)(unsafe.Pointer(&idx.lockData[slot*4]))
 }
 
+// writerStartPtr returns a pointer to the writer's start time in the mmap'd
+// lock file.
+func (idx *Index) writerStartPtr() *uint64 {
+	// #nosec G103 -- required for cross-process atomics on mmap'd lock file; the offset is 8-byte aligned
+	return (*uint64)(unsafe.Pointer(&idx.lockData[writerStartOffset]))
+}
+
+// readerStartPtr returns a pointer to the start time recorded beside the PID
+// slot at the given index.
+func (idx *Index) readerStartPtr(slot int) *uint64 {
+	// #nosec G103 -- required for cross-process atomics on mmap'd lock file; the offsets are 8-byte aligned
+	return (*uint64)(unsafe.Pointer(&idx.lockData[readerStartsOffset+slot*8]))
+}
+
 // claimReaderSlot CAS-claims an empty PID slot in the lock file for this
-// process. Called on the per-process 0→1 reader transition.
+// process, and records its start time beside it. Called on the per-process
+// 0→1 reader transition.
 func (idx *Index) claimReaderSlot() {
 	// #nosec G115 -- PIDs are always positive and fit in uint32
 	ourPID := uint32(os.Getpid())
@@ -1152,6 +1183,7 @@ func (idx *Index) claimReaderSlot() {
 	for slot := range maxReaderSlots {
 		ptr := idx.readerSlotPtr(slot)
 		if atomic.CompareAndSwapUint32(ptr, 0, ourPID) {
+			atomic.StoreUint64(idx.readerStartPtr(slot), startOfSelf())
 			idx.readerSlot.Store(int32(slot))
 
 			return
@@ -1162,23 +1194,26 @@ func (idx *Index) claimReaderSlot() {
 	// this reader is active. See maxReaderSlots.
 }
 
-// clearReaderSlot zeroes this process's PID slot in the lock file.
-// Called on the per-process 1→0 reader transition and during Close.
+// clearReaderSlot zeroes this process's PID slot in the lock file, the start
+// time first so that no checker pairs the PID with another's start. Called on
+// the per-process 1→0 reader transition and during Close.
 func (idx *Index) clearReaderSlot() {
 	slot := idx.readerSlot.Swap(-1)
 	if slot >= 0 && idx.lockData != nil {
+		atomic.StoreUint64(idx.readerStartPtr(int(slot)), 0)
 		atomic.StoreUint32(idx.readerSlotPtr(int(slot)), 0)
 	}
 }
 
 // allReaderPIDsDead reports whether every non-zero PID in the lock file
-// reader slots belongs to a dead process. Returns true when all slots are
-// empty or all registered PIDs are dead.
+// reader slots belongs to a dead process, or to another process than the one
+// that claimed the slot. Returns true when all slots are empty or all
+// registered PIDs are dead.
 func (idx *Index) allReaderPIDsDead() bool {
 	for slot := range maxReaderSlots {
 		slotPID := atomic.LoadUint32(idx.readerSlotPtr(slot))
 
-		if slotPID != 0 && isProcessAlive(int(slotPID)) {
+		if slotPID != 0 && sameProcess(int(slotPID), atomic.LoadUint64(idx.readerStartPtr(slot))) {
 			return false
 		}
 	}
@@ -1186,8 +1221,12 @@ func (idx *Index) allReaderPIDsDead() bool {
 	return true
 }
 
+// rlock takes the read lock, or reports false with nothing held when a dead
+// writer holds the word: the write lock recovers what it left, so the caller
+// goes through refresh and tries again.
+//
 //nolint:gocognit // the cross-process read-lock protocol, read top to bottom
-func (idx *Index) rlock() {
+func (idx *Index) rlock() bool {
 	idx.mu.RLock()
 
 	// The 0→1 transition claims a PID slot, so writers can tell this process
@@ -1209,8 +1248,11 @@ func (idx *Index) rlock() {
 			// Writer is active. Check for stale writer before spinning further.
 			if spin >= stalePIDThreshold {
 				writerPID := int((old & lockPIDMask) >> lockPIDShift)
-				if writerPID != 0 && !isProcessAlive(writerPID) {
-					atomic.CompareAndSwapUint64(ptr, old, 0)
+				if writerPID != 0 && !sameProcess(writerPID, atomic.LoadUint64(idx.writerStartPtr())) {
+					idx.unclaim()
+					idx.mu.RUnlock()
+
+					return false
 				}
 
 				spin = 0
@@ -1228,14 +1270,20 @@ func (idx *Index) rlock() {
 		}
 
 		if atomic.CompareAndSwapUint64(ptr, old, old+1) {
-			return
+			return true
 		}
 	}
 }
 
 func (idx *Index) runlock() {
 	atomic.AddUint64(idx.lockWordPtr(), ^uint64(0))
+	idx.unclaim()
+	idx.mu.RUnlock()
+}
 
+// unclaim is the per-process reader count going down one, the slot cleared
+// at 1→0.
+func (idx *Index) unclaim() {
 	idx.slotMu.Lock()
 
 	if idx.localReaders.Add(-1) == 0 {
@@ -1243,12 +1291,15 @@ func (idx *Index) runlock() {
 	}
 
 	idx.slotMu.Unlock()
-
-	idx.mu.RUnlock()
 }
 
+// wlock takes the write lock. A dead writer's word becomes this process's,
+// never free: a grow the writer died in has left a journal, which is
+// replayed before anyone reads the table. A failure to replay it is
+// returned with the dead writer's word put back, for the next taker.
+//
 //nolint:gocognit // the cross-process write-lock protocol, read top to bottom
-func (idx *Index) wlock() {
+func (idx *Index) wlock() error {
 	idx.mu.Lock()
 
 	ptr := idx.lockWordPtr()
@@ -1259,27 +1310,62 @@ func (idx *Index) wlock() {
 
 		if old == 0 {
 			if atomic.CompareAndSwapUint64(ptr, 0, target) {
-				return
+				atomic.StoreUint64(idx.writerStartPtr(), startOfSelf())
+
+				return nil
 			}
 
 			continue
 		}
 
 		if spin >= stalePIDThreshold {
+			spin = 0
+
 			if old&lockWriteFlag != 0 {
 				writerPID := int((old & lockPIDMask) >> lockPIDShift)
-				if writerPID != 0 && !isProcessAlive(writerPID) {
-					atomic.CompareAndSwapUint64(ptr, old, 0)
+				if writerPID == 0 || sameProcess(writerPID, atomic.LoadUint64(idx.writerStartPtr())) {
+					continue
 				}
+
+				// The start goes to zero before the word changes hands: a
+				// checker that read our PID beside the dead writer's start
+				// would take us for dead too. Zero is PID-only, the free
+				// path's own window.
+				deadStart := atomic.LoadUint64(idx.writerStartPtr())
+				atomic.StoreUint64(idx.writerStartPtr(), 0)
+
+				// Lost to another taker: the word is a live process's now, and
+				// zero beside it is PID-only until its own store lands; the
+				// dead start put back would read as its mismatch.
+				if !atomic.CompareAndSwapUint64(ptr, old, target) {
+					continue
+				}
+
+				atomic.StoreUint64(idx.writerStartPtr(), startOfSelf())
+
+				if err := idx.recoverTakenOver(); err != nil {
+					// Not free: the dead writer's word goes back, then its
+					// start, so that the next checker takes over and tries
+					// again, and no one reads the table it died in meanwhile.
+					// Word first: with our PID still in it, the dead start
+					// beside it would read as our mismatch.
+					atomic.StoreUint64(ptr, old)
+					atomic.StoreUint64(idx.writerStartPtr(), deadStart)
+					idx.mu.Unlock()
+
+					return err
+				}
+
+				return nil
 			} else if idx.allReaderPIDsDead() {
 				// All reader PIDs are dead (or no PIDs registered). The
 				// reader count is stale — CAS directly to our write lock.
 				if atomic.CompareAndSwapUint64(ptr, old, target) {
-					return
+					atomic.StoreUint64(idx.writerStartPtr(), startOfSelf())
+
+					return nil
 				}
 			}
-
-			spin = 0
 
 			continue
 		}
@@ -1292,7 +1378,109 @@ func (idx *Index) wlock() {
 	}
 }
 
+// recoverTakenOver replays the journal a dead writer left, with its lock
+// word now this process's and the setup lock held against New and a grow.
+// The table is rebuilt the way the grow builds it, in this process's own
+// mapping of the file every live holder has mapped: the file is extended if
+// the writer died before sizing it and never shrunk, the records go in, the
+// header's counts last, and the word, inside every holder's mapping, is
+// never written. The holders wait on it meanwhile and find the new capacity
+// when it is theirs, as after any grow. A crash midway leaves the journal
+// for the next taker, who starts over.
+func (idx *Index) recoverTakenOver() error {
+	setupLock, err := flock.Lock(idx.lockPath)
+	if err != nil {
+		return fmt.Errorf("%w: lock for recovery: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	defer func() { _ = flock.Unlock(setupLock) }()
+
+	journal, found, err := readJournalFor(idx.journalPath, idx.valSize, idx.maxCap)
+	if err != nil || !found {
+		return err
+	}
+
+	// #nosec G115 -- NewCap is at most maxJournalCap, checked in readJournal
+	size := int64(headerSize) + int64(journal.NewCap)*idx.recordSize()
+
+	if err = idx.mapAtLeast(size); err != nil {
+		return err
+	}
+
+	clear(idx.data[headerSize:size])
+
+	recSize := idx.recordSize()
+
+	var count uint64
+
+	for _, rec := range journal.Records {
+		start := rec.Key % journal.NewCap
+		for probe := range journal.NewCap {
+			off := int64(headerSize) + int64((start+probe)%journal.NewCap)*recSize // #nosec G115 -- bucket < NewCap
+			if idx.data[off] == statusEmpty {
+				marshalRecord(idx.data, off, rec.Key, rec.Value, idx.valSize, rec.Timestamp)
+
+				count++
+
+				break
+			}
+		}
+	}
+
+	idx.writeHeader(header{
+		Magic:   magic,
+		Version: version,
+		// #nosec G115 -- valSize is validated to be in [1, 65535] in New
+		ValSize:  uint16(idx.valSize),
+		Capacity: journal.NewCap,
+		Count:    count,
+	})
+	idx.cap = journal.NewCap
+
+	if err = idx.mapping.Sync(); err != nil {
+		return fmt.Errorf("%w: sync recovered table: %w", fault.ErrWriteFailure, err)
+	}
+
+	_ = os.Remove(idx.journalPath)
+
+	return nil
+}
+
+// mapAtLeast makes the data file and this process's mapping of it at least
+// size bytes, as a grow does: the file is extended, never shrunk, and a new
+// mapping of the same file replaces the old, the lock word in it unchanged.
+func (idx *Index) mapAtLeast(size int64) error {
+	info, err := idx.dataFile.Stat()
+	if err != nil {
+		return fmt.Errorf("%w: stat for recovery: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	if info.Size() < size {
+		if err = idx.dataFile.Truncate(size); err != nil {
+			return fmt.Errorf("%w: extend for recovery: %w", fault.ErrWriteFailure, err)
+		}
+	} else {
+		size = info.Size()
+	}
+
+	if int64(len(idx.data)) >= size {
+		return nil
+	}
+
+	mapping, err := mmap.Map(idx.dataFile, int(size))
+	if err != nil {
+		return fmt.Errorf("%w: mmap for recovery: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	old := idx.mapping
+	idx.mapping, idx.data = mapping, mapping.Bytes()
+	_ = old.Unmap()
+
+	return nil
+}
+
 func (idx *Index) wunlock() {
+	atomic.StoreUint64(idx.writerStartPtr(), 0)
 	atomic.StoreUint64(idx.lockWordPtr(), 0)
 	idx.mu.Unlock()
 }

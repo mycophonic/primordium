@@ -56,5 +56,12 @@ const (
 	// without a slot; stale-reader recovery cannot detect such readers
 	// and may allow a writer to acquire the lock while they are active.
 	maxReaderSlots = 64
-	lockFileSize   = maxReaderSlots * 4 // 256 bytes
+
+	// Past the slots, the lock file carries the start time of the writer
+	// and of each reader, by which a PID the kernel has reused since its
+	// holder died is told from the holder. An older lock file ends at the
+	// slots; ensureLockFile extends it, and a zero start time is unknown.
+	writerStartOffset  = maxReaderSlots * 4
+	readerStartsOffset = writerStartOffset + 8
+	lockFileSize       = readerStartsOffset + maxReaderSlots*8
 )
