@@ -15,10 +15,11 @@
 */
 
 // Package shutdown runs registered cleanup handlers, in reverse order of
-// registration and once, when the process ends through [Run], a panic in a
-// goroutine started with [Go], or a shutdown signal.
+// registration and once, when the process ends through [Run] or [Exit], a
+// panic in a goroutine started with [Go], or a shutdown signal.
 //
 // Nothing runs them on a plain return from main: a program ends through [Run],
-// or calls [Shutdown] itself. A panic in a goroutine started with a bare go
-// statement crashes the process without them. SIGKILL cannot be caught.
+// or through [Exit] where a command library exits by itself. A panic in a
+// goroutine started with a bare go statement crashes the process without
+// them. SIGKILL cannot be caught.
 package shutdown
