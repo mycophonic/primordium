@@ -24,7 +24,7 @@ import (
 )
 
 var (
-	errInvalidPathTooLong  = errors.New("path component must be strictly shorter than 256 characters")
+	errInvalidPathTooLong  = errors.New("path component too long")
 	errInvalidPathEmpty    = errors.New("path component cannot be empty")
 	errInvalidEncoding     = errors.New("path component is not valid UTF-8")
 	errUnassignedCodePoint = errors.New("path component holds a code point unassigned in Unicode 9.0")

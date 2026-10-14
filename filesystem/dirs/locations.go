@@ -43,19 +43,27 @@ func appName() string {
 	return name
 }
 
-// HomeDir returns the current user's home directory.
-// Panics if the home directory cannot be determined, as this indicates
-// a fundamentally broken system configuration that cannot be recovered from.
-//
-// On Unix/Linux/macOS: Returns $HOME
-// On Windows: Returns %USERPROFILE%.
-func HomeDir() string {
+// HomeDir returns the current user's home directory: $HOME on Unix,
+// %USERPROFILE% on Windows. Without one it is ErrSystemFailure: a process
+// without a home, as a service account's or a bare container's, is the
+// machine's doing, not the program's.
+func HomeDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		panic(fmt.Sprintf("%v: %v", fault.ErrSystemFailure, err))
+		return "", fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
 
-	return home
+	return home, nil
+}
+
+// underHome is the path under the home directory, or HomeDir's error.
+func underHome(elem ...string) (string, error) {
+	home, err := HomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	return filepath.Join(append([]string{home}, elem...)...), nil
 }
 
 // RuntimeDir returns the user's runtime directory for storing sockets and other
@@ -93,7 +101,10 @@ func RuntimeDir() (string, error) {
 // On macOS: ~/Library/Application Support/<appname>
 // On Windows: %LOCALAPPDATA%\<appname>.
 func DataDir() (string, error) {
-	dir := getDataDir()
+	dir, err := getDataDir()
+	if err != nil {
+		return "", err
+	}
 
 	if err := os.MkdirAll(dir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
@@ -102,40 +113,41 @@ func DataDir() (string, error) {
 	return dir, nil
 }
 
-func getDataDir() string {
+func getDataDir() (string, error) {
 	switch runtime.GOOS {
 	case osDarwin:
-		return filepath.Join(HomeDir(), "Library", "Application Support", appName())
-
+		return underHome("Library", "Application Support", appName())
 	case osLinux:
 		if dataHome, ok := xdgDir("XDG_DATA_HOME"); ok {
-			return filepath.Join(dataHome, appName())
+			return filepath.Join(dataHome, appName()), nil
 		}
 
-		return filepath.Join(HomeDir(), ".local", "share", appName())
-
+		return underHome(".local", "share", appName())
 	case osWindows:
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, appName())
+			return filepath.Join(localAppData, appName()), nil
 		}
 
-		return filepath.Join(HomeDir(), "AppData", "Local", appName())
-
+		return underHome("AppData", "Local", appName())
 	default:
-		return filepath.Join(HomeDir(), ".local", "share", appName())
+		return underHome(".local", "share", appName())
 	}
 }
 
 // ConfigDir returns the app-specific directory for user configuration.
-// The directory is created if it doesn't exist.
-// Panics if the config directory cannot be determined.
+// The directory is created if it doesn't exist. Nowhere to put it, no home
+// and on Linux no usable $XDG_CONFIG_HOME, is ErrSystemFailure.
 //
 // On Linux: $XDG_CONFIG_HOME/<appname> (defaults to ~/.config/<appname>)
 // On macOS: ~/Library/Application Support/<appname> (same as DataDir)
 // On Windows: %AppData%\<appname> (roaming profile, syncs across machines).
 func ConfigDir() (string, error) {
-	configDir := filepath.Join(getConfigBase(), appName())
+	base, err := getConfigBase()
+	if err != nil {
+		return "", err
+	}
 
+	configDir := filepath.Join(base, appName())
 	if err := os.MkdirAll(configDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -146,21 +158,21 @@ func ConfigDir() (string, error) {
 // getConfigBase is the user's configuration directory. On Linux it follows the
 // XDG spec, which os.UserConfigDir does not: a relative $XDG_CONFIG_HOME is
 // ignored there, where os.UserConfigDir fails.
-func getConfigBase() string {
+func getConfigBase() (string, error) {
 	if runtime.GOOS == osLinux {
 		if configHome, ok := xdgDir("XDG_CONFIG_HOME"); ok {
-			return configHome
+			return configHome, nil
 		}
 
-		return filepath.Join(HomeDir(), ".config")
+		return underHome(".config")
 	}
 
 	base, err := os.UserConfigDir()
 	if err != nil {
-		panic(fmt.Sprintf("%v: %v", fault.ErrSystemFailure, err))
+		return "", fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
 
-	return base
+	return base, nil
 }
 
 // xdgDir returns an XDG variable's value when the spec lets it count: "All
@@ -180,8 +192,12 @@ func xdgDir(variable string) (string, bool) {
 // On macOS: ~/Library/Caches/<appname>
 // On Windows: %LOCALAPPDATA%\<appname>\cache.
 func CacheDir(sub ...string) (string, error) {
-	cacheDir := filepath.Join(append([]string{getCacheDir()}, sub...)...)
+	base, err := getCacheDir()
+	if err != nil {
+		return "", err
+	}
 
+	cacheDir := filepath.Join(append([]string{base}, sub...)...)
 	if err := os.MkdirAll(cacheDir, internal.DirPermissionsPrivate); err != nil {
 		return "", fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -189,27 +205,24 @@ func CacheDir(sub ...string) (string, error) {
 	return cacheDir, nil
 }
 
-func getCacheDir() string {
+func getCacheDir() (string, error) {
 	switch runtime.GOOS {
 	case osDarwin:
-		return filepath.Join(HomeDir(), "Library", "Caches", appName())
-
+		return underHome("Library", "Caches", appName())
 	case osLinux:
 		if xdgCache, ok := xdgDir("XDG_CACHE_HOME"); ok {
-			return filepath.Join(xdgCache, appName())
+			return filepath.Join(xdgCache, appName()), nil
 		}
 
-		return filepath.Join(HomeDir(), ".cache", appName())
-
+		return underHome(".cache", appName())
 	case osWindows:
 		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			return filepath.Join(localAppData, appName(), "cache")
+			return filepath.Join(localAppData, appName(), "cache"), nil
 		}
 
-		return filepath.Join(HomeDir(), "AppData", "Local", appName(), "cache")
-
+		return underHome("AppData", "Local", appName(), "cache")
 	default:
-		return filepath.Join(HomeDir(), ".cache", appName())
+		return underHome(".cache", appName())
 	}
 }
 

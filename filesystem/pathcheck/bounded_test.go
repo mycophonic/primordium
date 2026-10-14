@@ -228,3 +228,26 @@ func TestBoundedSockets(t *testing.T) {
 		}
 	}
 }
+
+// TestTooLongSaysWhatItCounted: the length error carries the count and the
+// unit the platform counts in: the same 300 two-byte runes are 600 bytes to
+// Linux and 300 UTF-16 code units to Windows.
+func TestTooLongSaysWhatItCounted(t *testing.T) {
+	t.Parallel()
+
+	name := strings.Repeat("é", 300)
+
+	for platform, want := range map[string]string{"linux": "600 bytes, at most 255", "windows": "300 UTF-16 code units, at most 255"} {
+		var err error
+
+		if platform == "linux" {
+			err = pathcheck.Linux().ValidateComponent(name)
+		} else {
+			err = pathcheck.Windows().ValidateComponent(name)
+		}
+
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Fatalf("%s: ValidateComponent = %v, want it to say %q", platform, err, want)
+		}
+	}
+}

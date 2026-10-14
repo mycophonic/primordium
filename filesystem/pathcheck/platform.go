@@ -200,6 +200,15 @@ func (p platform) componentLength(component string) int {
 	return len(component)
 }
 
+// lengthUnit names what componentLength counts.
+func (p platform) lengthUnit() string {
+	if p.name == "windows" {
+		return "UTF-16 code units"
+	}
+
+	return "bytes"
+}
+
 func (p platform) validateSpecific(component string) error {
 	if p.name == "windows" {
 		return validateWindows(component)

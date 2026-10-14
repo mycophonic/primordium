@@ -49,7 +49,10 @@ var procGlobalMemoryStatusEx = windows.NewLazySystemDLL("kernel32.dll").NewProc(
 
 // Host returns information about the current machine.
 func Host() (Info, error) {
-	home := dirs.HomeDir()
+	home, err := dirs.HomeDir()
+	if err != nil {
+		return Info{}, fmt.Errorf("home: %w", err)
+	}
 
 	diskTotal, diskFree, err := diskSpace(home)
 	if err != nil {

@@ -35,10 +35,13 @@ import (
 
 // Host returns information about the current machine.
 func Host() (Info, error) {
-	home := dirs.HomeDir()
+	home, err := dirs.HomeDir()
+	if err != nil {
+		return Info{}, fmt.Errorf("home: %w", err)
+	}
 
 	var stat unix.Statfs_t
-	if err := unix.Statfs(home, &stat); err != nil {
+	if err = unix.Statfs(home, &stat); err != nil {
 		return Info{}, fmt.Errorf("%w: statfs: %w", fault.ErrSystemFailure, err)
 	}
 
