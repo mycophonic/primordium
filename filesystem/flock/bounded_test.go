@@ -27,6 +27,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -424,5 +425,55 @@ func TestCleanup(t *testing.T) {
 
 	if len(entries) != 1 || entries[0].Name() != filepath.Base(path) {
 		t.Fatalf("after Cleanup the directory holds %v, want the locked file alone", entries)
+	}
+}
+
+// TestLongName: a name of 255 characters, the longest a file system takes,
+// is locked like any other: its holder conflicts with a second, another long
+// name that starts alike is a lock of its own, and Cleanup leaves the two
+// files alone in their directory.
+func TestLongName(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	first := filepath.Join(dir, strings.Repeat("a", 254)+"1")
+	second := filepath.Join(dir, strings.Repeat("a", 254)+"2")
+
+	for _, path := range []string{first, second} {
+		if err := os.WriteFile(path, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	held, err := flock.Lock(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = flock.TryLock(first); !errors.Is(err, flock.ErrLockWouldBlock) {
+		t.Fatalf("TryLock on a held long name = %v, want ErrLockWouldBlock", err)
+	}
+
+	other, err := flock.TryLock(second)
+	if err != nil {
+		t.Fatalf("TryLock on another long name = %v, want a lock of its own", err)
+	}
+
+	for _, file := range []*os.File{held, other} {
+		if err = flock.Unlock(file); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	flock.Cleanup(first)
+	flock.Cleanup(second)
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 2 || entries[0].Name() != filepath.Base(first) || entries[1].Name() != filepath.Base(second) {
+		t.Fatalf("after Cleanup the directory holds %v, want the two files alone", entries)
 	}
 }
