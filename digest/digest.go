@@ -109,7 +109,8 @@ func (a Algorithm) Hash() hash.Hash {
 // Digest is a content digest: the algorithm that produced it and the hash's
 // lowercase hex encoding. It is a value: two digests of the same content
 // compare equal with ==, and the zero value is no digest, which IsZero
-// reports. One comes from New or FromString only.
+// reports. One comes from New or FromString only, or from text through
+// UnmarshalText, which is FromString.
 type Digest struct {
 	algorithm Algorithm
 	encoded   string
@@ -199,4 +200,30 @@ func (d Digest) String() string {
 // returns.
 func (d Digest) IsZero() bool {
 	return d == Digest{}
+}
+
+// MarshalText is the digest as String gives it, so that a Digest travels
+// through JSON, YAML and every encoder that honours encoding.TextMarshaler
+// as "algorithm:encoded"; no digest travels as the empty string.
+func (d Digest) MarshalText() ([]byte, error) {
+	return []byte(d.String()), nil
+}
+
+// UnmarshalText is FromString over the text, and no digest for the empty
+// string, so that an optional digest round-trips as one.
+func (d *Digest) UnmarshalText(text []byte) error {
+	if len(text) == 0 {
+		*d = Digest{}
+
+		return nil
+	}
+
+	parsed, err := FromString(string(text))
+	if err != nil {
+		return err
+	}
+
+	*d = parsed
+
+	return nil
 }

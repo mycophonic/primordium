@@ -18,6 +18,7 @@ package digest_test
 
 import (
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -513,5 +514,45 @@ func TestDigestIsAValue(t *testing.T) {
 
 	if !none.IsZero() || none.String() != "" || first.IsZero() {
 		t.Fatalf("zero: IsZero %t String %q; real: IsZero %t", none.IsZero(), none.String(), first.IsZero())
+	}
+}
+
+// TestDigestTravelsAsText: through JSON a digest is its string, the zero
+// value the empty string, and both come back as themselves; text that is
+// not a digest is FromString's error.
+func TestDigestTravelsAsText(t *testing.T) {
+	t.Parallel()
+
+	dgst, err := digest.New(digest.SHA256, digest.SHA256.Hash().Sum(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type record struct {
+		Content digest.Digest `json:"content"`
+		None    digest.Digest `json:"none,omitzero"`
+	}
+
+	encoded, err := json.Marshal(record{Content: dgst})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if want := `{"content":"` + dgst.String() + `"}`; string(encoded) != want {
+		t.Fatalf("json = %s, want %s", encoded, want)
+	}
+
+	var back record
+
+	if err = json.Unmarshal([]byte(`{"content":"`+dgst.String()+`","none":""}`), &back); err != nil {
+		t.Fatal(err)
+	}
+
+	if back.Content != dgst || !back.None.IsZero() {
+		t.Fatalf("back = %+v, want the digest and no digest", back)
+	}
+
+	if err = json.Unmarshal([]byte(`{"content":"sha256:nothex"}`), &back); !errors.Is(err, fault.ErrInvalidArgument) {
+		t.Fatalf("Unmarshal of a bad digest = %v, want ErrInvalidArgument", err)
 	}
 }
