@@ -2068,3 +2068,22 @@ func TestCache_GC_EvictsOldestFirst(t *testing.T) {
 		t.Error("the entry aged older did not go first")
 	}
 }
+
+// TestCache_ZeroDigestIsRefused: the zero digest names no content; Acquire
+// and AcquireFile refuse it as ErrInvalidArgument instead of failing on the
+// path they would build from it, and Exists has nothing under it.
+func TestCache_ZeroDigestIsRefused(t *testing.T) {
+	t.Parallel()
+
+	blobCache := cache.New(t.TempDir(), 0)
+
+	var none dgst.Digest
+
+	_, _, err := blobCache.Acquire(none)
+	assert.Assert(t, errors.Is(err, fault.ErrInvalidArgument), "Acquire: %v", err)
+
+	_, err = blobCache.AcquireFile(none)
+	assert.Assert(t, errors.Is(err, fault.ErrInvalidArgument), "AcquireFile: %v", err)
+
+	assert.Assert(t, !blobCache.Exists(none))
+}
