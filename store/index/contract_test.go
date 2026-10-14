@@ -359,3 +359,49 @@ func TestAReusedPIDIsNotAReader(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestNewLeavesARecoveredTableFree: after New rebuilt a dead writer's grow,
+// the first operation does not wait out the stale threshold on the word the
+// writer left; a live taker's word would be kept.
+func TestNewLeavesARecoveredTableFree(t *testing.T) {
+	t.Parallel()
+
+	path := closedIndex(t)
+
+	idx, err := index.New(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	capacity, err := idx.Cap()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = idx.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The writer died in a grow: its journal, its word, and a data file it
+	// never finished.
+	writeTestJournal(t, path+".journal", capacity, []index.Record{{Key: 1, Value: testValue(1), Timestamp: 100}})
+	writeAt(t, path, 40, (uint64(1)<<63)|(uint64(4_000_000)<<32))
+
+	idx, err = index.New(path, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	defer func() { _ = idx.Close() }()
+
+	start := time.Now()
+
+	rec, found, err := idx.Get(1)
+	if err != nil || !found || rec.Timestamp != 100 {
+		t.Fatalf("Get after the rebuild = %v, %t, %v", rec, found, err)
+	}
+
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("the first Get waited %v on the dead writer's word", elapsed)
+	}
+}
