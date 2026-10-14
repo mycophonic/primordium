@@ -18,11 +18,16 @@
 
 package index
 
-import "syscall"
+import (
+	"errors"
+	"syscall"
+)
 
-// isProcessAlive reports whether a process with the given PID exists.
-// It uses kill(pid, 0), which checks for process existence without
-// delivering any signal.
+// isProcessAlive reports whether pid exists. kill(pid, 0) delivers nothing;
+// EPERM means the process is there and not ours to signal, which is alive:
+// a live writer taken for dead hands its lock to a second writer.
 func isProcessAlive(pid int) bool {
-	return syscall.Kill(pid, 0) == nil
+	err := syscall.Kill(pid, 0)
+
+	return err == nil || errors.Is(err, syscall.EPERM)
 }

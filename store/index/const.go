@@ -33,6 +33,11 @@ const (
 	defaultCap    = 1024
 	growFactor    = 2
 
+	// maxJournalCap bounds the capacity a grow journal may name: the number is
+	// a word read off disk, and a table this large is not one this store ever
+	// grew in place.
+	maxJournalCap = uint64(1) << 32
+
 	// Lock word layout (uint64 at header offset 40):
 	//   Bit 63:     write flag
 	//   Bits 62-32: writer PID (31 bits)

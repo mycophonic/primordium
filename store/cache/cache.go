@@ -24,6 +24,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -309,155 +310,44 @@ func (c *Cache) Exists(dgst digest.Digest) bool {
 	return err == nil
 }
 
-// GarbageCollect removes unused cache entries to stay within quota.
-// Returns statistics about the cleanup operation.
-// Locking is per-shard (prefix bucket), so Acquire operations in other shards
-// can proceed concurrently.
+// GarbageCollect brings the cache under its quota, evicting the oldest
+// committed entries first among those no reader, writer or pin holds. The
+// measure takes no lock; each eviction takes the entry's locks for itself,
+// so the walk holds no descriptor however many entries there are, and an
+// entry in use at that moment is skipped.
 func (c *Cache) GarbageCollect() (GCStats, error) {
 	stats := GCStats{Quota: c.quota}
 
-	// Enumerate all prefix buckets.
-	prefixes, err := xos.ReadDir(c.rootDir)
+	entries, err := c.measure()
 	if err != nil {
-		return stats, fmt.Errorf("%w: cache directory: %w", fault.ErrReadFailure, err)
+		return stats, err
 	}
 
-	var total int64
-
-	var candidates []gcCandidate
-
-	for _, pfx := range prefixes {
-		if !pfx.IsDir() {
-			continue
-		}
-
-		prefixDir := filepath.Join(c.rootDir, pfx.Name())
-
-		// Lock this shard while scanning its entries.
-		shardLock, err := flock.Lock(prefixDir)
-		if err != nil {
-			continue
-		}
-
-		bucketTotal, bucketCandidates := gcScanBucket(prefixDir)
-		total += bucketTotal
-
-		candidates = append(candidates, bucketCandidates...)
-
-		// Release shard lock — candidates retain their own entry dir locks.
-		_ = flock.Unlock(shardLock)
+	for _, entry := range entries {
+		stats.Remaining += entry.size
 	}
 
-	stats.Remaining = total
-
-	// If under quota, release all locks and return
-	if total <= c.quota {
-		for _, candidate := range candidates {
-			_ = flock.Unlock(candidate.lock)
-		}
-
+	if stats.Remaining <= c.quota {
 		return stats, nil
 	}
 
-	// Delete entries until under quota
-	for _, candidate := range candidates {
+	slices.SortFunc(entries, func(a, b gcEntry) int { return a.modTime.Compare(b.modTime) })
+
+	for _, entry := range entries {
 		if stats.Remaining <= c.quota {
-			// Under quota, release remaining locks
-			_ = flock.Unlock(candidate.lock)
-
-			continue
+			break
 		}
 
-		// Delete this entry
-		if err := os.RemoveAll(candidate.path); err != nil {
-			_ = flock.Unlock(candidate.lock)
-
+		if !c.evict(entry.path) {
 			continue
 		}
-
-		_ = flock.Unlock(candidate.lock)
 
 		stats.EntriesFreed++
-		stats.BytesFreed += candidate.size
-		stats.Remaining -= candidate.size
+		stats.BytesFreed += entry.size
+		stats.Remaining -= entry.size
 	}
 
 	return stats, nil
-}
-
-// gcScanBucket scans a single prefix bucket directory for GC candidates.
-// Returns the total size of data files and any candidates eligible for eviction.
-func gcScanBucket(prefixDir string) (int64, []gcCandidate) {
-	entries, err := xos.ReadDir(prefixDir)
-	if err != nil {
-		return 0, nil
-	}
-
-	var total int64
-
-	var candidates []gcCandidate
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		dir := filepath.Join(prefixDir, entry.Name())
-		dataPath := filepath.Join(dir, cacheDataFile)
-		lockPath := filepath.Join(dir, cacheLockFile)
-		writeLockPath := filepath.Join(dir, cacheWriteLock)
-
-		// Acquire exclusive lock on directory
-		dirLock, err := flock.TryLock(dir)
-		if err != nil {
-			// Directory in use, skip
-			continue
-		}
-
-		// Read size of data file
-		info, err := xos.Stat(dataPath)
-		if err != nil {
-			// No data file, release dir lock and continue
-			_ = flock.Unlock(dirLock)
-
-			continue
-		}
-
-		size := info.Size()
-		total += size
-
-		// Try to acquire exclusive lock on XYZ/lock
-		readLock, err := flock.TryLock(lockPath)
-		if err != nil {
-			// Someone has a read lock, skip this entry
-			_ = flock.Unlock(dirLock)
-
-			continue
-		}
-
-		// Try to acquire exclusive lock on XYZ/lock.write
-		writeLock, err := flock.TryLock(writeLockPath)
-		if err != nil {
-			// Write in progress, skip this entry
-			_ = flock.Unlock(readLock)
-			_ = flock.Unlock(dirLock)
-
-			continue
-		}
-
-		// Both locks acquired - entry is unused
-		// Release the file locks but keep directory lock
-		_ = flock.Unlock(writeLock)
-		_ = flock.Unlock(readLock)
-
-		candidates = append(candidates, gcCandidate{
-			path: dir,
-			size: size,
-			lock: dirLock,
-		})
-	}
-
-	return total, candidates
 }
 
 // acquireNoActiveWriter handles the case where no writer is active.
@@ -799,10 +689,105 @@ func (r *inProgressReader) Close() error {
 	return lockErr
 }
 
-type gcCandidate struct {
-	path string
-	size int64
-	lock *os.File
+// measure lists every committed entry with its size and commit time, locking
+// nothing: a shard or an entry that cannot be read is simply not there.
+func (c *Cache) measure() ([]gcEntry, error) {
+	prefixes, err := xos.ReadDir(c.rootDir)
+	if err != nil {
+		return nil, fmt.Errorf("%w: cache directory: %w", fault.ErrReadFailure, err)
+	}
+
+	var entries []gcEntry
+
+	for _, pfx := range prefixes {
+		if !pfx.IsDir() {
+			continue
+		}
+
+		prefixDir := filepath.Join(c.rootDir, pfx.Name())
+
+		shard, err := xos.ReadDir(prefixDir)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range shard {
+			if !entry.IsDir() {
+				continue
+			}
+
+			dir := filepath.Join(prefixDir, entry.Name())
+
+			info, err := xos.Stat(filepath.Join(dir, cacheDataFile))
+			if err != nil {
+				continue
+			}
+
+			entries = append(entries, gcEntry{path: dir, size: info.Size(), modTime: info.ModTime()})
+		}
+	}
+
+	return entries, nil
+}
+
+// evict removes the entry at dir when nobody holds it. The shard lock keeps
+// an Acquire out of its create-then-lock window; the directory lock stands
+// for the entry, and the two probes, released at once, for a reader or a pin
+// and for a writer. False when any is held, or the entry is already gone.
+func (*Cache) evict(dir string) bool {
+	shardLock, err := flock.Lock(filepath.Dir(dir))
+	if err != nil {
+		return false
+	}
+
+	defer func() { _ = flock.Unlock(shardLock) }()
+
+	dirLock, err := flock.TryLock(dir)
+	if err != nil {
+		return false
+	}
+
+	// Probed, not held: on Windows a lock is a sidecar file inside the
+	// directory, open for the lock's life, and a directory with an open file
+	// in it does not go. Nothing takes either meanwhile; Acquire and
+	// AcquireFile take the directory lock first.
+	free := unheld(filepath.Join(dir, cacheLockFile)) && unheld(filepath.Join(dir, cacheWriteLock))
+
+	removed := false
+
+	if free {
+		if _, err := xos.Stat(filepath.Join(dir, cacheDataFile)); err == nil {
+			removed = os.RemoveAll(dir) == nil
+		}
+	}
+
+	_ = flock.Unlock(dirLock)
+
+	// The directory lock's own sidecar sits beside the directory.
+	if removed {
+		flock.Cleanup(dir)
+	}
+
+	return removed
+}
+
+// unheld reports whether nobody holds the lock at path: a TryLock that
+// succeeds, released at once.
+func unheld(path string) bool {
+	lock, err := flock.TryLock(path)
+	if err != nil {
+		return false
+	}
+
+	_ = flock.Unlock(lock)
+
+	return true
+}
+
+type gcEntry struct {
+	path    string
+	size    int64
+	modTime time.Time
 }
 
 // GCStats contains statistics from a garbage collection run. Sizes are in

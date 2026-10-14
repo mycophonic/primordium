@@ -89,6 +89,11 @@ type Index struct {
 	lockDataFile *os.File
 	localReaders atomic.Int32 // per-process reader goroutine count
 	readerSlot   atomic.Int32 // claimed PID slot index, -1 if none
+	// slotMu makes a reader-count transition and its slot change one step:
+	// without it a goroutine leaving at 1→0 clears the slot a goroutine
+	// arriving at 0→1 has just claimed, and that reader is invisible to a
+	// writer's stale-reader check.
+	slotMu sync.Mutex
 }
 
 // Record represents a single entry in the index.
@@ -165,7 +170,7 @@ func New(path string, opts *Options) (*Index, error) {
 	// If a previous grow was interrupted, rebuild the data file from the
 	// journal before proceeding. The setup lock ensures no other process
 	// can race with recovery.
-	if err = recoverFromJournal(path, idx.journalPath, idx.valSize); err != nil {
+	if err = recoverFromJournal(path, idx.journalPath, idx.valSize, idx.maxCap); err != nil {
 		return nil, err
 	}
 
@@ -574,9 +579,11 @@ type journalData struct {
 	Records []Record
 }
 
-// readJournal reads a grow journal. Returns the target capacity, valSize,
-// and the records that were live at the time of the interrupted grow.
-func readJournal(path string) (journalData, error) {
+// readJournal reads a grow journal: the target capacity, the value width and
+// the records live when the grow was interrupted. Anything the bytes cannot
+// be, a capacity above capLimit included, is an error, and the caller treats
+// the journal as corrupt.
+func readJournal(path string, capLimit uint64) (journalData, error) {
 	const journalHeaderSize = 24
 
 	data, err := xos.ReadFile(path)
@@ -591,19 +598,34 @@ func readJournal(path string) (journalData, error) {
 	newCap := binary.BigEndian.Uint64(data[0:8])
 	count := binary.BigEndian.Uint64(data[8:16])
 	valSz := int(binary.BigEndian.Uint16(data[16:18]))
-	journalRecordSize := keySize + valSz + tsSize
 
-	// #nosec G115 -- count from untrusted journal; overflow produces wrong expected, caught by size mismatch check
-	// below
-	expected := journalHeaderSize + int(count)*journalRecordSize
-	if len(data) != expected {
-		return journalData{}, fmt.Errorf("%w: journal size mismatch: have %d, want %d",
-			fault.ErrInvalidArgument, len(data), expected)
+	if valSz == 0 {
+		return journalData{}, fmt.Errorf("%w: journal value width is zero", fault.ErrInvalidArgument)
+	}
+
+	// The count is what the bytes hold, never the header's count times the
+	// record width: that product wraps for a large enough count into a size
+	// that matches, and the allocation it then asks for does not exist.
+	journalRecordSize := keySize + valSz + tsSize
+	body := len(data) - journalHeaderSize
+
+	// #nosec G115 -- body is a length less the header, never negative
+	if body%journalRecordSize != 0 || uint64(body/journalRecordSize) != count {
+		return journalData{}, fmt.Errorf("%w: journal size mismatch: %d bytes for %d records of %d",
+			fault.ErrInvalidArgument, body, count, journalRecordSize)
+	}
+
+	// The capacity holds the records under the load factor and is one a grow
+	// could have written: under the index's own ceiling when it has one.
+	if newCap == 0 || newCap > capLimit || float64(count)/float64(newCap) > maxLoadFactor {
+		return journalData{}, fmt.Errorf("%w: journal capacity %d cannot hold %d records",
+			fault.ErrInvalidArgument, newCap, count)
 	}
 
 	records := make([]Record, count)
 	for idx := range records {
 		off := journalHeaderSize + idx*journalRecordSize
+
 		val := make([]byte, valSz)
 		copy(val, data[off+keySize:off+keySize+valSz])
 
@@ -618,11 +640,13 @@ func readJournal(path string) (journalData, error) {
 	return journalData{NewCap: newCap, ValSize: valSz, Records: records}, nil
 }
 
-// recoverFromJournal rebuilds the data file from a grow journal left by
-// a previous interrupted grow. If no journal exists, this is a no-op.
-// If the journal is corrupt (partial write before crash), it is deleted
-// and the existing data file is used as-is.
-func recoverFromJournal(dataPath, journalPath string, valSize int) error {
+// recoverFromJournal rebuilds the data file from a grow journal left by a
+// previous interrupted grow. No journal is a no-op; a corrupt one, a partial
+// write before the crash or a capacity the index would refuse, is deleted
+// and the existing data file used as it is. The rebuilt table is written
+// beside the data file and renamed over it after the sync, so a failure or
+// a crash midway leaves the previous file and the journal for the next New.
+func recoverFromJournal(dataPath, journalPath string, valSize int, maxCap uint64) error {
 	_, err := xos.Stat(journalPath)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
@@ -632,14 +656,16 @@ func recoverFromJournal(dataPath, journalPath string, valSize int) error {
 		return fmt.Errorf("%w: stat journal: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	journal, err := readJournal(journalPath)
+	capLimit := maxJournalCap
+	if maxCap != 0 && maxCap < capLimit {
+		capLimit = maxCap
+	}
+
+	journal, err := readJournal(journalPath, capLimit)
 	if err != nil {
-		// Corrupt journal — the grow hadn't started writing to the data
-		// file yet (journal is written and synced before any modification).
-		// Delete the journal and proceed with the existing data file.
 		_ = os.Remove(journalPath)
 
-		return nil
+		return nil //nolint:nilerr // a corrupt journal is dropped and the data file used as it is
 	}
 
 	if journal.ValSize != valSize {
@@ -649,61 +675,106 @@ func recoverFromJournal(dataPath, journalPath string, valSize int) error {
 			fault.ErrInvalidArgument, journal.ValSize, valSize)
 	}
 
-	newCap := journal.NewCap
-	records := journal.Records
+	recoverPath := dataPath + ".recover"
+
+	if err := writeRecovered(recoverPath, journal, valSize); err != nil {
+		_ = os.Remove(recoverPath)
+
+		return err
+	}
+
+	if err := xos.Rename(recoverPath, dataPath); err != nil {
+		_ = os.Remove(recoverPath)
+
+		return fmt.Errorf("%w: install recovered data file: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	_ = os.Remove(journalPath)
+
+	return nil
+}
+
+// writeRecovered writes the journal's table to path, sized to its capacity
+// and filled record by record, never built in memory: the capacity is a
+// word read off disk.
+func writeRecovered(path string, journal journalData, valSize int) error {
 	recSize := int64(1 + keySize + valSize + tsSize)
+	// #nosec G115 -- NewCap is at most maxJournalCap, checked in readJournal
+	fileSize := int64(headerSize) + int64(journal.NewCap)*recSize
 
-	// Build the recovered data file in memory.
-	// #nosec G115 -- same bound as create
-	fileSize := int64(headerSize) + int64(newCap)*recSize
-	buf := make([]byte, fileSize)
+	file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDWR|os.O_TRUNC, filesystem.FilePermissionsPrivate)
+	if err != nil {
+		return fmt.Errorf("%w: create recovered data file: %w", fault.ErrFilesystemFailure, err)
+	}
 
-	hdr := header{
+	defer func() { _ = file.Close() }() // data synced; a close error is not actionable
+
+	if err = file.Truncate(fileSize); err != nil {
+		return fmt.Errorf("%w: size recovered data file: %w", fault.ErrWriteFailure, err)
+	}
+
+	count, err := placeRecords(file, journal, valSize)
+	if err != nil {
+		return err
+	}
+
+	head := make([]byte, headerSize)
+	marshalHeader(head, header{
 		Magic:   magic,
 		Version: version,
 		// #nosec G115 -- valSize is validated to be in [1, 65535] in New
 		ValSize:  uint16(valSize),
-		Capacity: newCap,
+		Capacity: journal.NewCap,
+		Count:    count,
+	})
+
+	if _, err = file.WriteAt(head, 0); err != nil {
+		return fmt.Errorf("%w: write recovered header: %w", fault.ErrWriteFailure, err)
 	}
 
-	// Reinsert all records into the new capacity layout.
-	for _, rec := range records {
-		start := rec.Key % newCap
-		for j := range newCap {
-			bucket := (start + j) % newCap
-			// #nosec G115 -- bucket < newCap, bounded by file size
-			off := int64(headerSize) + int64(bucket)*recSize
-			if buf[off] == statusEmpty {
-				marshalRecord(buf, off, rec.Key, rec.Value, valSize, rec.Timestamp)
-
-				hdr.Count++
-
-				break
-			}
-		}
-	}
-
-	marshalHeader(buf, hdr)
-
-	// Write the recovered data file.
-	file, err := xos.OpenFile(dataPath, os.O_CREATE|os.O_RDWR|os.O_TRUNC, filesystem.FilePermissionsPrivate)
-	if err != nil {
-		return fmt.Errorf("%w: create recovered data file: %w", fault.ErrFilesystemFailure, err)
-	}
-	defer func() { _ = file.Close() }() // data synced; a close error is not actionable
-
-	if _, err := file.Write(buf); err != nil {
-		return fmt.Errorf("%w: write recovered data: %w", fault.ErrWriteFailure, err)
-	}
-
-	if err := file.Sync(); err != nil {
+	if err = file.Sync(); err != nil {
 		return fmt.Errorf("%w: sync recovered data: %w", fault.ErrWriteFailure, err)
 	}
 
-	// Recovery complete.
-	_ = os.Remove(journalPath)
-
 	return nil
+}
+
+// placeRecords writes the journal's records into the recovered file at their
+// buckets, remembering the buckets taken since the file is not read back,
+// and returns how many it placed.
+func placeRecords(file *os.File, journal journalData, valSize int) (uint64, error) {
+	newCap := journal.NewCap
+	recSize := int64(1 + keySize + valSize + tsSize)
+	occupied := make(map[uint64]struct{}, len(journal.Records))
+	record := make([]byte, recSize)
+
+	var count uint64
+
+	for _, rec := range journal.Records {
+		start := rec.Key % newCap
+
+		for j := range newCap {
+			bucket := (start + j) % newCap
+			if _, taken := occupied[bucket]; taken {
+				continue
+			}
+
+			occupied[bucket] = struct{}{}
+
+			marshalRecord(record, 0, rec.Key, rec.Value, valSize, rec.Timestamp)
+
+			// #nosec G115 -- bucket < newCap <= maxJournalCap
+			if _, err := file.WriteAt(record, int64(headerSize)+int64(bucket)*recSize); err != nil {
+				return 0, fmt.Errorf("%w: write recovered record: %w", fault.ErrWriteFailure, err)
+			}
+
+			count++
+
+			break
+		}
+	}
+
+	return count, nil
 }
 
 func (idx *Index) mmapDataFile() error {
@@ -1119,11 +1190,15 @@ func (idx *Index) allReaderPIDsDead() bool {
 func (idx *Index) rlock() {
 	idx.mu.RLock()
 
-	// Track per-process reader count. On the 0→1 transition, claim a PID
-	// slot in the lock file so writers can detect stale readers.
+	// The 0→1 transition claims a PID slot, so writers can tell this process
+	// has readers.
+	idx.slotMu.Lock()
+
 	if idx.localReaders.Add(1) == 1 {
 		idx.claimReaderSlot()
 	}
+
+	idx.slotMu.Unlock()
 
 	ptr := idx.lockWordPtr()
 
@@ -1161,11 +1236,13 @@ func (idx *Index) rlock() {
 func (idx *Index) runlock() {
 	atomic.AddUint64(idx.lockWordPtr(), ^uint64(0))
 
-	// Track per-process reader count. On the 1→0 transition, clear our
-	// PID slot so writers know this process has no active readers.
+	idx.slotMu.Lock()
+
 	if idx.localReaders.Add(-1) == 0 {
 		idx.clearReaderSlot()
 	}
+
+	idx.slotMu.Unlock()
 
 	idx.mu.RUnlock()
 }

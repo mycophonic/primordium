@@ -45,22 +45,10 @@ const stagingDir = "staging"
 // errFmtFetch wraps a failed FetchFunc invocation.
 const errFmtFetch = "%w: fetch: %w"
 
-// stageBufferSize is the copy buffer stage uses to feed the content hasher.
-//
-// BLAKE3 parallelises across goroutines within a single Write call, over the
-// eigentrees of whatever buffer it is handed, so staging throughput scales
-// with buffer size rather than with content size. io.Copy's default 32KiB is
-// far too small to engage that: it is the worst-performing option of any
-// algorithm here. Measured staging 512MB from a streaming source on arm64
-// with 18 cores:
-//
-//	256KiB  1950MB/s      4MiB  4429MB/s     32MiB  5100MB/s
-//	  1MiB  3224MB/s      8MiB  4733MB/s     64MiB  5234MB/s
-//	  2MiB  3728MB/s     16MiB  4936MB/s
-//
-// The curve flattens past 16MiB while the buffer is allocated per concurrent
-// stage call, so this deliberately stops short of the peak: the remaining
-// ~6% costs four times the resident footprint under concurrent fetches.
+// stageBufferSize feeds the hasher 16 MiB at a time: BLAKE3 parallelises
+// within one Write over the buffer it is handed, so io.Copy's 32 KiB never
+// engages it, and past 16 MiB the gain flattens while every concurrent stage
+// holds a buffer of its own.
 const stageBufferSize = 16 * bytesize.MiB
 
 // algorithmToID maps digest algorithms to stable numeric identifiers for
