@@ -49,11 +49,10 @@ const (
 // errFmtFetch wraps a failed FetchFunc invocation.
 const errFmtFetch = "%w: fetch: %w"
 
-// stageBufferSize feeds the hasher 16 MiB at a time: BLAKE3 parallelises
-// within one Write over the buffer it is handed, so io.Copy's 32 KiB never
-// engages it, and past 16 MiB the gain flattens while every concurrent stage
-// holds a buffer of its own.
-const stageBufferSize = 16 * bytesize.MiB
+// stageBufferSize is the copy buffer of a stage, which every concurrent
+// stage holds: measured on a 64 MiB blob, 1 MiB hashes as fast as any size
+// below it and twice as fast as 16 MiB, which no longer fits the caches.
+const stageBufferSize = bytesize.MiB
 
 // algorithmToID maps digest algorithms to stable numeric identifiers for
 // on-disk index records. These IDs are a persistence contract owned by this
