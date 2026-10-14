@@ -31,7 +31,9 @@ func Validate(path string) error {
 }
 
 // ValidateComponent checks a single path component for the platform this
-// program runs on: see Platform.ValidateComponent.
+// program runs on: at most 255 bytes, UTF-16 code units on Windows, since
+// that is what the filesystems count; see Platform.ValidateComponent for the
+// rest.
 func ValidateComponent(pathComponent string) error {
 	return Native().ValidateComponent(pathComponent) //nolint:wrapcheck // pathcheck's own error, already ErrInvalidPath
 }
@@ -64,8 +66,9 @@ func (p platform) Validate(path string) error {
 
 func (p platform) ValidateComponent(pathComponent string) error {
 	// https://en.wikipedia.org/wiki/Comparison_of_file_systems#Limits
-	if p.componentLength(pathComponent) > pathComponentMaxLength {
-		return errors.Join(ErrInvalidPath, errInvalidPathTooLong)
+	if length := p.componentLength(pathComponent); length > pathComponentMaxLength {
+		return fmt.Errorf("%w: %d %s, at most %d", errors.Join(ErrInvalidPath, errInvalidPathTooLong),
+			length, p.lengthUnit(), pathComponentMaxLength)
 	}
 
 	if strings.TrimSpace(pathComponent) == "" {
