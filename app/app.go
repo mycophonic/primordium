@@ -29,8 +29,9 @@ import (
 	"github.com/mycophonic/primordium/system/rlimit"
 )
 
-// Options provides configurable hooks for applications that will decide of app-derived common locations and crash
-// reporter behavior.
+// Options names the program. Name decides its directories and must be set;
+// Version and Environment tag its crash reports; DSN is where they go, and an
+// empty one disables crash collection.
 type Options struct {
 	Name        string
 	Version     string
@@ -38,25 +39,22 @@ type Options struct {
 	DSN         string
 }
 
-// New configures application lifecycle and returns a context that is
-// cancelled on shutdown signals.
+// New sets the process up and returns a context cancelled by a shutdown
+// signal. Once per process: the network defaults refuse a second install.
+// The reporter and the stores are shutdown handlers, which run on a signal
+// or through shutdown.Run, never on a plain return from main.
 func New(ctx context.Context, opts *Options) context.Context {
 	if opts.Name == "" {
 		panic("app.New: Options.Name must not be empty")
 	}
 
-	// Initialize subsystems
-
-	// Filesystem first. Wipe out system umask, set the app name for locations.
+	// Locations first: everything after may log or write under the name.
 	filesystem.Initialize(opts.Name)
 
-	// Set the logger: honor LOG_LEVEL env var, install the tint/JSON slog handler.
 	debug := logger.SetDefaultsForLogger(ctx)
 
-	// Configure the default http and ssh configurations.
 	network.SetDefaults()
 
-	// Setup Sentry.
 	if opts.DSN != "" {
 		if err := reporter.Initialize(&reporter.Config{
 			DSN:              opts.DSN,
@@ -72,11 +70,10 @@ func New(ctx context.Context, opts *Options) context.Context {
 		slog.WarnContext(ctx, "dsn not provided: crash collection disabled")
 	}
 
-	// On modern systems, this is generally reasonable.
 	rlimit.RaiseNoFileLimit()
 
-	// Register shutdown handlers. Handlers run in reverse order, so reporter
-	// flushes last (after stores close) to capture any final error events.
+	// Reverse order: the reporter flushes last, after the stores have closed
+	// and logged whatever closing them raised.
 	shutdown.Register(reporter.Shutdown)
 	shutdown.Register(store.Shutdown)
 

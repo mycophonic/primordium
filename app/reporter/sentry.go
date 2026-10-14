@@ -17,12 +17,15 @@
 package reporter
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 
 	"github.com/getsentry/sentry-go"
 
+	"github.com/mycophonic/primordium/app/logger"
 	"github.com/mycophonic/primordium/fault"
 )
 
@@ -44,7 +47,10 @@ type (
 	Event = sentry.Event
 )
 
-// Initialize and configures underlying Sentry library.
+// Initialize configures Sentry and routes the default logger into it: records
+// at ERROR and above become events, lower ones breadcrumbs on the next event,
+// while the console keeps every record. Once per process: a second call wraps
+// the logger again and every error is reported twice.
 func Initialize(conf *Config) error {
 	sampleRate := conf.TracesSampleRate
 	if sampleRate == 0 {
@@ -63,20 +69,23 @@ func Initialize(conf *Config) error {
 		Environment:      conf.Environment,
 		Release:          conf.Release,
 		TracesSampleRate: sampleRate,
-		// Use the global default client so that Sentry traffic inherits the
-		// TLS and transport settings configured by network.SetDefaults.
+		// The default client, so Sentry traffic goes through the transport
+		// network.SetDefaults installs.
 		HTTPClient: http.DefaultClient,
 	})
 	if err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
 
-	// Route slog into Sentry: wrap the current default handler (the console
-	// handler that logger.SetDefaultsForLogger installed) so ERROR records become
-	// Sentry events and lower levels become breadcrumbs, while the console keeps
-	// writing everything to stderr. Done here, after Init, because the Sentry
-	// client must exist before the handler can capture. Without this step nothing
-	// reaches Sentry — sentry.Init alone does not observe slog.
+	// After Init: the handler captures through the client Init creates. The
+	// handler it wraps must not be slog's built-in one: SetDefault routes the
+	// log package into the new default, and the built-in handler writes back
+	// through the log package, under the same lock, so a log.Print would
+	// deadlock on itself. With nothing installed yet, logger's defaults go first.
+	if reflect.TypeOf(slog.Default().Handler()).String() == "*slog.defaultHandler" {
+		logger.SetDefaultsForLogger(context.Background())
+	}
+
 	slog.SetDefault(slog.New(newSentryHandler(slog.Default().Handler())))
 
 	slog.Info("sentry reporter configured")
