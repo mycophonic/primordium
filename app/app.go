@@ -29,23 +29,36 @@ import (
 	"github.com/mycophonic/primordium/system/rlimit"
 )
 
-// Options names the program. Name decides its directories and must be set;
-// Version and Environment tag its crash reports; DSN is where they go, and an
-// empty one disables crash collection.
+// Options names the program and sets its crash reporting. Name decides its
+// directories and must be set; Version and Environment tag its crash reports;
+// DSN is where they go, and an empty one disables crash collection. PII lets
+// the reports carry user and request data; TracesSampleRate is the share of
+// transactions traced, and zero traces none.
 type Options struct {
-	Name        string
-	Version     string
-	Environment string
-	DSN         string
+	Name             string
+	Version          string
+	Environment      string
+	DSN              string
+	PII              bool
+	TracesSampleRate float64
 }
 
-// New sets the process up and returns a context cancelled by a shutdown
-// signal. Once per process: the network defaults refuse a second install.
-// The reporter and the stores are shutdown handlers, which run on a signal
-// or through shutdown.Run, never on a plain return from main.
-func New(ctx context.Context, opts *Options) context.Context {
+// Main sets the process up under opts and runs run with a context a shutdown
+// signal cancels. When run returns, the shutdown handlers run and the process
+// exits: with the shutdown.ExitError run returned or wrapped, 0 on nil, 1 on any
+// other error or a panic. Main never returns. Once per process: the network
+// defaults refuse a second install. A program whose command library exits by
+// itself, as urfave/cli does through its OsExiter, points that exit at
+// shutdown.Exit, so that the handlers run first.
+func Main(opts *Options, run func(ctx context.Context) error) {
+	shutdown.Run(setUp(context.Background(), opts), run)
+}
+
+// setUp is Main before run: the locations, the logger, the network defaults,
+// the reporter, the file limit, the handlers, and the context.
+func setUp(ctx context.Context, opts *Options) context.Context {
 	if opts.Name == "" {
-		panic("app.New: Options.Name must not be empty")
+		panic("app.Main: Options.Name must not be empty")
 	}
 
 	// Locations first: everything after may log or write under the name.
@@ -59,10 +72,10 @@ func New(ctx context.Context, opts *Options) context.Context {
 		if err := reporter.Initialize(&reporter.Config{
 			DSN:              opts.DSN,
 			Debug:            debug,
-			PII:              true,
+			PII:              opts.PII,
 			Release:          opts.Version,
 			Environment:      opts.Environment,
-			TracesSampleRate: 1.0,
+			TracesSampleRate: opts.TracesSampleRate,
 		}); err != nil {
 			slog.ErrorContext(ctx, "failed to initialize reporter", "err", err)
 		}
@@ -77,7 +90,5 @@ func New(ctx context.Context, opts *Options) context.Context {
 	shutdown.Register(reporter.Shutdown)
 	shutdown.Register(store.Shutdown)
 
-	ctx = shutdown.SetDefaults(ctx)
-
-	return ctx
+	return shutdown.SetDefaults(ctx)
 }

@@ -14,7 +14,9 @@
    limitations under the License.
 */
 
-// Package app sets a process up the way every mycophonic program is: the
+// Package app sets a process up the way every mycophonic program is, the
 // filesystem defaults and locations under its name, the logger, the network
-// defaults, the crash reporter, the file limit, and the shutdown handlers.
+// defaults, the crash reporter, the file limit, and the shutdown handlers,
+// and runs it through Main, so that the handlers run however it ends short
+// of a kill.
 package app
