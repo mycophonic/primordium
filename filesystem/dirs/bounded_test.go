@@ -29,6 +29,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/dirs"
 )
 
@@ -233,22 +234,27 @@ func TestDirectoriesNeedAName(t *testing.T) {
 	}
 }
 
-// TestHomeDirPanics: HomeDir panics when the home cannot be determined.
-func TestHomeDirPanics(t *testing.T) {
-	variable := "HOME"
-	if runtime.GOOS == "windows" {
-		variable = "USERPROFILE"
+// TestHomeDirFails: with no home, HomeDir is ErrSystemFailure, as are the
+// directories that live under it and have no variable of their own to fall
+// back on.
+//
+//nolint:paralleltest // sets the process's environment
+func TestHomeDirFails(t *testing.T) {
+	for _, variable := range []string{"HOME", "USERPROFILE", "XDG_DATA_HOME", "XDG_CACHE_HOME", "LOCALAPPDATA"} {
+		t.Setenv(variable, "")
 	}
 
-	t.Setenv(variable, "")
+	if _, err := dirs.HomeDir(); !errors.Is(err, fault.ErrSystemFailure) {
+		t.Fatalf("HomeDir with no home = %v, want ErrSystemFailure", err)
+	}
 
-	defer func() {
-		if recover() == nil {
-			t.Fatal("HomeDir did not panic with no home")
+	cache := func() (string, error) { return dirs.CacheDir() }
+
+	for _, directory := range []func() (string, error){dirs.DataDir, cache, dirs.BinDir} {
+		if _, err := directory(); !errors.Is(err, fault.ErrSystemFailure) {
+			t.Fatalf("a directory under a missing home = %v, want ErrSystemFailure", err)
 		}
-	}()
-
-	_ = dirs.HomeDir()
+	}
 }
 
 func exists(path string) bool {
@@ -266,21 +272,17 @@ func pow(base, exponent int) int {
 	return result
 }
 
-// TestConfigDirPanics: ConfigDir panics when the configuration directory cannot
-// be determined, as it documents: no $HOME (and on Linux no usable
-// $XDG_CONFIG_HOME), or on Windows no %APPDATA%.
+// TestConfigDirFails: with nowhere to put configuration, no $HOME and on
+// Linux no usable $XDG_CONFIG_HOME, on Windows no %APPDATA%, ConfigDir is
+// ErrSystemFailure.
 //
 //nolint:paralleltest // sets the process's environment
-func TestConfigDirPanics(t *testing.T) {
+func TestConfigDirFails(t *testing.T) {
 	for _, variable := range []string{"HOME", "USERPROFILE", "APPDATA", "XDG_CONFIG_HOME"} {
 		t.Setenv(variable, "")
 	}
 
-	defer func() {
-		if recover() == nil {
-			t.Fatal("ConfigDir did not panic with nowhere to put configuration")
-		}
-	}()
-
-	_, _ = dirs.ConfigDir()
+	if _, err := dirs.ConfigDir(); !errors.Is(err, fault.ErrSystemFailure) {
+		t.Fatalf("ConfigDir with nowhere to go = %v, want ErrSystemFailure", err)
+	}
 }
