@@ -106,32 +106,24 @@ func (a Algorithm) Hash() hash.Hash {
 	return known.hash()
 }
 
-// Digest represents a content digest with an algorithm and encoded hash.
-type Digest interface {
-	// Algorithm is the algorithm that produced the digest.
-	Algorithm() Algorithm
-	// Encoded is the digest's lowercase hex encoding.
-	Encoded() string
-	// String is the digest as "algorithm:encoded".
-	String() string
-}
-
-type digest struct {
+// Digest is a content digest: the algorithm that produced it and the hash's
+// lowercase hex encoding. It is a value: two digests of the same content
+// compare equal with ==, and the zero value is no digest, which IsZero
+// reports. One comes from New or FromString only.
+type Digest struct {
 	algorithm Algorithm
 	encoded   string
 }
 
 // New creates a Digest from an algorithm and raw hash bytes.
-//
-//nolint:iface // a nil Digest means none, and callers pass nil for that
 func New(alg Algorithm, raw []byte) (Digest, error) {
 	known, ok := algorithms[alg]
 	if !ok {
-		return nil, fmt.Errorf("%w: unknown algorithm %s", fault.ErrInvalidArgument, alg)
+		return Digest{}, fmt.Errorf("%w: unknown algorithm %s", fault.ErrInvalidArgument, alg)
 	}
 
 	if len(raw) != known.size {
-		return nil, fmt.Errorf(
+		return Digest{}, fmt.Errorf(
 			"%w: expected %d bytes for %s, got %d",
 			fault.ErrInvalidArgument,
 			known.size,
@@ -140,35 +132,33 @@ func New(alg Algorithm, raw []byte) (Digest, error) {
 		)
 	}
 
-	return &digest{
+	return Digest{
 		algorithm: alg,
 		encoded:   hex.EncodeToString(raw),
 	}, nil
 }
 
 // FromString parses a digest string in the format "algorithm:encoded".
-//
-//nolint:iface // a nil Digest means none, and callers pass nil for that
 func FromString(dgst string) (Digest, error) {
 	before, after, ok := strings.Cut(dgst, ":")
-
 	if !ok {
-		return nil, fmt.Errorf("%w: digest %s has no colon", fault.ErrInvalidArgument, dgst)
+		return Digest{}, fmt.Errorf("%w: digest %s has no colon", fault.ErrInvalidArgument, dgst)
 	}
 
 	alg := Algorithm(before)
 
 	known, ok := algorithms[alg]
 	if !ok {
-		return nil, fmt.Errorf("%w: digest %s has unknown algorithm", fault.ErrInvalidArgument, dgst)
+		return Digest{}, fmt.Errorf("%w: digest %s has unknown algorithm", fault.ErrInvalidArgument, dgst)
 	}
 
 	encoded := after
 	if len(encoded) != hex.EncodedLen(known.size) || !isLowerHex(encoded) {
-		return nil, fmt.Errorf("%w: digest %s has invalid encoded hash for algorithm", fault.ErrInvalidArgument, dgst)
+		return Digest{}, fmt.Errorf("%w: digest %s has invalid encoded hash for algorithm",
+			fault.ErrInvalidArgument, dgst)
 	}
 
-	return &digest{
+	return Digest{
 		algorithm: alg,
 		encoded:   encoded,
 	}, nil
@@ -186,14 +176,27 @@ func isLowerHex(s string) bool {
 	return true
 }
 
-func (d *digest) Algorithm() Algorithm {
+// Algorithm is the algorithm that produced the digest.
+func (d Digest) Algorithm() Algorithm {
 	return d.algorithm
 }
 
-func (d *digest) Encoded() string {
+// Encoded is the digest's lowercase hex encoding.
+func (d Digest) Encoded() string {
 	return d.encoded
 }
 
-func (d *digest) String() string {
+// String is the digest as "algorithm:encoded", and empty for no digest.
+func (d Digest) String() string {
+	if d.IsZero() {
+		return ""
+	}
+
 	return string(d.algorithm) + ":" + d.encoded
+}
+
+// IsZero reports no digest: the zero value, which no New or FromString
+// returns.
+func (d Digest) IsZero() bool {
+	return d == Digest{}
 }

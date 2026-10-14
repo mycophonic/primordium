@@ -80,7 +80,7 @@ func TestIndexRecordAlgorithmIDs(t *testing.T) {
 
 			// Reading the record back must resolve the persisted digest: a hit
 			// without fetching proves the ID decodes to the same algorithm.
-			acquire(t, root, nil, failingFetch(errDigestNotResolved))
+			acquire(t, root, digest.Digest{}, failingFetch(errDigestNotResolved))
 		})
 	}
 }
@@ -175,7 +175,7 @@ func TestAnotherIdentifiersRecordIsAMiss(t *testing.T) {
 	root := t.TempDir()
 	data := []byte("content of the identifier")
 
-	acquire(t, root, nil, fetchFunc(data))
+	acquire(t, root, digest.Digest{}, fetchFunc(data))
 
 	// The record as the store wrote it, then with another confirmation.
 	rec := persistedRecord(t, root, valueWidth)
@@ -196,7 +196,7 @@ func TestAnotherIdentifiersRecordIsAMiss(t *testing.T) {
 
 	var fetched atomic.Int64
 
-	acquire(t, root, nil, countingFetch(data, &fetched))
+	acquire(t, root, digest.Digest{}, countingFetch(data, &fetched))
 
 	if fetched.Load() != 1 {
 		t.Fatalf("fetched %d times, want once: the other identifier's record was served", fetched.Load())
@@ -231,8 +231,8 @@ func TestAnIndexOfAnotherFormatIsDiscarded(t *testing.T) {
 	var fetched atomic.Int64
 
 	data := []byte("content after the format change")
-	acquire(t, root, nil, countingFetch(data, &fetched))
-	acquire(t, root, nil, countingFetch(data, &fetched))
+	acquire(t, root, digest.Digest{}, countingFetch(data, &fetched))
+	acquire(t, root, digest.Digest{}, countingFetch(data, &fetched))
 
 	if fetched.Load() != 1 {
 		t.Fatalf("fetched %d times, want once then a hit", fetched.Load())

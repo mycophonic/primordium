@@ -96,7 +96,7 @@ func TestStore_MissWithoutDigest(t *testing.T) {
 	cs := newStore(t)
 	data := []byte("hello from the fetch function")
 
-	reader, createdAt, err := cs.Acquire("https://example.com/file.bin", nil, fetchFunc(data))
+	reader, createdAt, err := cs.Acquire("https://example.com/file.bin", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
@@ -160,7 +160,7 @@ func TestStore_HitReturnsCache(t *testing.T) {
 	fetch := countingFetch(data, &fetchCount)
 
 	// First acquire — miss, calls fetch.
-	reader1, createdAt1, err := cs.Acquire("https://example.com/data", nil, fetch)
+	reader1, createdAt1, err := cs.Acquire("https://example.com/data", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("first Acquire() error: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestStore_HitReturnsCache(t *testing.T) {
 	}
 
 	// Second acquire — hit, fetch NOT called.
-	reader2, createdAt2, err := cs.Acquire("https://example.com/data", nil, fetch)
+	reader2, createdAt2, err := cs.Acquire("https://example.com/data", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestStore_HitPreservesCreatedAt(t *testing.T) {
 	cs := newStore(t)
 	data := []byte("time-sensitive content")
 
-	reader1, createdAt1, err := cs.Acquire("id-1", nil, fetchFunc(data))
+	reader1, createdAt1, err := cs.Acquire("id-1", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("first Acquire() error: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestStore_HitPreservesCreatedAt(t *testing.T) {
 	// Small delay to ensure timestamps differ if re-created.
 	time.Sleep(10 * time.Millisecond)
 
-	reader2, createdAt2, err := cs.Acquire("id-1", nil, fetchFunc(data))
+	reader2, createdAt2, err := cs.Acquire("id-1", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -310,7 +310,7 @@ func TestStore_FetchFailsWithoutDigest(t *testing.T) {
 
 	cs := newStore(t)
 
-	_, _, err := cs.Acquire("https://example.com/down", nil, failingFetch(errNetworkTimeout))
+	_, _, err := cs.Acquire("https://example.com/down", digest.Digest{}, failingFetch(errNetworkTimeout))
 	if err == nil {
 		t.Fatal("Acquire() should fail when fetch fails")
 	}
@@ -343,13 +343,13 @@ func TestStore_FetchFailureDoesNotPoison(t *testing.T) {
 	data := []byte("eventually available content")
 
 	// First attempt — fetch fails.
-	_, _, err := cs.Acquire("https://example.com/flaky", nil, failingFetch(errTemporaryFailure))
+	_, _, err := cs.Acquire("https://example.com/flaky", digest.Digest{}, failingFetch(errTemporaryFailure))
 	if err == nil {
 		t.Fatal("first Acquire() should fail")
 	}
 
 	// Second attempt — fetch succeeds.
-	reader, _, err := cs.Acquire("https://example.com/flaky", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("https://example.com/flaky", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestStore_DifferentIdentifiersSameContent(t *testing.T) {
 	fetch := countingFetch(data, &fetchCount)
 
 	// Two different identifiers, same content.
-	reader1, _, err := cs.Acquire("https://mirror1.example.com/file", nil, fetch)
+	reader1, _, err := cs.Acquire("https://mirror1.example.com/file", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("Acquire(mirror1) error: %v", err)
 	}
@@ -387,7 +387,7 @@ func TestStore_DifferentIdentifiersSameContent(t *testing.T) {
 	data1, _ := io.ReadAll(reader1)
 	assert.Check(t, reader1.Close())
 
-	reader2, _, err := cs.Acquire("https://mirror2.example.com/file", nil, fetch)
+	reader2, _, err := cs.Acquire("https://mirror2.example.com/file", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("Acquire(mirror2) error: %v", err)
 	}
@@ -457,7 +457,7 @@ func TestStore_EmptyContent(t *testing.T) {
 	cs := newStore(t)
 	data := []byte{}
 
-	reader, _, err := cs.Acquire("empty-resource", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("empty-resource", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
@@ -474,7 +474,7 @@ func TestStore_EmptyContent(t *testing.T) {
 	}
 
 	// Hit path.
-	reader2, _, err := cs.Acquire("empty-resource", nil, fetchFunc(data))
+	reader2, _, err := cs.Acquire("empty-resource", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -522,7 +522,7 @@ func TestStore_LargeContent(t *testing.T) {
 		data[i] = byte(i % 256)
 	}
 
-	reader, _, err := cs.Acquire("large-file", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("large-file", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
@@ -535,7 +535,7 @@ func TestStore_LargeContent(t *testing.T) {
 	}
 
 	// Hit path.
-	reader2, _, err := cs.Acquire("large-file", nil, fetchFunc(data))
+	reader2, _, err := cs.Acquire("large-file", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -590,7 +590,7 @@ func TestStore_TruncatedFetchWithoutDigest(t *testing.T) {
 		}), nil
 	})
 
-	_, _, err := cs.Acquire("truncated", nil, truncatedFetch)
+	_, _, err := cs.Acquire("truncated", digest.Digest{}, truncatedFetch)
 	if err == nil {
 		t.Fatal("Acquire() should fail with truncated fetch")
 	}
@@ -647,13 +647,13 @@ func TestStore_TruncatedFetchDoesNotPoison(t *testing.T) {
 	})
 
 	// First attempt — truncated.
-	_, _, err := cs.Acquire("truncated-recover", nil, truncatedFetch)
+	_, _, err := cs.Acquire("truncated-recover", digest.Digest{}, truncatedFetch)
 	if err == nil {
 		t.Fatal("first Acquire() should fail")
 	}
 
 	// Second attempt — succeeds.
-	reader, _, err := cs.Acquire("truncated-recover", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("truncated-recover", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -686,7 +686,7 @@ func TestStore_ConcurrentSameIdentifier(t *testing.T) {
 
 	for range numGoroutines {
 		wg.Go(func() {
-			reader, _, err := cs.Acquire("concurrent-id", nil, fetch)
+			reader, _, err := cs.Acquire("concurrent-id", digest.Digest{}, fetch)
 			if err != nil {
 				t.Errorf("Acquire() error: %v", err)
 
@@ -730,7 +730,7 @@ func TestStore_ConcurrentDifferentIdentifiers(t *testing.T) {
 			data := []byte("content for identifier " + letter)
 			identifier := "id-" + letter
 
-			reader, _, err := cs.Acquire(identifier, nil, fetchFunc(data))
+			reader, _, err := cs.Acquire(identifier, digest.Digest{}, fetchFunc(data))
 			if err != nil {
 				t.Errorf("Acquire(%s) error: %v", identifier, err)
 
@@ -805,7 +805,7 @@ func TestStore_ConcurrentMixedHitAndMiss(t *testing.T) {
 	data := []byte("mixed hit/miss content")
 
 	// Pre-populate the cache.
-	reader0, _, err := cs.Acquire("mixed-id", nil, fetchFunc(data))
+	reader0, _, err := cs.Acquire("mixed-id", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("initial Acquire() error: %v", err)
 	}
@@ -822,7 +822,7 @@ func TestStore_ConcurrentMixedHitAndMiss(t *testing.T) {
 
 	for range numGoroutines {
 		wg.Go(func() {
-			reader, _, err := cs.Acquire("mixed-id", nil, fetchFunc(data))
+			reader, _, err := cs.Acquire("mixed-id", digest.Digest{}, fetchFunc(data))
 			if err != nil {
 				t.Errorf("Acquire() error: %v", err)
 
@@ -855,7 +855,7 @@ func TestStore_IdentifierIsEmptyString(t *testing.T) {
 	cs := newStore(t)
 	data := []byte("content for empty identifier")
 
-	reader, _, err := cs.Acquire("", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
@@ -878,7 +878,7 @@ func TestStore_VeryLongIdentifier(t *testing.T) {
 	// A long identifier — hashIdentifier hashes to uint64, so this is safe.
 	longID := string(make([]byte, 10*bytesize.KiB))
 
-	reader, _, err := cs.Acquire(longID, nil, fetchFunc(data))
+	reader, _, err := cs.Acquire(longID, digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
@@ -952,7 +952,7 @@ func TestStore_RapidAcquireRelease(t *testing.T) {
 		go func(id int) {
 			defer wg.Done()
 
-			reader, _, err := cs.Acquire("rapid-id", nil, fetchFunc(data))
+			reader, _, err := cs.Acquire("rapid-id", digest.Digest{}, fetchFunc(data))
 			if err != nil {
 				t.Errorf("iteration %d: Acquire() error: %v", id, err)
 
@@ -974,7 +974,7 @@ func TestStore_RapidAcquireRelease(t *testing.T) {
 	wg.Wait()
 
 	// Verify content is still intact.
-	reader, _, err := cs.Acquire("rapid-id", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("rapid-id", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("final Acquire() error: %v", err)
 	}
@@ -1001,7 +1001,7 @@ func TestStore_InvalidateTriggersRefetch(t *testing.T) {
 	fetch := countingFetch(data, &fetchCount)
 
 	// Populate.
-	reader1, _, err := cs.Acquire("invalidate-id", nil, fetch)
+	reader1, _, err := cs.Acquire("invalidate-id", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("first Acquire() error: %v", err)
 	}
@@ -1022,7 +1022,7 @@ func TestStore_InvalidateTriggersRefetch(t *testing.T) {
 	}
 
 	// Re-acquire — should call fetch again.
-	reader2, _, err := cs.Acquire("invalidate-id", nil, fetch)
+	reader2, _, err := cs.Acquire("invalidate-id", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("second Acquire() error: %v", err)
 	}
@@ -1199,7 +1199,7 @@ func TestStore_AcquireFileColdAndWarm(t *testing.T) {
 
 	// Cold: fetch runs to completion synchronously; the pinned file holds
 	// exactly the payload.
-	pin, err := cs.AcquireFile("acquire-file-id", nil, fetch)
+	pin, err := cs.AcquireFile("acquire-file-id", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("AcquireFile() cold error: %v", err)
 	}
@@ -1222,7 +1222,7 @@ func TestStore_AcquireFileColdAndWarm(t *testing.T) {
 	}
 
 	// Warm: no fetch, same content.
-	warm, err := cs.AcquireFile("acquire-file-id", nil, fetch)
+	warm, err := cs.AcquireFile("acquire-file-id", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("AcquireFile() warm error: %v", err)
 	}
@@ -1255,7 +1255,7 @@ func TestStore_AcquireFileSharesBlobWithAcquire(t *testing.T) {
 	}
 
 	// Populate via the streaming API...
-	reader, _, err := cs.Acquire("shared-id", nil, fetch)
+	reader, _, err := cs.Acquire("shared-id", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
@@ -1267,7 +1267,7 @@ func TestStore_AcquireFileSharesBlobWithAcquire(t *testing.T) {
 	_ = reader.Close()
 
 	// ...then pin the same blob as a file without refetching.
-	pin, err := cs.AcquireFile("shared-id", nil, fetch)
+	pin, err := cs.AcquireFile("shared-id", digest.Digest{}, fetch)
 	if err != nil {
 		t.Fatalf("AcquireFile() error: %v", err)
 	}
@@ -1299,7 +1299,7 @@ func TestStore_DigestlessStagingUsesBLAKE3(t *testing.T) {
 	cs := newStore(t)
 	data := []byte("content addressed by whatever stage() decided to use")
 
-	reader, _, err := cs.Acquire("https://example.com/staged.bin", nil, fetchFunc(data))
+	reader, _, err := cs.Acquire("https://example.com/staged.bin", digest.Digest{}, fetchFunc(data))
 	if err != nil {
 		t.Fatalf("Acquire() error: %v", err)
 	}
