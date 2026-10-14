@@ -40,7 +40,11 @@ import (
 // stagingDir holds in-flight digest-less fetches. It sits beside the cache
 // rather than inside it: the GC walks the cache root treating every child as a
 // shard bucket, and a staging directory there would be walked as one.
-const stagingDir = "staging"
+const (
+	stagingDir = "staging"
+	// confirmSize is the width of the confirmation that opens each index value.
+	confirmSize = 8
+)
 
 // errFmtFetch wraps a failed FetchFunc invocation.
 const errFmtFetch = "%w: fetch: %w"
@@ -110,10 +114,12 @@ type Store struct {
 
 // New creates a content store under root, using root/cache for the
 // content-addressed blob cache and root/index.dat for the flat-file index.
-// Close must be called when the store is no longer needed.
+// An index of another format, or a corrupt one, is discarded: the blobs stay,
+// and each identifier is fetched again once. Close must be called when the
+// store is no longer needed.
 func New(root string, opts *Options) (*Store, error) {
 	idxOpts := &index.Options{
-		ValSize: 1 + digest.MaxDigestSize,
+		ValSize: confirmSize + 1 + digest.MaxDigestSize,
 	}
 
 	var quota int64
@@ -124,7 +130,22 @@ func New(root string, opts *Options) (*Store, error) {
 		quota = opts.Quota
 	}
 
-	idx, err := index.New(filepath.Join(root, "index.dat"), idxOpts)
+	path := filepath.Join(root, "index.dat")
+
+	idx, err := index.New(path, idxOpts)
+	if errors.Is(err, fault.ErrInvalidArgument) {
+		// The index only maps identifiers to blobs the cache holds by digest:
+		// one of another format, or corrupt, costs a fetch per identifier to
+		// rebuild, where a refusal would cost the consumer its cache directory.
+		slog.Warn("content index discarded, identifiers will be fetched again", "path", path, "error", err)
+
+		for _, stale := range []string{path, path + ".journal"} {
+			_ = os.Remove(stale)
+		}
+
+		idx, err = index.New(path, idxOpts)
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("index: %w", err)
 	}
@@ -161,18 +182,13 @@ func (s *Store) GarbageCollect() (cache.GCStats, error) {
 //
 // The returned reader must be closed by the caller.
 func (s *Store) Acquire(identifier string, dgst digest.Digest, fetch FetchFunc) (io.ReadCloser, time.Time, error) {
-	key := hashKey(identifier)
+	place := slotOf(identifier)
 
-	// Look up the index once — needed to preserve timestamps and avoid redundant writes.
-	rec, found, err := s.idx.Get(key)
+	// One lookup: its timestamp is kept on a hit, and a matching entry is not
+	// written again.
+	rec, indexedDgst, err := s.lookup(place)
 	if err != nil {
-		return nil, time.Time{}, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
-	}
-
-	var indexedDgst digest.Digest
-
-	if found {
-		indexedDgst, _ = decodeValue(rec.Value)
+		return nil, time.Time{}, err
 	}
 
 	if indexedDgst != nil {
@@ -185,20 +201,20 @@ func (s *Store) Acquire(identifier string, dgst digest.Digest, fetch FetchFunc) 
 	if dgst != nil {
 		slog.Debug("using caller digest", "identifier", identifier, "digest", dgst.String())
 
-		return s.fetchWithDigest(key, dgst, indexedDgst, rec.Timestamp, fetch)
+		return s.fetchWithDigest(place, dgst, indexedDgst, rec.Timestamp, fetch)
 	}
 
 	// (b) No caller digest — use the indexed one if available.
 	if indexedDgst != nil {
 		slog.Debug("using indexed digest", "identifier", identifier, "digest", indexedDgst.String())
 
-		return s.fetchWithDigest(key, indexedDgst, indexedDgst, rec.Timestamp, fetch)
+		return s.fetchWithDigest(place, indexedDgst, indexedDgst, rec.Timestamp, fetch)
 	}
 
 	// (c) No digest, no index entry — fetch, hash, cache.
 	slog.Debug("no digest available, will fetch and hash", "identifier", identifier)
 
-	return s.fetchAndHash(key, fetch)
+	return s.fetchAndHash(place, fetch)
 }
 
 // AcquireFile is Acquire for consumers that need the blob as a complete,
@@ -214,17 +230,15 @@ func (s *Store) Acquire(identifier string, dgst digest.Digest, fetch FetchFunc) 
 func (s *Store) AcquireFile(
 	identifier string, dgst digest.Digest, fetch FetchFunc,
 ) (*cache.PinnedFile, error) {
-	key := hashKey(identifier)
+	place := slotOf(identifier)
 
 	resolved := dgst
 	if resolved == nil {
-		rec, found, err := s.idx.Get(key)
-		if err != nil {
-			return nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
-		}
+		var err error
 
-		if found {
-			resolved, _ = decodeValue(rec.Value)
+		_, resolved, err = s.lookup(place)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -270,7 +284,7 @@ func (s *Store) AcquireFile(
 	// Digest-less miss: stage/hash/commit/pin synchronously. Acquire's own
 	// digest-less path commits in a background goroutine after its reader
 	// drains, which would leave this function racing the index write.
-	return s.commitDigestless(key, fetch)
+	return s.commitDigestless(place, fetch)
 }
 
 // Invalidate removes the index entry for the given identifier.
@@ -278,10 +292,14 @@ func (s *Store) AcquireFile(
 // Cached content blobs are not removed — they may be shared by other identifiers
 // and will be cleaned up by Cache garbage collection.
 func (s *Store) Invalidate(identifier string) error {
-	key := hashKey(identifier)
+	place := slotOf(identifier)
 
-	_, err := s.idx.Delete(key)
-	if err != nil {
+	// Another identifier's entry under the same key is not ours to remove.
+	if _, dgst, err := s.lookup(place); err != nil || dgst == nil {
+		return err
+	}
+
+	if _, err := s.idx.Delete(place.key); err != nil {
 		return fmt.Errorf("%w: invalidate: %w", fault.ErrFilesystemFailure, err)
 	}
 
@@ -294,7 +312,7 @@ func (s *Store) Invalidate(identifier string) error {
 // released so GC cannot reclaim it in between. The index write is
 // best-effort: the pin is valid without it, and a missed entry only costs a
 // refetch on some later call.
-func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (*cache.PinnedFile, error) {
+func (s *Store) commitDigestless(place slot, fetch FetchFunc) (*cache.PinnedFile, error) {
 	source, err := fetch()
 	if err != nil {
 		return nil, fmt.Errorf(errFmtFetch, fault.ErrReadFailure, err)
@@ -345,7 +363,7 @@ func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (*cache.PinnedFile
 		return nil, pinErr
 	}
 
-	if err := s.idx.Put(key, encodeDigest(dgst), time.Now().UnixNano()); err != nil {
+	if err := s.idx.Put(place.key, encodeValue(place, dgst), time.Now().UnixNano()); err != nil {
 		slog.Warn("index write failed after commit", "digest", dgst.String(), "err", err)
 	}
 
@@ -360,7 +378,7 @@ func (s *Store) commitDigestless(key uint64, fetch FetchFunc) (*cache.PinnedFile
 // The index is only written when the entry is missing or maps to a different digest.
 // indexedDgst/indexedTS are the previously stored digest and timestamp (indexedDgst may be nil).
 func (s *Store) fetchWithDigest(
-	key uint64,
+	place slot,
 	dgst digest.Digest,
 	indexedDgst digest.Digest,
 	indexedTS int64,
@@ -371,7 +389,7 @@ func (s *Store) fetchWithDigest(
 		return nil, time.Time{}, fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	encodedDgst := encodeDigest(dgst)
+	encodedDgst := encodeValue(place, dgst)
 
 	if writer != nil {
 		slog.Debug("cache miss, fetching", "digest", dgst.String())
@@ -396,7 +414,7 @@ func (s *Store) fetchWithDigest(
 			// even if Close then fails — an entry pointing at an absent blob
 			// is the same recoverable state a GC-reclaimed blob leaves.
 			if copyErr == nil {
-				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+				_ = s.idx.Put(place.key, encodedDgst, now.UnixNano())
 			}
 
 			closeErr := writer.Close()
@@ -421,7 +439,7 @@ func (s *Store) fetchWithDigest(
 
 	// Index missing or maps to a different digest — update it.
 	now := time.Now()
-	_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+	_ = s.idx.Put(place.key, encodedDgst, now.UnixNano())
 
 	return reader, now, nil
 }
@@ -429,7 +447,7 @@ func (s *Store) fetchWithDigest(
 // fetchAndHash handles the miss path when the digest is unknown.
 // Content is buffered to compute the digest, then written to cache.
 func (s *Store) fetchAndHash(
-	key uint64,
+	place slot,
 	fetch FetchFunc,
 ) (io.ReadCloser, time.Time, error) {
 	slog.Debug("fetching without digest (will stage and hash)")
@@ -456,7 +474,7 @@ func (s *Store) fetchAndHash(
 	}
 
 	now := time.Now()
-	encodedDgst := encodeDigest(dgst)
+	encodedDgst := encodeValue(place, dgst)
 
 	if writer != nil {
 		s.wg.Go(func() {
@@ -469,7 +487,7 @@ func (s *Store) fetchAndHash(
 			// Index before Close — see fetchWithDigest: drained readers must
 			// be guaranteed to observe the entry.
 			if writeErr == nil {
-				_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+				_ = s.idx.Put(place.key, encodedDgst, now.UnixNano())
 			}
 
 			closeErr := writer.Close()
@@ -490,7 +508,7 @@ func (s *Store) fetchAndHash(
 	slog.Debug("blob already cached", "digest", dgst.String())
 
 	// Blob exists but index is missing (e.g. prior incomplete run).
-	_ = s.idx.Put(key, encodedDgst, now.UnixNano())
+	_ = s.idx.Put(place.key, encodedDgst, now.UnixNano())
 
 	return reader, now, nil
 }
@@ -556,56 +574,93 @@ func (s *Store) stage(source io.Reader) (*os.File, digest.Digest, error) {
 	return file, dgst, nil
 }
 
-// encodeDigest encodes a digest as [algID:1][rawDigest:N] for index storage.
-func encodeDigest(dgst digest.Digest) []byte {
+// encodeValue is the index value for a digest under place:
+// [confirm:8][algID:1][rawDigest:N].
+func encodeValue(place slot, dgst digest.Digest) []byte {
 	algID, ok := algorithmToID[dgst.Algorithm()]
 	if !ok {
 		panic(fmt.Sprintf("unknown algorithm: %s", dgst.Algorithm()))
 	}
 
 	raw, _ := hex.DecodeString(dgst.Encoded())
-	val := make([]byte, 1+len(raw))
-	val[0] = algID
-	copy(val[1:], raw)
+
+	val := make([]byte, confirmSize+1+len(raw))
+	binary.BigEndian.PutUint64(val, place.confirm)
+	val[confirmSize] = algID
+	copy(val[confirmSize+1:], raw)
 
 	return val
 }
 
-// decodeValue reconstructs a Digest from an index value encoded by encodeDigest.
-func decodeValue(value []byte) (digest.Digest, error) {
-	if len(value) == 0 {
-		return nil, fmt.Errorf("%w: empty index value", fault.ErrInvalidArgument)
+// decodeValue is the confirmation and the digest an index value encodes.
+func decodeValue(value []byte) (uint64, digest.Digest, error) {
+	if len(value) < confirmSize+1 {
+		return 0, nil, fmt.Errorf("%w: index value of %d bytes", fault.ErrInvalidArgument, len(value))
 	}
+
+	confirm := binary.BigEndian.Uint64(value)
+	value = value[confirmSize:]
 
 	algID := value[0]
 	if algID == 0 {
-		return nil, fmt.Errorf("%w: zero algorithm ID", fault.ErrInvalidArgument)
+		return 0, nil, fmt.Errorf("%w: zero algorithm ID", fault.ErrInvalidArgument)
 	}
 
 	alg, ok := algorithmFromID[algID]
 	if !ok {
-		return nil, fmt.Errorf("%w: unknown algorithm ID %d", fault.ErrInvalidArgument, algID)
+		return 0, nil, fmt.Errorf("%w: unknown algorithm ID %d", fault.ErrInvalidArgument, algID)
 	}
 
 	size := alg.Hash().Size()
 	if len(value) < 1+size {
-		return nil, fmt.Errorf("%w: value too short for %s: need %d, have %d",
+		return 0, nil, fmt.Errorf("%w: value too short for %s: need %d, have %d",
 			fault.ErrInvalidArgument, alg, 1+size, len(value))
 	}
 
 	dgst, err := digest.New(alg, value[1:1+size])
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
+		return 0, nil, fmt.Errorf("%w: %w", fault.ErrInvalidArgument, err)
 	}
 
-	return dgst, nil
+	return confirm, dgst, nil
 }
 
-// hashKey returns a uint64 hash of the given string using BLAKE2b-256.
-// Same entropy as HashPath (64 bits) but as a numeric key suitable for index lookups.
-func hashKey(s string) uint64 {
-	h := digest.BLAKE2b256.Hash()
-	_, _ = h.Write([]byte(s))
+// slot is where an identifier lives in the index. key, the first 64 bits of
+// the identifier's BLAKE2b-256, picks the record; confirm, the next 64, says
+// whose record it is, since two identifiers can share a key.
+type slot struct {
+	key     uint64
+	confirm uint64
+}
 
-	return binary.BigEndian.Uint64(h.Sum(nil)[:8])
+func slotOf(identifier string) slot {
+	h := digest.BLAKE2b256.Hash()
+	_, _ = h.Write([]byte(identifier))
+	sum := h.Sum(nil)
+
+	return slot{
+		key:     binary.BigEndian.Uint64(sum[:confirmSize]),
+		confirm: binary.BigEndian.Uint64(sum[confirmSize : 2*confirmSize]),
+	}
+}
+
+// lookup is the identifier's record and digest, or a zero record and a nil
+// digest when the index has none for it: no record under its key, or
+// another identifier's, which the next write replaces.
+func (s *Store) lookup(place slot) (index.Record, digest.Digest, error) {
+	rec, found, err := s.idx.Get(place.key)
+	if err != nil {
+		return index.Record{}, nil, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
+	}
+
+	if !found {
+		return index.Record{}, nil, nil
+	}
+
+	confirm, dgst, err := decodeValue(rec.Value)
+	if err != nil || confirm != place.confirm {
+		return index.Record{}, nil, nil //nolint:nilerr // an unreadable record is no record, and is written over
+	}
+
+	return rec, dgst, nil
 }
