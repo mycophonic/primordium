@@ -126,7 +126,7 @@ func New(root string, opts *Options) (*Store, error) {
 
 	idx, err := index.New(filepath.Join(root, "index.dat"), idxOpts)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
+		return nil, fmt.Errorf("index: %w", err)
 	}
 
 	return &Store{
