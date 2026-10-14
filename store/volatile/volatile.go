@@ -29,16 +29,15 @@ import (
 	"github.com/mycophonic/primordium/store/refcount"
 )
 
-// Volatile provides content-addressed ephemeral storage with file-based reference counting.
-// Safe for concurrent access across multiple processes.
-// Resistant to process crashes - OS automatically releases file locks when process dies.
+// Volatile is a content-addressed store whose files live while any process
+// holds them. A holder that dies releases, the OS drops its lock.
 type Volatile struct {
 	rc        *refcount.Locker
 	algorithm digest.Algorithm
 }
 
-// New creates a new volatile store at the given root directory.
-// See types.Algorithm for supported hashing algorithms.
+// New is a Volatile at root, addressing content by algorithm. It panics when
+// root is not a valid path.
 func New(root string, algorithm digest.Algorithm) *Volatile {
 	return &Volatile{
 		rc:        refcount.New(root),
@@ -46,11 +45,10 @@ func New(root string, algorithm digest.Algorithm) *Volatile {
 	}
 }
 
-// Acquire ensures content exists at a path and returns that path with a release function.
-// Multiple concurrent readers (even across processes) can acquire the same content.
-// The file is guaranteed to exist until release is called.
-// Release is soft - if other readers exist, the file is not deleted.
-// Crash-resistant: OS releases file locks when process dies, enabling cleanup.
+// Acquire holds content and returns the path of a file holding it, with
+// release, which must be called when done and is idempotent. Holders of the
+// same content, in any process, get the same path; the file stays until the
+// last of them releases.
 func (v *Volatile) Acquire(content []byte) (string, func(), error) {
 	h := v.algorithm.Hash()
 	h.Write(content)
@@ -60,18 +58,18 @@ func (v *Volatile) Acquire(content []byte) (string, func(), error) {
 	return v.rc.Acquire(contentHash, func(dir string) (string, func(), error) {
 		dataPath := filepath.Join(dir, volatileDataFile)
 
-		// Write data if it doesn't exist (atomic write)
+		// A data file that exists is whole: WriteFile renames it into place,
+		// so a writer that died left a temporary beside it, never a part.
 		if _, err := xos.Stat(dataPath); err != nil {
 			if !os.IsNotExist(err) {
 				return "", nil, fmt.Errorf("%w: stat data file: %w", fault.ErrFilesystemFailure, err)
 			}
 
 			if err := filesystem.WriteFile(dataPath, content, filesystem.FilePermissionsPrivate); err != nil {
-				return "", nil, fmt.Errorf("%w: data file: %w", fault.ErrWriteFailure, err)
+				return "", nil, fmt.Errorf("data file: %w", err)
 			}
 		}
 
-		// No cleanup needed - Locker handles directory removal
 		return dataPath, nil, nil
 	})
 }

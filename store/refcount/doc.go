@@ -14,14 +14,11 @@
    limitations under the License.
 */
 
-// Package refcount provides primitives for a refcounted mechanism for shared folders
-// that is safe to use across process.
-// A typical use case is a shared folder where the provider can
-// write temporary files on construction time, have consumers read it
-// concurrently, then self-cleaning once readers are done.
-// Note this is low-level:
-// - creation factory is run on every acquire: it is the caller responsibility to decide what
-// the factory should do if the resource has already been created
-// - only the last `release` function is called: same thing, the consumer is responsible for dealing with that
-// For a safer, higher-level API, use the volatile store instead.
+// Package refcount counts the holders of keyed directories across processes:
+// an entry exists while any process holds it and goes with its last release.
+//
+// It is low level: the factory runs on every Acquire, so it decides itself
+// what to do with an entry that is already filled, and only the last
+// releaser's cleanup runs. For content written once and read by many, use
+// the volatile store.
 package refcount
