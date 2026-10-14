@@ -66,7 +66,7 @@ func (v *Volatile) Acquire(content []byte) (string, func(), error) {
 			}
 
 			if err := filesystem.WriteFile(dataPath, content, filesystem.FilePermissionsPrivate); err != nil {
-				return "", nil, fmt.Errorf("%w: data file: %w", fault.ErrWriteFailure, err)
+				return "", nil, fmt.Errorf("data file: %w", err)
 			}
 		}
 
