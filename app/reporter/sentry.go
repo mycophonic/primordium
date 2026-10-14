@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"reflect"
+	"sync/atomic"
 
 	"github.com/getsentry/sentry-go"
 
@@ -29,15 +30,21 @@ import (
 	"github.com/mycophonic/primordium/fault"
 )
 
-// Config structure for minimum set of reporter parameters.
+// Config is what Initialize needs: the DSN events go to; Debug for Sentry's
+// own logging; PII to let events carry user and request data; Release and
+// Environment to tag them; TracesSampleRate, the share of transactions traced,
+// zero tracing none.
 type Config struct {
 	DSN              string
 	Debug            bool
 	PII              bool
 	Release          string
 	Environment      string
-	TracesSampleRate float64 // 0 defaults to 1.0 (100%)
+	TracesSampleRate float64
 }
+
+//nolint:gochecknoglobals // the process's one reporter
+var initialized atomic.Bool
 
 type (
 	// EventID is a hexadecimal string representing a unique uuid4 for an Event.
@@ -52,11 +59,6 @@ type (
 // while the console keeps every record. Once per process: a second call wraps
 // the logger again and every error is reported twice.
 func Initialize(conf *Config) error {
-	sampleRate := conf.TracesSampleRate
-	if sampleRate == 0 {
-		sampleRate = 1.0
-	}
-
 	err := sentry.Init(sentry.ClientOptions{
 		Dsn:   conf.DSN,
 		Debug: conf.Debug,
@@ -65,10 +67,10 @@ func Initialize(conf *Config) error {
 		// means for this reporter is a design decision, not a linter fix.
 		SendDefaultPII:   conf.PII, //nolint:staticcheck // SA1019: see above
 		AttachStacktrace: true,
-		EnableTracing:    true,
+		EnableTracing:    conf.TracesSampleRate > 0,
 		Environment:      conf.Environment,
 		Release:          conf.Release,
-		TracesSampleRate: sampleRate,
+		TracesSampleRate: conf.TracesSampleRate,
 		// The default client, so Sentry traffic goes through the transport
 		// network.SetDefaults installs.
 		HTTPClient: http.DefaultClient,
@@ -76,6 +78,8 @@ func Initialize(conf *Config) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", fault.ErrSystemFailure, err)
 	}
+
+	initialized.Store(true)
 
 	// After Init: the handler captures through the client Init creates. The
 	// handler it wraps must not be slog's built-in one: SetDefault routes the
@@ -108,8 +112,13 @@ func CaptureEvent(e *Event) *EventID {
 	return sentry.CaptureEvent(e)
 }
 
-// Shutdown flushes buffered events before the program terminates.
+// Shutdown delivers the events still buffered, with two seconds to do so;
+// before Initialize there is nothing to deliver and nothing to say.
 func Shutdown() {
+	if !initialized.Load() {
+		return
+	}
+
 	if !sentry.Flush(flushTimeout) {
 		slog.Warn("sentry flush incomplete: some events may not have been delivered")
 	}
