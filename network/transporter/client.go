@@ -26,7 +26,7 @@ import (
 type Options struct {
 	Parallelism    int           // Max concurrent in-flight requests (0 = unlimited).
 	MaxPerSecond   int           // Rate limit (0 = unlimited).
-	MaxRetries     int           // Retries on 5xx, 429 and transport errors; a body without GetBody is not retried.
+	MaxRetries     int           // Retries on 5xx, 429 and transport errors that can change; a TLS alert, an untrusted certificate, a host that does not resolve and a body without GetBody are not retried.
 	InitialBackoff time.Duration // Doubles each retry with ±25% jitter.
 	MaxBackoff     time.Duration // Cap on Retry-After values; anything beyond is treated as failure.
 	UserAgent      string

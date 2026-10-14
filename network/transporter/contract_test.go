@@ -17,14 +17,19 @@
 package transporter_test
 
 // The contract, from the documentation and the callers: which responses are
-// retried and which are returned, what Retry-After does against MaxBackoff,
-// which bodies can be retried, and that no option value breaks the client.
+// retried and which are returned, which transport errors are retried and
+// which cannot change, what Retry-After does against MaxBackoff, which bodies
+// can be retried, and that no option value breaks the client.
 
 import (
 	"bytes"
+	"crypto/tls"
+	"errors"
 	"io"
 	"math"
+	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/http/httptrace"
 	"strconv"
 	"strings"
@@ -322,4 +327,106 @@ func TestCloseIdleConnectionsClosesThem(t *testing.T) {
 	client.CloseIdleConnections()
 
 	assert.Assert(t, !reused(), "the connection survived CloseIdleConnections")
+}
+
+// tlsBackend is a TLS server counting the connections made to it: a handshake
+// the client refuses never reaches a handler, so attempts are counted there.
+func tlsBackend(t *testing.T, config *tls.Config) (*httptest.Server, *atomic.Int32) {
+	t.Helper()
+
+	var connections atomic.Int32
+
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	srv.TLS = config
+	srv.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			connections.Add(1)
+		}
+	}
+
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+
+	return srv, &connections
+}
+
+// TestUntrustedCertificateNotRetried: a certificate the client does not trust
+// is the same certificate on every attempt; one connection, the error
+// classified as a network failure.
+func TestUntrustedCertificateNotRetried(t *testing.T) {
+	t.Parallel()
+
+	srv, connections := tlsBackend(t, nil)
+
+	client := newClient(t, transporter.Options{MaxRetries: 3, InitialBackoff: time.Millisecond})
+
+	resp, err := doGet(t.Context(), t, client, srv.URL)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	_, verification := errors.AsType[*tls.CertificateVerificationError](err)
+
+	assert.Assert(t, verification, "error: %v", err)
+	assert.Assert(t, errors.Is(err, fault.ErrNetworkCommunication))
+	assert.Equal(t, connections.Load(), int32(1))
+}
+
+// TestTLSAlertNotRetried: a server that speaks no TLS version the client
+// accepts alerts on every attempt; one connection. The client's floor is set
+// on the process's default transport, as network.SetDefaults sets it, so the
+// test swaps it and does not run in parallel.
+func TestTLSAlertNotRetried(t *testing.T) { //nolint:paralleltest // http.DefaultTransport is process-wide
+	srv, connections := tlsBackend(t, &tls.Config{MaxVersion: tls.VersionTLS12})
+
+	configured := &http.Transport{TLSClientConfig: &tls.Config{
+		MinVersion: tls.VersionTLS13,
+		RootCAs:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
+	}}
+
+	previous := http.DefaultTransport
+	http.DefaultTransport = configured //nolint:reassign // the configuration under test
+
+	t.Cleanup(func() {
+		configured.CloseIdleConnections()
+
+		http.DefaultTransport = previous //nolint:reassign // restores the configuration under test
+	})
+
+	client := newClient(t, transporter.Options{MaxRetries: 3, InitialBackoff: time.Millisecond})
+
+	resp, err := doGet(t.Context(), t, client, srv.URL)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	assert.ErrorContains(t, err, "protocol version not supported")
+	assert.Equal(t, connections.Load(), int32(1))
+}
+
+// TestUnknownHostNotRetried: a name that does not resolve is asked once. The
+// .invalid domain never resolves (RFC 6761); a resolver that answers anything
+// but "no such host", as one cut off from the network does, cannot show the
+// property, and the test says so.
+func TestUnknownHostNotRetried(t *testing.T) {
+	t.Parallel()
+
+	var attempts atomic.Int32
+
+	trace := &httptrace.ClientTrace{DNSStart: func(httptrace.DNSStartInfo) { attempts.Add(1) }}
+	ctx := httptrace.WithClientTrace(t.Context(), trace)
+	client := newClient(t, transporter.Options{MaxRetries: 3, InitialBackoff: time.Millisecond})
+
+	resp, err := doGet(ctx, t, client, "http://nonexistent.invalid/")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	if dnsErr, ok := errors.AsType[*net.DNSError](err); !ok || !dnsErr.IsNotFound {
+		t.Skipf("the resolver did not answer no such host: %v", err)
+	}
+
+	assert.Equal(t, attempts.Load(), int32(1))
 }
