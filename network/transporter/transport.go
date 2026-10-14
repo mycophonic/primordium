@@ -19,10 +19,13 @@ package transporter
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"math/rand/v2"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -214,6 +217,15 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				return nil, fmt.Errorf("%w: %w", fault.ErrCancelled, lastErr)
 			}
 
+			if permanent(err) {
+				slog.WarnContext(req.Context(), "HTTP transport error, not retried: it cannot change",
+					"error", err,
+					"url", req.URL.String(),
+				)
+
+				return nil, lastErr
+			}
+
 			slog.WarnContext(req.Context(), "HTTP transport error, retrying",
 				"attempt", attempt+1,
 				"elapsed", elapsed,
@@ -318,6 +330,30 @@ func (t *retryTransport) refill(ctx context.Context, maxPerSecond int) {
 			}
 		}
 	}
+}
+
+// permanent reports a transport error that no retry can change for the life
+// of the request: an alert the server sent, as one that speaks no TLS version
+// the client accepts does; a certificate the client does not trust; a host
+// name that does not resolve. A timeout, a reset or a refused connection is
+// not one.
+func permanent(err error) bool {
+	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok {
+		return dnsErr.IsNotFound
+	}
+
+	// A TLS alert from the server is a net.OpError of that operation: the
+	// alert type behind it is not exported.
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && opErr.Op == "remote error" {
+		return true
+	}
+
+	_, verify := errors.AsType[*tls.CertificateVerificationError](err)
+	_, unknown := errors.AsType[x509.UnknownAuthorityError](err)
+	_, hostname := errors.AsType[x509.HostnameError](err)
+	_, invalid := errors.AsType[x509.CertificateInvalidError](err)
+
+	return verify || unknown || hostname || invalid
 }
 
 func (t *retryTransport) backoffDuration(attempt int) time.Duration {
