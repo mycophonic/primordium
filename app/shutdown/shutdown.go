@@ -18,11 +18,13 @@ package shutdown
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"os/signal"
 	"runtime/debug"
 	"slices"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -82,12 +84,19 @@ func Shutdown() {
 	})
 }
 
-// Run executes fn with panic recovery. On panic or non-nil error return,
-// it runs Shutdown and exits with code 1. On normal return, it runs
-// Shutdown and exits with code 0.
-//
-// Shutdown is called outside the recovery scope: a handler that panics
-// crashes with a stack trace rather than being silently swallowed.
+// ExitError is an exit status a program asks for, by returning it or an error
+// wrapping it from the function Run runs. Run exits with it and says nothing:
+// a program that asks for a status has said what it had to.
+type ExitError int
+
+func (e ExitError) Error() string {
+	return "exit status " + strconv.Itoa(int(e))
+}
+
+// Run runs function with panic recovery, then the handlers, and exits: with
+// the ExitError function returned or wrapped, silently; with 0 on nil; with 1 and
+// the error logged on any other error; with 1 and the panic logged on a panic.
+// A handler that panics is not recovered: the process crashes with its stack.
 //
 // Run never returns.
 func Run(ctx context.Context, function func(context.Context) error) {
@@ -102,15 +111,28 @@ func Run(ctx context.Context, function func(context.Context) error) {
 			}
 		}()
 
-		if err := function(ctx); err != nil {
+		var asked ExitError
+
+		switch err := function(ctx); {
+		case err == nil:
+		case errors.As(err, &asked):
+			exitCode = int(asked)
+		default:
 			slog.ErrorContext(ctx, "fatal", "error", err)
 
 			exitCode = 1
 		}
 	}()
 
+	Exit(exitCode)
+}
+
+// Exit runs the handlers and ends the process with code. It is the exit for a
+// program that cannot end through Run, as one whose command library exits by
+// itself does: urfave/cli's OsExiter takes it as it is.
+func Exit(code int) {
 	Shutdown()
-	os.Exit(exitCode) //revive:disable-line:deep-exit
+	os.Exit(code) //revive:disable-line:deep-exit
 }
 
 // Go launches fn in a new goroutine with panic recovery. If fn panics,
@@ -120,8 +142,7 @@ func Go(function func()) {
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("goroutine panic", "value", r, "stack", string(debug.Stack()))
-				Shutdown()
-				os.Exit(1) //revive:disable-line:deep-exit
+				Exit(1)
 			}
 		}()
 

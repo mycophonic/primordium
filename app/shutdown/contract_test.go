@@ -18,8 +18,10 @@ package shutdown_test
 
 // The contract, from shutdown's docs:
 //   - Shutdown runs the handlers in reverse order of registration, once;
-//   - Run runs fn, then the handlers, and exits 0 on a nil return, 1 on an
-//     error or a panic; Go recovers a goroutine's panic the same way;
+//   - Run runs fn, then the handlers, and exits 0 on a nil return, with an
+//     ExitError returned or wrapped and nothing said, 1 with the error logged
+//     on any other error, 1 on a panic; Go recovers a goroutine's panic the
+//     same way; Exit runs the handlers and exits with its code;
 //   - a shutdown signal cancels every context SetDefaults handed out, runs
 //     the handlers and exits with 128 plus the signal; handlers that overrun
 //     ten seconds end the process with 1.
@@ -69,6 +71,15 @@ func TestMain(m *testing.M) {
 		shutdown.Run(context.Background(), func(context.Context) error { say("body"); return nil })
 	case "run-error":
 		shutdown.Run(context.Background(), func(context.Context) error { return errFailed })
+	case "run-status":
+		shutdown.Run(context.Background(), func(context.Context) error {
+			say("body")
+
+			return fmt.Errorf("asked for: %w", shutdown.ExitError(2))
+		})
+	case "exit":
+		say("body")
+		shutdown.Exit(3)
 	case "run-panic":
 		shutdown.Run(context.Background(), func(context.Context) error { panic("boom") })
 	case "go-panic":
@@ -100,8 +111,9 @@ func TestMain(m *testing.M) {
 	}
 }
 
-// child runs this binary in mode and returns its stdout and exit code.
-func child(t *testing.T, mode string, signal func(*os.Process)) (string, int) {
+// child runs this binary in mode and returns its stdout, its stderr and its
+// exit code.
+func child(t *testing.T, mode string, signal func(*os.Process)) (stdout, stderr string, code int) {
 	t.Helper()
 
 	exe, err := os.Executable()
@@ -113,7 +125,11 @@ func child(t *testing.T, mode string, signal func(*os.Process)) (string, int) {
 
 	cmd.Env = append(os.Environ(), childEnv+"="+mode)
 
-	stdout, err := cmd.StdoutPipe()
+	var errOut strings.Builder
+
+	cmd.Stderr = &errOut
+
+	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +143,7 @@ func child(t *testing.T, mode string, signal func(*os.Process)) (string, int) {
 	buf := make([]byte, 4096)
 
 	for {
-		n, readErr := stdout.Read(buf)
+		n, readErr := pipe.Read(buf)
 		out.Write(buf[:n])
 
 		if signal != nil && strings.Contains(out.String(), "ready\n") {
@@ -144,14 +160,14 @@ func child(t *testing.T, mode string, signal func(*os.Process)) (string, int) {
 	err = cmd.Wait()
 
 	if exit, ok := errors.AsType[*exec.ExitError](err); ok {
-		return out.String(), exit.ExitCode()
+		return out.String(), errOut.String(), exit.ExitCode()
 	}
 
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	return out.String(), 0
+	return out.String(), errOut.String(), 0
 }
 
 const handlersReversed = "handler 2\nhandler 1\n"
@@ -161,7 +177,7 @@ const handlersReversed = "handler 2\nhandler 1\n"
 func TestShutdownOrderOnce(t *testing.T) {
 	t.Parallel()
 
-	out, code := child(t, "shutdown-twice", nil)
+	out, _, code := child(t, "shutdown-twice", nil)
 
 	if want := "handler 3\n" + handlersReversed + "done\n"; out != want || code != 0 {
 		t.Fatalf("exit %d with %q, want 0 with %q", code, out, want)
@@ -172,20 +188,32 @@ func TestRun(t *testing.T) {
 	t.Parallel()
 
 	for mode, want := range map[string]struct {
-		out  string
-		code int
+		out    string
+		code   int
+		logged string
 	}{
-		"run-ok":    {"body\n" + handlersReversed, 0},
-		"run-error": {handlersReversed, 1},
-		"run-panic": {handlersReversed, 1},
-		"go-panic":  {handlersReversed, 1},
+		"run-ok":     {"body\n" + handlersReversed, 0, ""},
+		"run-error":  {handlersReversed, 1, "fatal"},
+		"run-status": {"body\n" + handlersReversed, 2, ""},
+		"run-panic":  {handlersReversed, 1, "panic"},
+		"go-panic":   {handlersReversed, 1, "goroutine panic"},
+		"exit":       {"body\n" + handlersReversed, 3, ""},
 	} {
 		t.Run(mode, func(t *testing.T) {
 			t.Parallel()
 
-			out, code := child(t, mode, nil)
+			out, logged, code := child(t, mode, nil)
 			if out != want.out || code != want.code {
 				t.Fatalf("exit %d with %q, want %d with %q", code, out, want.code, want.out)
+			}
+
+			// What a program asked for is said by the program, not by Run.
+			if want.logged == "" && (strings.Contains(logged, "fatal") || strings.Contains(logged, "panic")) {
+				t.Fatalf("Run said %q, want nothing", logged)
+			}
+
+			if want.logged != "" && !strings.Contains(logged, want.logged) {
+				t.Fatalf("Run said %q, want a %q line", logged, want.logged)
 			}
 		})
 	}
@@ -198,7 +226,7 @@ func TestSignal(t *testing.T) {
 		t.Skip("Windows cannot deliver SIGTERM to another process")
 	}
 
-	out, code := child(t, "signal", func(proc *os.Process) { _ = proc.Signal(syscall.SIGTERM) })
+	out, _, code := child(t, "signal", func(proc *os.Process) { _ = proc.Signal(syscall.SIGTERM) })
 
 	if want := "ready\ncancelled\n" + handlersReversed; out != want || code != 128+int(syscall.SIGTERM) {
 		t.Fatalf("exit %d with %q, want %d with %q", code, out, 128+int(syscall.SIGTERM), want)
@@ -215,7 +243,7 @@ func TestSignalHandlersOverrun(t *testing.T) {
 	}
 
 	start := time.Now()
-	out, code := child(t, "signal-slow", func(proc *os.Process) { _ = proc.Signal(syscall.SIGTERM) })
+	out, _, code := child(t, "signal-slow", func(proc *os.Process) { _ = proc.Signal(syscall.SIGTERM) })
 
 	if code != 1 || !strings.HasPrefix(out, "ready\ncancelled\n") {
 		t.Fatalf("exit %d with %q", code, out)

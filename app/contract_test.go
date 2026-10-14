@@ -17,13 +17,14 @@
 package app_test
 
 // The contract, from app's docs:
-//   - New without a Name panics; with one, the directories carry the name,
+//   - Main without a Name panics; with one, the directories carry the name,
 //     the logger is installed, and no DSN is a warning, not a failure;
-//   - the context New returns is cancelled by a shutdown signal (shutdown's
-//     tests hold that mechanism; here the context is live after New).
+//   - run gets a context a shutdown signal cancels (shutdown's tests hold
+//     that mechanism; here the context is live inside run); when run returns,
+//     the handlers run and the process exits with the ExitError run asked for.
 //
-// New installs process-wide defaults, so each case is a child: this binary,
-// told by PRIMORDIUM_APP_CHILD what to do.
+// Main installs process-wide defaults and exits, so each case is a child: this
+// binary, told by PRIMORDIUM_APP_CHILD what to do.
 
 import (
 	"context"
@@ -35,6 +36,7 @@ import (
 	"testing"
 
 	"github.com/mycophonic/primordium/app"
+	"github.com/mycophonic/primordium/app/shutdown"
 	"github.com/mycophonic/primordium/filesystem/dirs"
 )
 
@@ -45,18 +47,21 @@ func TestMain(m *testing.M) {
 	case "":
 		m.Run()
 	case "no-name":
-		app.New(context.Background(), &app.Options{})
+		app.Main(&app.Options{}, func(context.Context) error { return nil })
 	case "named":
-		ctx := app.New(context.Background(), &app.Options{Name: "primordium-app-test"})
+		shutdown.Register(func() { fmt.Fprintln(os.Stdout, "handler ran") })
 
-		cache, err := dirs.CacheDir()
-		if err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(2)
-		}
+		app.Main(&app.Options{Name: "primordium-app-test"}, func(ctx context.Context) error {
+			cache, err := dirs.CacheDir()
+			if err != nil {
+				return err
+			}
 
-		fmt.Fprintln(os.Stdout, cache)
-		fmt.Fprintln(os.Stdout, "context live:", ctx.Err() == nil)
+			fmt.Fprintln(os.Stdout, cache)
+			fmt.Fprintln(os.Stdout, "context live:", ctx.Err() == nil)
+
+			return shutdown.ExitError(3)
+		})
 	default:
 		os.Exit(99)
 	}
@@ -110,8 +115,8 @@ func TestNamed(t *testing.T) {
 	t.Parallel()
 
 	stdout, stderr, code := child(t, "named")
-	if code != 0 {
-		t.Fatalf("exit %d: %s", code, stderr)
+	if code != 3 {
+		t.Fatalf("exit %d, want the ExitError run asked for: %s", code, stderr)
 	}
 
 	if !strings.Contains(stdout, "primordium-app-test") {
@@ -120,6 +125,14 @@ func TestNamed(t *testing.T) {
 
 	if !strings.Contains(stdout, "context live: true") {
 		t.Errorf("the context is cancelled before any signal: %q", stdout)
+	}
+
+	if !strings.HasSuffix(stdout, "handler ran\n") {
+		t.Errorf("the handlers did not run after run returned: %q", stdout)
+	}
+
+	if strings.Contains(stderr, "fatal") {
+		t.Errorf("Main said what the program asked for: %q", stderr)
 	}
 
 	// The logger is in place, JSON off a terminal, and the missing DSN is a

@@ -24,7 +24,8 @@ package reporter_test
 //     attributes travel under the "log" context, groups as dotted prefixes;
 //     records the console does not show reach Sentry neither;
 //   - CaptureMessage, CaptureException and CaptureEvent send one event each;
-//   - Shutdown delivers what is buffered.
+//   - tracing is on at the rate given and off at zero;
+//   - Shutdown delivers what is buffered, and before Initialize does nothing.
 //
 // Sentry is a local server here; the envelopes it receives are read back.
 // The reporter and the default logger are process-wide, so the tests run in
@@ -81,6 +82,9 @@ func TestMain(m *testing.M) {
 		slog.Info("kept on the console", "n", 1)
 		slog.Error("and reported")
 		reporter.Shutdown()
+	case "shutdown-only":
+		reporter.Shutdown()
+		fmt.Fprintln(os.Stdout, "returned")
 	default:
 		os.Exit(99)
 	}
@@ -375,5 +379,56 @@ func TestWrapsTheInstalledLogger(t *testing.T) {
 
 	if events := s.received(); len(events) != 1 || field(events[0], "message") != "and reported" {
 		t.Errorf("events: %v", events)
+	}
+}
+
+// TestTracingFollowsTheRate: the client Initialize configures traces at the
+// rate given, and not at all at zero.
+//
+//nolint:paralleltest // process-wide reporter and default logger
+func TestTracingFollowsTheRate(t *testing.T) {
+	previous := slog.Default()
+
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	s := newCollector(t)
+
+	for _, rate := range []float64{0, 0.25} {
+		if err := reporter.Initialize(&reporter.Config{DSN: s.dsn(), TracesSampleRate: rate}); err != nil {
+			t.Fatal(err)
+		}
+
+		options := sentry.CurrentHub().Client().Options()
+		if options.EnableTracing != (rate > 0) || options.TracesSampleRate != rate {
+			t.Fatalf("rate %v: tracing %t at %v", rate, options.EnableTracing, options.TracesSampleRate)
+		}
+	}
+}
+
+// TestShutdownBeforeInitialize: a program with no reporter ends with no
+// warning about one; a child, since the reporter is process-wide.
+func TestShutdownBeforeInitialize(t *testing.T) {
+	t.Parallel()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := exec.CommandContext(t.Context(), exe)
+
+	cmd.Env = append(os.Environ(), childEnv+"=shutdown-only")
+
+	var stdout, stderr strings.Builder
+
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("%v: %s", err, stderr.String())
+	}
+
+	if stdout.String() != "returned\n" || strings.Contains(stderr.String(), "flush") {
+		t.Fatalf("stdout %q, stderr %q: want a silent return", stdout.String(), stderr.String())
 	}
 }
