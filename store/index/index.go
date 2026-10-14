@@ -1143,8 +1143,23 @@ func (idx *Index) readerSlotPtr(slot int) *uint32 {
 	return (*uint32)(unsafe.Pointer(&idx.lockData[slot*4]))
 }
 
+// writerStartPtr returns a pointer to the writer's start time in the mmap'd
+// lock file.
+func (idx *Index) writerStartPtr() *uint64 {
+	// #nosec G103 -- required for cross-process atomics on mmap'd lock file; the offset is 8-byte aligned
+	return (*uint64)(unsafe.Pointer(&idx.lockData[writerStartOffset]))
+}
+
+// readerStartPtr returns a pointer to the start time recorded beside the PID
+// slot at the given index.
+func (idx *Index) readerStartPtr(slot int) *uint64 {
+	// #nosec G103 -- required for cross-process atomics on mmap'd lock file; the offsets are 8-byte aligned
+	return (*uint64)(unsafe.Pointer(&idx.lockData[readerStartsOffset+slot*8]))
+}
+
 // claimReaderSlot CAS-claims an empty PID slot in the lock file for this
-// process. Called on the per-process 0→1 reader transition.
+// process, and records its start time beside it. Called on the per-process
+// 0→1 reader transition.
 func (idx *Index) claimReaderSlot() {
 	// #nosec G115 -- PIDs are always positive and fit in uint32
 	ourPID := uint32(os.Getpid())
@@ -1152,6 +1167,7 @@ func (idx *Index) claimReaderSlot() {
 	for slot := range maxReaderSlots {
 		ptr := idx.readerSlotPtr(slot)
 		if atomic.CompareAndSwapUint32(ptr, 0, ourPID) {
+			atomic.StoreUint64(idx.readerStartPtr(slot), startOfSelf())
 			idx.readerSlot.Store(int32(slot))
 
 			return
@@ -1162,23 +1178,26 @@ func (idx *Index) claimReaderSlot() {
 	// this reader is active. See maxReaderSlots.
 }
 
-// clearReaderSlot zeroes this process's PID slot in the lock file.
-// Called on the per-process 1→0 reader transition and during Close.
+// clearReaderSlot zeroes this process's PID slot in the lock file, the start
+// time first so that no checker pairs the PID with another's start. Called on
+// the per-process 1→0 reader transition and during Close.
 func (idx *Index) clearReaderSlot() {
 	slot := idx.readerSlot.Swap(-1)
 	if slot >= 0 && idx.lockData != nil {
+		atomic.StoreUint64(idx.readerStartPtr(int(slot)), 0)
 		atomic.StoreUint32(idx.readerSlotPtr(int(slot)), 0)
 	}
 }
 
 // allReaderPIDsDead reports whether every non-zero PID in the lock file
-// reader slots belongs to a dead process. Returns true when all slots are
-// empty or all registered PIDs are dead.
+// reader slots belongs to a dead process, or to another process than the one
+// that claimed the slot. Returns true when all slots are empty or all
+// registered PIDs are dead.
 func (idx *Index) allReaderPIDsDead() bool {
 	for slot := range maxReaderSlots {
 		slotPID := atomic.LoadUint32(idx.readerSlotPtr(slot))
 
-		if slotPID != 0 && isProcessAlive(int(slotPID)) {
+		if slotPID != 0 && sameProcess(int(slotPID), atomic.LoadUint64(idx.readerStartPtr(slot))) {
 			return false
 		}
 	}
@@ -1209,7 +1228,7 @@ func (idx *Index) rlock() {
 			// Writer is active. Check for stale writer before spinning further.
 			if spin >= stalePIDThreshold {
 				writerPID := int((old & lockPIDMask) >> lockPIDShift)
-				if writerPID != 0 && !isProcessAlive(writerPID) {
+				if writerPID != 0 && !sameProcess(writerPID, atomic.LoadUint64(idx.writerStartPtr())) {
 					atomic.CompareAndSwapUint64(ptr, old, 0)
 				}
 
@@ -1259,6 +1278,8 @@ func (idx *Index) wlock() {
 
 		if old == 0 {
 			if atomic.CompareAndSwapUint64(ptr, 0, target) {
+				atomic.StoreUint64(idx.writerStartPtr(), startOfSelf())
+
 				return
 			}
 
@@ -1268,13 +1289,15 @@ func (idx *Index) wlock() {
 		if spin >= stalePIDThreshold {
 			if old&lockWriteFlag != 0 {
 				writerPID := int((old & lockPIDMask) >> lockPIDShift)
-				if writerPID != 0 && !isProcessAlive(writerPID) {
+				if writerPID != 0 && !sameProcess(writerPID, atomic.LoadUint64(idx.writerStartPtr())) {
 					atomic.CompareAndSwapUint64(ptr, old, 0)
 				}
 			} else if idx.allReaderPIDsDead() {
 				// All reader PIDs are dead (or no PIDs registered). The
 				// reader count is stale — CAS directly to our write lock.
 				if atomic.CompareAndSwapUint64(ptr, old, target) {
+					atomic.StoreUint64(idx.writerStartPtr(), startOfSelf())
+
 					return
 				}
 			}
@@ -1293,6 +1316,7 @@ func (idx *Index) wlock() {
 }
 
 func (idx *Index) wunlock() {
+	atomic.StoreUint64(idx.writerStartPtr(), 0)
 	atomic.StoreUint64(idx.lockWordPtr(), 0)
 	idx.mu.Unlock()
 }
