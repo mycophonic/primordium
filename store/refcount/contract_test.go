@@ -23,7 +23,8 @@ package refcount_test
 //     is the key under the root; Acquire returns the factory's path;
 //   - the entry lives while any holder, in any process, has it; the last
 //     release removes it and runs that releaser's cleanup only; release is
-//     idempotent; a holder that dies releases;
+//     idempotent; a holder that dies releases; a release that cannot take
+//     its locks leaves the entry and warns;
 //   - a factory error is returned as it is, the entry released as a holder's.
 //
 // The holder in another process is this test binary, told by
@@ -32,12 +33,15 @@ package refcount_test
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -493,4 +497,38 @@ func TestFactoriesRunAloneAcrossProcesses(t *testing.T) {
 	}
 
 	child.done(t)
+}
+
+// TestAReleaseThatCannotLockWarns: with the root gone under a holder, its
+// release cannot take its locks; it returns, and says what it left. slog's
+// default is swapped for the test, which is why it does not run in parallel.
+func TestAReleaseThatCannotLockWarns(t *testing.T) { //nolint:paralleltest // slog's default is process-wide
+	if runtime.GOOS == "windows" {
+		t.Skip("a held lock file keeps its directory on Windows")
+	}
+
+	root := filepath.Join(t.TempDir(), "root")
+	locker := refcount.New(root)
+
+	_, release, err := locker.Acquire(key, writing)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err = os.RemoveAll(root); err != nil {
+		t.Fatal(err)
+	}
+
+	var said bytes.Buffer
+
+	previous := slog.Default()
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(&said, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	release()
+
+	if !strings.Contains(said.String(), "left the entry in place") {
+		t.Fatalf("release said %q, want a warning that the entry was left", said.String())
+	}
 }

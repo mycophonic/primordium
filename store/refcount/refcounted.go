@@ -17,7 +17,9 @@
 package refcount
 
 import (
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
@@ -54,9 +56,11 @@ type ResourceFactory func(dir string) (resourcePath string, cleanup func(), err 
 
 // Acquire holds key's entry: it runs factory on the entry directory and
 // returns the path the factory returned, with release, which must be called
-// when done and is idempotent. The last release removes the entry directory.
-// A key that is not a single path component is ErrInvalidArgument. A factory
-// error is returned as it is, and the entry is released as a holder's is.
+// when done and is idempotent. The last release removes the entry directory;
+// one that cannot take its locks leaves the entry in place and warns, and the
+// next hold of the key removes it. A key that is not a single path component
+// is ErrInvalidArgument. A factory error is returned as it is, and the entry
+// is released as a holder's is.
 func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), error) {
 	if err := pathcheck.ValidateComponent(key); err != nil {
 		return "", nil, fmt.Errorf("%w: invalid key %q: %w", fault.ErrInvalidArgument, key, err)
@@ -138,6 +142,8 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 			if err != nil {
 				_ = flock.Unlock(readLock)
 
+				left(dir, err)
+
 				return
 			}
 
@@ -145,6 +151,8 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 			if err != nil {
 				_ = flock.Unlock(globalLock)
 				_ = flock.Unlock(readLock)
+
+				left(dir, err)
 
 				return
 			}
@@ -157,6 +165,8 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 			if err != nil {
 				_ = flock.Unlock(dirLock)
 				_ = flock.Unlock(globalLock)
+
+				left(dir, err)
 
 				return
 			}
@@ -177,6 +187,17 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 			_ = flock.Unlock(globalLock)
 		})
 	}
+}
+
+// left says that a release could not tell whether it was the last and left
+// the entry in place, which the next hold of the key removes. A lock that
+// would block is another holder, the usual case, and nothing to say.
+func left(dir string, err error) {
+	if errors.Is(err, flock.ErrLockWouldBlock) {
+		return
+	}
+
+	slog.Warn("refcount: release left the entry in place", "dir", dir, "error", err)
 }
 
 func touchLockFile(path string) error {
