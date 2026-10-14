@@ -59,7 +59,12 @@ func New(root string, quota int64) *Cache {
 // On cache miss, the reader and writer are connected via a pipe: data written to writer
 // is teed to both the cache file and the reader.
 // The caller must Close() the returned reader and writer to release locks.
+// A zero digest is ErrInvalidArgument.
 func (c *Cache) Acquire(dgst digest.Digest) (io.ReadCloser, io.WriteCloser, error) {
+	if dgst.IsZero() {
+		return nil, nil, fmt.Errorf("%w: zero digest", fault.ErrInvalidArgument)
+	}
+
 	// Use algorithm-encoded format for directory name (safe: validated hex + known algorithm).
 	// Shard into 256 prefix buckets by first 2 hex chars of the encoded hash.
 	name := strings.Replace(dgst.String(), ":", "-", 1)
@@ -186,7 +191,14 @@ func (p *PinnedFile) Release() error {
 // expected to complete a regular Acquire first and try again. The pin is the
 // same shared read flock a reader holds, so GarbageCollect skips the entry
 // while the pin is outstanding.
+// A zero digest is ErrInvalidArgument.
+//
+//nolint:gocognit // the pin protocol: its checks are ordered and read as one
 func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
+	if dgst.IsZero() {
+		return nil, fmt.Errorf("%w: zero digest", fault.ErrInvalidArgument)
+	}
+
 	name := strings.Replace(dgst.String(), ":", "-", 1)
 	prefix := dgst.Encoded()[:2]
 	resourceDir := filepath.Join(c.rootDir, prefix, name)
@@ -300,7 +312,12 @@ func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 // Exists reports whether cached content for the given digest is present on disk.
 // This is a lockless, best-effort check (subject to TOCTOU races) intended for
 // fast-path skipping in bulk operations where a subsequent Acquire handles correctness.
+// Nothing is cached under the zero digest.
 func (c *Cache) Exists(dgst digest.Digest) bool {
+	if dgst.IsZero() {
+		return false
+	}
+
 	name := strings.Replace(dgst.String(), ":", "-", 1)
 	prefix := dgst.Encoded()[:2]
 	dataPath := filepath.Join(c.rootDir, prefix, name, cacheDataFile)
