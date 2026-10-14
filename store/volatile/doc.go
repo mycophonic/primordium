@@ -14,7 +14,8 @@
    limitations under the License.
 */
 
-// Package volatile provides a volatile filesystem store where stored data is automatically cleaned-up
-// once all consumers are done with it.
-// This is just a thin wrapper around refcount.
+// Package volatile is a content-addressed store whose files live while any
+// process holds them: content is written once under its digest, read by any
+// number of holders, and removed with the last release. It is refcount with
+// the digest for a key and a data file for the resource.
 package volatile
