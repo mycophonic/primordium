@@ -529,22 +529,31 @@ type cacheReader struct {
 }
 
 func (r *cacheReader) Read(p []byte) (int, error) {
-	//nolint:wrapcheck // io.Reader interface, thin wrapper
-	return r.file.Read(p)
+	n, err := r.file.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		err = fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
+	}
+
+	return n, err
 }
 
 // Close releases the data file and the shared read lock.
 // Not safe for concurrent or repeated calls.
 func (r *cacheReader) Close() error {
-	fileErr := r.file.Close()
-	lockErr := flock.Unlock(r.lockFile)
+	return closeReader(r.file, r.lockFile)
+}
 
-	//nolint:wrapcheck // io.Closer interface, thin wrapper
+// closeReader closes a reader's data file and releases its read lock; the
+// lock is released whatever the close said.
+func closeReader(file, lockFile *os.File) error {
+	fileErr := file.Close()
+	lockErr := flock.Unlock(lockFile)
+
 	if fileErr != nil {
-		return fileErr
+		return fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, fileErr)
 	}
 
-	//nolint:wrapcheck // io.Closer interface, thin wrapper
+	//nolint:wrapcheck // flock's own sentinel, ErrUnlockFail
 	return lockErr
 }
 
@@ -660,9 +669,8 @@ func (r *inProgressReader) Read(p []byte) (int, error) {
 			return n, nil
 		}
 
-		//nolint:wrapcheck // io.Reader interface
-		if err != nil && err != io.EOF {
-			return 0, err
+		if err != nil && !errors.Is(err, io.EOF) {
+			return 0, fmt.Errorf("%w: %w", fault.ErrReadFailure, err)
 		}
 
 		// Hit EOF - if we already confirmed write complete, we're truly done
@@ -695,16 +703,7 @@ func (r *inProgressReader) Read(p []byte) (int, error) {
 // Close releases the temp file and the shared read lock.
 // Not safe for concurrent or repeated calls.
 func (r *inProgressReader) Close() error {
-	fileErr := r.file.Close()
-	lockErr := flock.Unlock(r.lockFile)
-
-	//nolint:wrapcheck // io.Closer interface
-	if fileErr != nil {
-		return fileErr
-	}
-
-	//nolint:wrapcheck // io.Closer interface
-	return lockErr
+	return closeReader(r.file, r.lockFile)
 }
 
 // measure lists every committed entry with its size and commit time, locking

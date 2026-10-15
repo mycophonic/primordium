@@ -438,12 +438,12 @@ func stateFilePath(stateDir, bucket, objectKey string) string {
 func loadState(statePath string) (*uploadState, error) {
 	data, err := xos.ReadFile(statePath)
 	if err != nil {
-		return nil, fmt.Errorf("read upload state: %w", err)
+		return nil, fmt.Errorf("%w: read upload state: %w", fault.ErrReadFailure, err)
 	}
 
 	var state uploadState
 	if err := json.Unmarshal(data, &state); err != nil {
-		return nil, fmt.Errorf("decode upload state: %w", err)
+		return nil, fmt.Errorf("%w: decode upload state: %w", fault.ErrInvalidJSON, err)
 	}
 
 	return &state, nil
@@ -452,7 +452,7 @@ func loadState(statePath string) (*uploadState, error) {
 func saveState(statePath string, state *uploadState) error {
 	data, err := json.Marshal(state)
 	if err != nil {
-		return fmt.Errorf("encode upload state: %w", err)
+		return fmt.Errorf("%w: encode upload state: %w", fault.ErrWriteFailure, err)
 	}
 
 	if err := filesystem.WriteFile(statePath, data, filesystem.FilePermissionsPrivate); err != nil {

@@ -18,6 +18,7 @@ package r2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -183,12 +184,12 @@ func (cli *Client) fetchInto(ctx context.Context, objectKey, tempFile string, of
 
 	file, err := xos.OpenFile(tempFile, flags, filesystem.FilePermissionsPrivate)
 	if err != nil {
-		return fmt.Errorf("open file: %w", err)
+		return fmt.Errorf("%w: open file: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	written, err := copyWithProgress(ctx, file, body, offset, remoteSize)
 	if closeErr := file.Close(); closeErr != nil && err == nil {
-		err = fmt.Errorf("close: %w", closeErr)
+		err = fmt.Errorf("%w: close: %w", fault.ErrWriteFailure, closeErr)
 	}
 
 	if err != nil {
@@ -205,11 +206,11 @@ func (cli *Client) fetchInto(ctx context.Context, objectKey, tempFile string, of
 
 func (paths downloadPaths) moveToData() error {
 	if err := xos.Rename(paths.tempFile, paths.dataFile); err != nil {
-		return fmt.Errorf("move data file: %w", err)
+		return fmt.Errorf("%w: move data file: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	if err := xos.Rename(paths.tempETag, paths.dataETag); err != nil {
-		return fmt.Errorf("move etag file: %w", err)
+		return fmt.Errorf("%w: move etag file: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	return nil
@@ -236,7 +237,7 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset,
 
 	for {
 		if err := ctx.Err(); err != nil {
-			return written, fmt.Errorf("cancelled: %w", err)
+			return written, mapErr(err)
 		}
 
 		bytesRead, readErr := src.Read(buf)
@@ -264,11 +265,21 @@ func copyWithProgress(ctx context.Context, dst io.Writer, src io.Reader, offset,
 		}
 
 		if readErr != nil {
-			return written, fmt.Errorf("read: %w", readErr)
+			return written, readFailure(readErr)
 		}
 	}
 
 	return written, nil
+}
+
+// readFailure classifies a response body that failed under the copy: a
+// context that ended is its own class, anything else is the connection.
+func readFailure(err error) error {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return mapErr(err)
+	}
+
+	return fmt.Errorf("%w: read: %w", fault.ErrNetworkCommunication, err)
 }
 
 // writeChunk writes chunk to dst whole: a write error, or a short write the
@@ -278,7 +289,7 @@ func writeChunk(dst io.Writer, chunk []byte) (int, error) {
 	bytesWritten = max(bytesWritten, 0)
 
 	if err != nil {
-		return bytesWritten, fmt.Errorf("write: %w", err)
+		return bytesWritten, fmt.Errorf("%w: write: %w", fault.ErrWriteFailure, err)
 	}
 
 	if bytesWritten != len(chunk) {

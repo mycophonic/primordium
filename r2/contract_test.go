@@ -23,6 +23,8 @@ package r2_test
 import (
 	"bytes"
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -506,4 +508,105 @@ func TestBoundedResumeOffsets(t *testing.T) {
 			assert.Assert(t, bytes.Equal(got, data), "resumed from %d: %d bytes, want %d", partial, len(got), size)
 		})
 	}
+}
+
+// objectServer serves one object of size bytes at any key: HEAD answers with
+// its size, GET hands the writer to body after the headers are out.
+func objectServer(t *testing.T, size int, body func(w http.ResponseWriter, r *http.Request)) string {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(size))
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("ETag", `"0123456789abcdef0123456789abcdef"`)
+		w.Header().Set("Last-Modified", "Tue, 14 Oct 2026 00:00:00 GMT")
+		w.WriteHeader(http.StatusOK)
+
+		if r.Method != http.MethodHead {
+			body(w, r)
+		}
+	}))
+	t.Cleanup(server.Close)
+
+	return server.URL
+}
+
+// TestTheCopyFails: what a download that fails after the service answered
+// becomes. A temp file it cannot open is ErrFilesystemFailure; a body the
+// connection cut is ErrNetworkCommunication; a context ended under the copy
+// is ErrCancelled.
+func TestTheCopyFails(t *testing.T) {
+	t.Parallel()
+
+	t.Run("temp file it cannot open", func(t *testing.T) {
+		t.Parallel()
+
+		if os.Geteuid() == 0 {
+			t.Skip("a read-only file does not refuse root")
+		}
+
+		env := setup(t)
+		content := []byte("content")
+		env.putObject(t, "k", content)
+
+		// A resume: the partial temp file and its sidecar are in place, so the
+		// download reopens the file for append and nothing before that writes.
+		tempDir := t.TempDir()
+		sum := md5.Sum(content)
+		assert.NilError(t, os.WriteFile(filepath.Join(tempDir, "k.etag"), []byte(hex.EncodeToString(sum[:])), 0o600))
+		partial := filepath.Join(tempDir, "k")
+		assert.NilError(t, os.WriteFile(partial, content[:3], 0o400))
+		// Registered after TempDir's cleanup, so it runs first: the directory
+		// cannot be removed around a read-only file on Windows.
+		t.Cleanup(func() { _ = os.Chmod(partial, 0o600) })
+
+		err := env.client.Download(t.Context(), "k", tempDir, t.TempDir())
+		assert.ErrorIs(t, err, fault.ErrFilesystemFailure)
+	})
+
+	t.Run("body cut by the connection", func(t *testing.T) {
+		t.Parallel()
+
+		url := objectServer(t, 100, func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write(make([]byte, 10))
+			_ = http.NewResponseController(w).
+				Flush()
+				// the cut, or the wait, is the point; a flush that failed shows there
+
+			panic(http.ErrAbortHandler)
+		})
+
+		err := clientFor(t, url).Download(t.Context(), "k", t.TempDir(), t.TempDir())
+		assert.ErrorIs(t, err, fault.ErrNetworkCommunication)
+	})
+
+	t.Run("context ended under the copy", func(t *testing.T) {
+		t.Parallel()
+
+		sent := make(chan struct{})
+		url := objectServer(t, 100, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write(make([]byte, 10))
+			_ = http.NewResponseController(w).
+				Flush()
+				// the cut, or the wait, is the point; a flush that failed shows there
+
+			close(sent)
+			<-r.Context().Done()
+		})
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+
+		// Built here: a failure in them must fail the test on its own goroutine.
+		client := clientFor(t, url)
+		tempDir, dataDir := t.TempDir(), t.TempDir()
+		done := make(chan error, 1)
+
+		go func() { done <- client.Download(ctx, "k", tempDir, dataDir) }()
+
+		<-sent
+		cancel()
+
+		assert.ErrorIs(t, <-done, fault.ErrCancelled)
+	})
 }
