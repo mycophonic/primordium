@@ -29,10 +29,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/flock"
-	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/mmap"
 )
 

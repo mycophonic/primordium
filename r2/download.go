@@ -27,10 +27,10 @@ import (
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/forkcloser/xos"
 
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Download downloads an R2 object to dataDir/key with resume support.

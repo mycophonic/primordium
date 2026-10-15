@@ -22,9 +22,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/r2"
 )
 

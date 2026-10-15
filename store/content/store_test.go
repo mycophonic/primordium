@@ -26,12 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/forkcloser/xos"
 	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/content"
 )
 

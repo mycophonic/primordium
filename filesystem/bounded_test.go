@@ -29,9 +29,10 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // start is a state a write starts from.

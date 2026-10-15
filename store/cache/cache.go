@@ -28,11 +28,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/flock"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Cache provides content-addressed persistent storage with read-while-write support.

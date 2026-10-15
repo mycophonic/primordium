@@ -22,10 +22,11 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/refcount"
 )
 

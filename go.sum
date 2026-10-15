@@ -32,6 +32,8 @@ github.com/dustin/go-humanize v1.1.0 h1:dbKTrvD0klcbBV/h4AWJdMuZogJACoMlvWIWZ5b2
 github.com/dustin/go-humanize v1.1.0/go.mod h1:hc1CvRkJMsgxqjmjMQF3QNRAZBwY8AXBAzKYoSX9sFI=
 github.com/forkcloser/blake3 v1.0.1 h1:ol94agsGVUs1srexJxb4jUSrXHdA3thPyrfuAVGhi5I=
 github.com/forkcloser/blake3 v1.0.1/go.mod h1:yl3AyBunlxsVVNqNMvTEE9D6C1Hk0RzMlT1sEJrv5Ds=
+github.com/forkcloser/xos v0.1.0 h1:0vfH2xxdCCDv6x7mYvnQ74zTElzb3wce+0wL+782HtE=
+github.com/forkcloser/xos v0.1.0/go.mod h1:XD7TJl5GzHaZbCBDKby6zDS9zQ+R6DAWclFskmRjAco=
 github.com/forkcloser/xz v1.0.2 h1:EczpMCCAy7l94vzitbLhIdOc9QuHYdWMybe2j4bKHTA=
 github.com/forkcloser/xz v1.0.2/go.mod h1:97jHfaW5ugdlASYSsIlWK2tohamE+Jh5ouA78TH92sU=
 github.com/getsentry/sentry-go v0.50.0 h1:gkO59rn/i0RCAXUUTflC5QVbTQGPXbaFabs2olVzc9g=

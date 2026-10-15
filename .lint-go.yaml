@@ -23,6 +23,7 @@ golangci:
               - github.com/klauspost/pgzip
               - github.com/pierrec/lz4
               - github.com/forkcloser/xz # forked from github.com/ulikunitz/xz for performance
+              - github.com/forkcloser/xos # os with FILE_SHARE_DELETE on Windows, moved out of this module
               - github.com/aws/aws-sdk-go-v2
               - github.com/aws/smithy-go
 licenses:

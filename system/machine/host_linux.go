@@ -25,12 +25,12 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/forkcloser/xos"
 	"golang.org/x/sys/unix"
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem/dirs"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Host returns information about the current machine.

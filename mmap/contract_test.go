@@ -34,7 +34,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/mycophonic/primordium/filesystem/xos"
+	"github.com/forkcloser/xos"
 )
 
 // fileOf creates a file of size bytes, zero-filled, open read-write.

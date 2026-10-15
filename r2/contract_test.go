@@ -33,13 +33,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/forkcloser/xos"
 	"github.com/johannesboyne/gofakes3"
 	"github.com/johannesboyne/gofakes3/backend/s3mem"
 	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/r2"
 )
 

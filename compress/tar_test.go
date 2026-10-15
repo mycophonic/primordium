@@ -25,11 +25,11 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/forkcloser/xos"
 	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/compress"
 	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 func TestTar(t *testing.T) {
