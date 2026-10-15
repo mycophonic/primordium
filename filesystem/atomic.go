@@ -24,8 +24,9 @@ import (
 	"path/filepath"
 	"strconv"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Adapted from: https://github.com/containerd/continuity/blob/main/ioutils.go under Apache License

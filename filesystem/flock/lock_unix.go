@@ -30,7 +30,7 @@ import (
 	"os"
 	"syscall"
 
-	"github.com/mycophonic/primordium/filesystem/xos"
+	"github.com/forkcloser/xos"
 )
 
 type lockType int16

@@ -24,8 +24,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/filesystem"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Tar returns a reader that yields a tar archive of baseDir/relDir.

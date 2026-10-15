@@ -28,13 +28,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/forkcloser/xos"
 	"gotest.tools/v3/assert"
 	"gotest.tools/v3/assert/cmp"
 
 	"github.com/mycophonic/primordium/bytesize"
 	dgst "github.com/mycophonic/primordium/digest"
 	"github.com/mycophonic/primordium/fault"
-	"github.com/mycophonic/primordium/filesystem/xos"
 	"github.com/mycophonic/primordium/store/cache"
 )
 

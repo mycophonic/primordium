@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
 	github.com/aws/smithy-go v1.28.5
 	github.com/forkcloser/blake3 v1.0.1
+	github.com/forkcloser/xos v0.1.0
 	github.com/forkcloser/xz v1.0.2
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/johannesboyne/gofakes3 v1.2.0

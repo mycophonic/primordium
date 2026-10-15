@@ -35,10 +35,10 @@ import (
 	"path/filepath"
 	"unicode/utf16"
 
+	"github.com/forkcloser/xos"
 	"golang.org/x/sys/windows"
 
 	"github.com/mycophonic/primordium/filesystem/internal"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 type lockType uint32

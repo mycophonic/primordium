@@ -24,11 +24,12 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 	"github.com/mycophonic/primordium/filesystem/flock"
 	"github.com/mycophonic/primordium/filesystem/pathcheck"
-	"github.com/mycophonic/primordium/filesystem/xos"
 )
 
 // Locker counts the holders of keyed directories under a root, across

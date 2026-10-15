@@ -42,7 +42,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/mycophonic/primordium/filesystem/xos"
+	"github.com/forkcloser/xos"
+
 	"github.com/mycophonic/primordium/store/index"
 )
 
