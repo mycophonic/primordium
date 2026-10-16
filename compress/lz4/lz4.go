@@ -16,32 +16,4 @@
 
 package lz4
 
-import (
-	"fmt"
-	"io"
-
-	plz4 "github.com/pierrec/lz4/v4"
-
-	"github.com/mycophonic/primordium/compress"
-	"github.com/mycophonic/primordium/fault"
-)
-
-//nolint:gochecknoinits // Registration pattern requires init.
-func init() {
-	compress.Register("lz4", []byte{0x04, 0x22, 0x4D, 0x18}, New)
-}
-
-// New returns an lz4 decompressed reader that decodes frame blocks on
-// GOMAXPROCS goroutines. Abandoning a partially consumed reader parks those
-// workers and their block buffers for good, as the library has no
-// cancellation: a consumer that stops short of EOF by design (a tar reader
-// halting at the end-of-archive marker) must drain the rest before dropping
-// the reader.
-func New(reader io.Reader) (io.ReadCloser, error) {
-	decoder := plz4.NewReader(reader)
-	if err := decoder.Apply(plz4.ConcurrencyOption(-1)); err != nil {
-		return nil, fmt.Errorf("%w: lz4 concurrency: %w", fault.ErrNotImplemented, err)
-	}
-
-	return io.NopCloser(decoder), nil
-}
+import _ "github.com/forkcloser/compress/lz4" // registers lz4 with the registry compress.Decompress reads

@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-// Package lz4 registers LZ4 decompression with the compress registry.
+// Package lz4 registers lz4 decompression with the compress registry.
 //
 // Import this package for its side effect:
 //

@@ -16,19 +16,4 @@
 
 package bzip2
 
-import (
-	gobzip2 "compress/bzip2"
-	"io"
-
-	"github.com/mycophonic/primordium/compress"
-)
-
-//nolint:gochecknoinits // Registration pattern requires init.
-func init() {
-	compress.Register("bzip2", []byte{0x42, 0x5A, 0x68}, New)
-}
-
-// New returns a bzip2 decompressed reader, decoding ahead of its consumer.
-func New(reader io.Reader) (io.ReadCloser, error) {
-	return compress.ReadAhead(io.NopCloser(gobzip2.NewReader(reader))), nil
-}
+import _ "github.com/forkcloser/compress/bzip2" // registers bzip2 with the registry compress.Decompress reads

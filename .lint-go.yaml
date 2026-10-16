@@ -18,12 +18,8 @@ golangci:
               - github.com/forkcloser/blake3
               - golang.org/x/sys/unix
               - golang.org/x/sys/windows
-              - github.com/klauspost/compress
-              - github.com/klauspost/cpuid # CPU feature detection for the amd64 SIMD paths
-              - github.com/klauspost/pgzip
-              - github.com/pierrec/lz4
-              - github.com/forkcloser/xz # forked from github.com/ulikunitz/xz for performance
               - github.com/forkcloser/xos # os with FILE_SHARE_DELETE on Windows, moved out of this module
+              - github.com/forkcloser/compress # the codecs and the archiving; this module maps its classes onto fault
               - github.com/aws/aws-sdk-go-v2
               - github.com/aws/smithy-go
 licenses:

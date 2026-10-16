@@ -29,6 +29,7 @@ import (
 	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/compress"
+	"github.com/mycophonic/primordium/fault"
 	"github.com/mycophonic/primordium/filesystem"
 )
 
@@ -177,8 +178,12 @@ func TestUntar_PathTraversal(t *testing.T) {
 	destDir := t.TempDir()
 	err := compress.Untar(&buf, destDir)
 
-	if !errors.Is(err, compress.ErrPathTraversal) {
-		t.Errorf("expected ErrPathTraversal, got: %v", err)
+	if !errors.Is(err, fault.ErrWriteFailure) {
+		t.Errorf("expected ErrWriteFailure for an escaping entry, got: %v", err)
+	}
+
+	if _, statErr := os.Lstat(filepath.Join(filepath.Dir(destDir), "escape.txt")); statErr == nil {
+		t.Error("the escaping entry was written beside destDir")
 	}
 }
 
@@ -240,8 +245,8 @@ func TestTar_NonexistentSource(t *testing.T) {
 	defer func() { assert.Check(t, rc.Close()) }()
 
 	_, err := io.ReadAll(rc)
-	if err == nil {
-		t.Fatal("expected error for nonexistent source directory")
+	if !errors.Is(err, fault.ErrFilesystemFailure) {
+		t.Fatalf("expected ErrFilesystemFailure for a nonexistent source directory, got: %v", err)
 	}
 }
 

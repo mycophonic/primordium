@@ -16,27 +16,4 @@
 
 package gzip
 
-import (
-	"fmt"
-	"io"
-
-	"github.com/klauspost/compress/gzip"
-
-	"github.com/mycophonic/primordium/compress"
-	"github.com/mycophonic/primordium/fault"
-)
-
-//nolint:gochecknoinits // Registration pattern requires init.
-func init() {
-	compress.Register("gzip", []byte{0x1F, 0x8B}, New)
-}
-
-// New returns a gzip decompressed reader, decoding ahead of its consumer.
-func New(reader io.Reader) (io.ReadCloser, error) {
-	decoder, err := gzip.NewReader(reader)
-	if err != nil {
-		return nil, fmt.Errorf("%w: gzip decoder: %w", fault.ErrReadFailure, err)
-	}
-
-	return compress.ReadAhead(decoder), nil
-}
+import _ "github.com/forkcloser/compress/gzip" // registers gzip with the registry compress.Decompress reads
