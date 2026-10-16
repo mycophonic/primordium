@@ -16,27 +16,4 @@
 
 package xz
 
-import (
-	"fmt"
-	"io"
-
-	uxz "github.com/forkcloser/xz"
-
-	"github.com/mycophonic/primordium/compress"
-	"github.com/mycophonic/primordium/fault"
-)
-
-//nolint:gochecknoinits // Registration pattern requires init.
-func init() {
-	compress.Register("xz", []byte{0xFD, 0x37, 0x7A, 0x58, 0x5A, 0x00}, New)
-}
-
-// New returns an xz decompressed reader, decoding ahead of its consumer.
-func New(reader io.Reader) (io.ReadCloser, error) {
-	xr, err := uxz.NewReader(reader)
-	if err != nil {
-		return nil, fmt.Errorf("%w: xz decoder: %w", fault.ErrReadFailure, err)
-	}
-
-	return compress.ReadAhead(io.NopCloser(xr)), nil
-}
+import _ "github.com/forkcloser/compress/xz" // registers xz with the registry compress.Decompress reads

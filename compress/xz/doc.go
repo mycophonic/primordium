@@ -14,7 +14,7 @@
    limitations under the License.
 */
 
-// Package xz registers XZ decompression with the compress registry.
+// Package xz registers xz decompression with the compress registry.
 //
 // Import this package for its side effect:
 //

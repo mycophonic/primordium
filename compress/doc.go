@@ -14,13 +14,22 @@
    limitations under the License.
 */
 
-// Package compress provides streaming zstd compression and registry-based decompression.
+// Package compress is streaming zstd compression, registry-based
+// decompression and tar archiving, over github.com/forkcloser/compress, with
+// that module's five error classes mapped onto fault's: a stream no format
+// claims is ErrNotImplemented, a bad stream or a failing source
+// ErrReadFailure, a failing destination ErrWriteFailure, a call after Close
+// ErrInvalidArgument.
 //
-// Zstd compression and decompression are built-in. Additional decompression
-// formats are available via side-effect imports:
+// Zstd decompression is built in. Importing a format package registers its
+// decoder with Decompress:
 //
 //	import _ "github.com/mycophonic/primordium/compress/gzip"
 //	import _ "github.com/mycophonic/primordium/compress/xz"
 //	import _ "github.com/mycophonic/primordium/compress/bzip2"
 //	import _ "github.com/mycophonic/primordium/compress/lz4"
+//
+// A consumer that names its format, as one building an archive does, uses
+// forkcloser/compress's format packages directly: their NewReader and
+// NewWriter are the codecs.
 package compress

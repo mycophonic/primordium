@@ -16,117 +16,113 @@
 
 package compress_test
 
-// The contract of the package, from its documentation and its callers:
-// Decompress recognizes every registered format by its magic and streams the
-// payload back whole, whatever its size; what it cannot recognize is refused
-// as ErrNotImplemented, what it cannot read as ErrReadFailure; Compress is the
-// zstd half of that round trip. The formats and the sizes are the two axes.
+// The contract of the package, from its documentation and its callers: it is
+// forkcloser/compress with fault's classes. Decompress recognizes every
+// format the side-effect imports register and streams the payload back
+// whole; what no format claims is ErrNotImplemented; an empty, cut or
+// otherwise bad stream and a failing source are ErrReadFailure, at
+// Decompress or on a later Read; a Read after Close is ErrInvalidArgument;
+// Compress is the zstd half of the round trip, and its reader carries the
+// same classes. The bounded sizes and the formats' own edges are the
+// dependency's contract, checked there.
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"testing"
 
-	"github.com/forkcloser/xz"
-	"github.com/klauspost/compress/gzip"
-	"github.com/klauspost/compress/zstd"
-	"github.com/pierrec/lz4/v4"
+	"github.com/forkcloser/compress/gzip"
+	"github.com/forkcloser/compress/lz4"
+	"github.com/forkcloser/compress/xz"
+	"github.com/forkcloser/compress/zstd"
 	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/compress"
+	_ "github.com/mycophonic/primordium/compress/bzip2"
+	_ "github.com/mycophonic/primordium/compress/gzip"
+	_ "github.com/mycophonic/primordium/compress/lz4"
+	_ "github.com/mycophonic/primordium/compress/xz"
 	"github.com/mycophonic/primordium/fault"
 )
 
-// encoder compresses payload in one format, as that format's own writer does.
-type encoder func(tb testing.TB, payload []byte) []byte
+// testPayload is what testdata/payload.bz2 decompresses to.
+const testPayload = "the quick brown fox jumps over the lazy dog"
 
-// encoders are the formats Decompress must recognize and that a writer exists
+var errBoom = errors.New("boom")
+
+// failingReader fails every Read with its error.
+type failingReader struct {
+	err error
+}
+
+func (r *failingReader) Read([]byte) (int, error) {
+	return 0, r.err
+}
+
+// writer opens one format's encoder over buf, as forkcloser/compress's own
+// format packages write it.
+type writer func(tb testing.TB, buf *bytes.Buffer) io.WriteCloser
+
+// writers are the formats Decompress must recognize and that a writer exists
 // for; bzip2 has none in Go and is checked from a fixture.
-func encoders() map[string]encoder {
-	return map[string]encoder{
-		"zstd": func(tb testing.TB, payload []byte) []byte {
+func writers() map[string]writer {
+	return map[string]writer{
+		"zstd": func(tb testing.TB, buf *bytes.Buffer) io.WriteCloser {
 			tb.Helper()
 
-			var buf bytes.Buffer
-
-			writer, err := zstd.NewWriter(&buf)
-			assert.NilError(tb, err)
-			write(tb, writer, payload)
-
-			return buf.Bytes()
-		},
-		"gzip": func(tb testing.TB, payload []byte) []byte {
-			tb.Helper()
-
-			var buf bytes.Buffer
-
-			write(tb, gzip.NewWriter(&buf), payload)
-
-			return buf.Bytes()
-		},
-		"lz4": func(tb testing.TB, payload []byte) []byte {
-			tb.Helper()
-
-			var buf bytes.Buffer
-
-			write(tb, lz4.NewWriter(&buf), payload)
-
-			return buf.Bytes()
-		},
-		"xz": func(tb testing.TB, payload []byte) []byte {
-			tb.Helper()
-
-			var buf bytes.Buffer
-
-			writer, err := xz.NewWriter(&buf)
-			assert.NilError(tb, err)
-			write(tb, writer, payload)
-
-			return buf.Bytes()
-		},
-		"compress": func(tb testing.TB, payload []byte) []byte {
-			tb.Helper()
-
-			reader, err := compress.Compress(bytes.NewReader(payload))
+			w, err := zstd.NewWriter(buf)
 			assert.NilError(tb, err)
 
-			data, err := io.ReadAll(reader)
-			assert.NilError(tb, err)
-			assert.NilError(tb, reader.Close())
+			return w
+		},
+		"gzip": func(tb testing.TB, buf *bytes.Buffer) io.WriteCloser {
+			tb.Helper()
 
-			return data
+			w, err := gzip.NewWriter(buf)
+			assert.NilError(tb, err)
+
+			return w
+		},
+		"lz4": func(tb testing.TB, buf *bytes.Buffer) io.WriteCloser {
+			tb.Helper()
+
+			w, err := lz4.NewWriter(buf)
+			assert.NilError(tb, err)
+
+			return w
+		},
+		"xz": func(tb testing.TB, buf *bytes.Buffer) io.WriteCloser {
+			tb.Helper()
+
+			w, err := xz.NewWriter(buf)
+			assert.NilError(tb, err)
+
+			return w
 		},
 	}
 }
 
-func write(tb testing.TB, writer io.WriteCloser, payload []byte) {
+// encode compresses payload with one format's writer.
+func encode(tb testing.TB, open writer, payload []byte) []byte {
 	tb.Helper()
 
-	_, err := writer.Write(payload)
+	var buf bytes.Buffer
+
+	w := open(tb, &buf)
+
+	_, err := w.Write(payload)
 	assert.NilError(tb, err)
-	assert.NilError(tb, writer.Close())
+	assert.NilError(tb, w.Close())
+
+	return buf.Bytes()
 }
 
-// sizes are the payload lengths that bear on a streaming decoder: nothing,
-// one byte, the edges of the formats' blocks (4 KiB, 64 KiB), of the input
-// buffer Decompress reads through (256 KiB), and a few blocks of lz4's
-// largest (4 MiB).
-func sizes() []int {
-	return []int{
-		0, 1, 255, 256,
-		4*bytesize.KiB - 1, 4 * bytesize.KiB, 4*bytesize.KiB + 1,
-		64*bytesize.KiB - 1, 64 * bytesize.KiB, 64*bytesize.KiB + 1,
-		256*bytesize.KiB - 1, 256 * bytesize.KiB, 256*bytesize.KiB + 1,
-		4*bytesize.MiB + 3,
-	}
-}
-
-// payload is n bytes that compress, but not to nothing: text with a
-// byte-level drift, the same for the same n.
+// payload is n bytes that compress, but not to nothing.
 func payload(n int) []byte {
 	const text = "the quick brown fox jumps over the lazy dog; "
 
@@ -157,23 +153,40 @@ func decompressed(t *testing.T, data []byte) ([]byte, error) {
 	return data, reader.Close()
 }
 
-// TestBoundedRoundTrip: every format, every size, back whole through
-// Decompress.
-func TestBoundedRoundTrip(t *testing.T) {
+// TestRoundTrip: every registered format and Compress itself, at a byte, at
+// the input buffer's edge and past it, back whole through Decompress.
+func TestRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	for name, encode := range encoders() {
-		for _, size := range sizes() {
+	for _, size := range []int{0, 1, 256*bytesize.KiB + 1} {
+		for name, open := range writers() {
 			t.Run(name+"/"+strconv.Itoa(size), func(t *testing.T) {
 				t.Parallel()
 
 				want := payload(size)
 
-				got, err := decompressed(t, encode(t, want))
+				got, err := decompressed(t, encode(t, open, want))
 				assert.NilError(t, err)
 				assert.Assert(t, bytes.Equal(got, want), "%d bytes back, want %d", len(got), len(want))
 			})
 		}
+
+		t.Run("compress/"+strconv.Itoa(size), func(t *testing.T) {
+			t.Parallel()
+
+			want := payload(size)
+
+			reader, err := compress.Compress(bytes.NewReader(want))
+			assert.NilError(t, err)
+
+			data, err := io.ReadAll(reader)
+			assert.NilError(t, err)
+			assert.NilError(t, reader.Close())
+
+			got, err := decompressed(t, data)
+			assert.NilError(t, err)
+			assert.Assert(t, bytes.Equal(got, want), "%d bytes back, want %d", len(got), len(want))
+		})
 	}
 }
 
@@ -189,74 +202,85 @@ func TestBzip2Fixture(t *testing.T) {
 	assert.Equal(t, string(got), testPayload)
 }
 
-// TestTruncatedStreams: a stream cut short is an error on the read, in every
-// format, never a clean EOF with fewer bytes: cut in the middle, and cut at
-// the end so that only the trailer is missing.
-func TestTruncatedStreams(t *testing.T) {
+// TestFailureClasses: what each failure becomes.
+func TestFailureClasses(t *testing.T) {
 	t.Parallel()
 
-	const trailer = 8 // gzip's CRC-32 and size; the others' trailers are no shorter
+	t.Run("no format claims it", func(t *testing.T) {
+		t.Parallel()
 
-	for name, encode := range encoders() {
-		for _, cut := range []string{"middle", "trailer"} {
-			t.Run(name+"/"+cut, func(t *testing.T) {
-				t.Parallel()
-
-				whole := encode(t, payload(256*bytesize.KiB+1))
-
-				end := len(whole) / 2
-				if cut == "trailer" {
-					end = len(whole) - trailer
-				}
-
-				got, err := decompressed(t, whole[:end])
-				if err == nil {
-					t.Fatalf("%s cut at %s: %d bytes read with no error", name, cut, len(got))
-				}
-			})
+		for name, input := range map[string][]byte{
+			"one byte":                {0x00},
+			"shorter than any magic":  {0xAB, 0xCD},
+			"unknown, longer":         bytes.Repeat([]byte{0x01}, 1024),
+			"zstd magic, three bytes": {0x28, 0xB5, 0x2F},
+		} {
+			_, err := compress.Decompress(bytes.NewReader(input))
+			assert.ErrorIs(t, err, fault.ErrNotImplemented, name)
 		}
-	}
-}
+	})
 
-// TestRefusals: what Decompress refuses, and as what.
-func TestRefusals(t *testing.T) {
-	t.Parallel()
+	t.Run("empty", func(t *testing.T) {
+		t.Parallel()
 
-	cases := map[string]struct {
-		input []byte
-		want  error
-	}{
-		"empty":                   {nil, fault.ErrReadFailure},
-		"one unknown byte":        {[]byte{0x00}, fault.ErrNotImplemented},
-		"shorter than any magic":  {[]byte{0xAB, 0xCD}, fault.ErrNotImplemented},
-		"unknown, longer":         {bytes.Repeat([]byte{0x01}, 1024), fault.ErrNotImplemented},
-		"zstd magic, three bytes": {[]byte{0x28, 0xB5, 0x2F}, fault.ErrNotImplemented},
-	}
+		_, err := compress.Decompress(bytes.NewReader(nil))
+		assert.ErrorIs(t, err, fault.ErrReadFailure)
+	})
 
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
+	t.Run("cut short", func(t *testing.T) {
+		t.Parallel()
 
-			_, err := compress.Decompress(bytes.NewReader(tc.input))
-			assert.ErrorIs(t, err, tc.want)
-		})
-	}
-}
+		whole := encode(t, writers()["zstd"], payload(256*bytesize.KiB+1))
 
-// TestReaderErrors: a source that fails is the error the caller gets, from
-// Decompress when it fails on the magic, from the compressed reader when the
-// source fails under Compress.
-func TestReaderErrors(t *testing.T) {
-	t.Parallel()
+		_, err := decompressed(t, whole[:len(whole)/2])
+		assert.ErrorIs(t, err, fault.ErrReadFailure)
+	})
 
-	_, err := compress.Decompress(&failingReader{err: errBoom})
-	assert.ErrorIs(t, err, fault.ErrReadFailure)
-	assert.ErrorIs(t, err, errBoom)
+	t.Run("source fails at the magic", func(t *testing.T) {
+		t.Parallel()
 
-	compressed, err := compress.Compress(&failingReader{err: errBoom})
-	assert.NilError(t, err)
+		_, err := compress.Decompress(&failingReader{err: errBoom})
+		assert.ErrorIs(t, err, fault.ErrReadFailure)
+		assert.ErrorIs(t, err, errBoom)
+	})
 
-	_, err = io.ReadAll(compressed)
-	assert.ErrorIs(t, err, errBoom)
-	assert.NilError(t, compressed.Close())
+	t.Run("source fails under Compress", func(t *testing.T) {
+		t.Parallel()
+
+		compressed, err := compress.Compress(&failingReader{err: errBoom})
+		assert.NilError(t, err)
+
+		_, err = io.ReadAll(compressed)
+		assert.ErrorIs(t, err, fault.ErrReadFailure)
+		assert.ErrorIs(t, err, errBoom)
+		assert.NilError(t, compressed.Close())
+	})
+
+	t.Run("read after close", func(t *testing.T) {
+		t.Parallel()
+
+		reader, err := compress.Decompress(bytes.NewReader(encode(t, writers()["gzip"], payload(16))))
+		assert.NilError(t, err)
+		assert.NilError(t, reader.Close())
+
+		_, err = reader.Read(make([]byte, 1))
+		assert.ErrorIs(t, err, fault.ErrInvalidArgument)
+	})
+
+	t.Run("read ahead keeps the class", func(t *testing.T) {
+		t.Parallel()
+
+		reader, err := compress.Decompress(bytes.NewReader(encode(t, writers()["xz"], payload(16))))
+		assert.NilError(t, err)
+
+		ahead := compress.ReadAhead(reader)
+
+		got, err := io.ReadAll(ahead)
+		assert.NilError(t, err)
+		assert.Assert(t, bytes.Equal(got, payload(16)))
+		assert.NilError(t, ahead.Close())
+
+		_, err = ahead.Read(make([]byte, 1))
+		assert.ErrorIs(t, err, fault.ErrInvalidArgument)
+	})
 }
