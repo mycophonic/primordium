@@ -8,7 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.3
 	github.com/aws/smithy-go v1.28.5
 	github.com/forkcloser/blake3 v1.1.0
-	github.com/forkcloser/compress v0.2.0
+	github.com/forkcloser/compress v0.3.0
 	github.com/forkcloser/xos v0.1.0
 	github.com/getsentry/sentry-go v0.50.0
 	github.com/johannesboyne/gofakes3 v1.2.0
@@ -30,7 +30,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.14.6 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.20.6 // indirect
 	github.com/dustin/go-humanize v1.1.0 // indirect
-	github.com/forkcloser/xz v1.1.1 // indirect
+	github.com/forkcloser/xz v1.1.2 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.20.3 // indirect
