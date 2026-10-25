@@ -33,6 +33,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/forkcloser/xos"
@@ -53,6 +54,55 @@ func clientFor(t *testing.T, url string) *r2.Client {
 	assert.NilError(t, err)
 
 	return client
+}
+
+// awayServer is a fake whose port stays this test's after the service goes
+// away. Closing an httptest server frees its port, and a parallel test's own
+// fake may be listening there by the time the client dials again: the client
+// then gets that fake's answers, not a refusal. After leave, every connection
+// is hijacked and closed before any response and the idle ones are cut, so the
+// client sees the send fail, whichever connection it uses.
+type awayServer struct {
+	*httptest.Server
+
+	next http.Handler
+	gone atomic.Bool
+}
+
+func newAwayServer(t *testing.T, next http.Handler) *awayServer {
+	t.Helper()
+
+	server := &awayServer{next: next}
+	server.Server = httptest.NewServer(server)
+	t.Cleanup(server.Close)
+
+	return server
+}
+
+func (s *awayServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !s.gone.Load() {
+		s.next.ServeHTTP(w, r)
+
+		return
+	}
+
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		panic("awayServer needs HTTP/1: the response writer cannot hijack")
+	}
+
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		panic("awayServer could not take the connection: " + err.Error())
+	}
+
+	_ = conn.Close()
+}
+
+// leave makes the service unreachable from now on, on the same address.
+func (s *awayServer) leave() {
+	s.gone.Store(true)
+	s.CloseClientConnections()
 }
 
 // TestFailureClasses: what the service's answers become, by status; a server
@@ -89,11 +139,10 @@ func TestFailureClasses(t *testing.T) {
 	t.Run("unreachable", func(t *testing.T) {
 		t.Parallel()
 
-		server := httptest.NewServer(http.NotFoundHandler())
-		url := server.URL
-		server.Close()
+		server := newAwayServer(t, http.NotFoundHandler())
+		server.leave()
 
-		_, err := clientFor(t, url).Stat(t.Context(), "key")
+		_, err := clientFor(t, server.URL).Stat(t.Context(), "key")
 		assert.ErrorIs(t, err, fault.ErrNetworkCommunication)
 	})
 
@@ -408,7 +457,7 @@ func TestResumeKeepsStateWhenTheServiceIsAway(t *testing.T) {
 	backend := s3mem.New()
 	assert.NilError(t, backend.CreateBucket(testBucket))
 
-	server := httptest.NewServer(gofakes3.New(backend).Server())
+	server := newAwayServer(t, gofakes3.New(backend).Server())
 	client := clientFor(t, server.URL)
 
 	data := randomBytes(t, part+bytesize.KiB)
@@ -420,7 +469,7 @@ func TestResumeKeepsStateWhenTheServiceIsAway(t *testing.T) {
 
 	path, before := stateFile(t, stateDir)
 
-	server.Close()
+	server.leave()
 
 	err = client.Upload(
 		t.Context(),
