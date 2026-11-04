@@ -464,8 +464,11 @@ func TestFactoriesRunAloneAcrossProcesses(t *testing.T) {
 	child.said(t, "in factory")
 
 	found := make(chan []byte, 1)
+	// Our acquire finishes after its factory reports: the test waits for it, so
+	// TempDir's cleanup never removes the entry while the acquire still works in it.
+	var wg sync.WaitGroup
 
-	go func() {
+	wg.Go(func() {
 		_, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
 			data, _ := os.ReadFile(filepath.Join(dir, dataFile))
 			found <- data
@@ -481,7 +484,7 @@ func TestFactoriesRunAloneAcrossProcesses(t *testing.T) {
 		}
 
 		release()
-	}()
+	})
 
 	// A factory not kept out would run during this pause and see the part.
 	time.Sleep(100 * time.Millisecond)
@@ -497,6 +500,7 @@ func TestFactoriesRunAloneAcrossProcesses(t *testing.T) {
 	}
 
 	child.done(t)
+	wg.Wait()
 }
 
 // TestAReleaseThatCannotLockWarns: with the root gone under a holder, its
