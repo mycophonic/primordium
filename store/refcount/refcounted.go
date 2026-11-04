@@ -58,8 +58,8 @@ type ResourceFactory func(dir string) (resourcePath string, cleanup func(), err 
 // Acquire holds key's entry: it runs factory on the entry directory and
 // returns the path the factory returned, with release, which must be called
 // when done and is idempotent. The last release removes the entry directory;
-// one that cannot take its locks leaves the entry in place and warns, and the
-// next hold of the key removes it. A key that is not a single path component
+// one that cannot take its locks, or cannot remove the entry, leaves it in
+// place and warns, and the next hold of the key removes it. A key that is not a single path component
 // is ErrInvalidArgument. A factory error is returned as it is, and the entry
 // is released as a holder's is.
 func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), error) {
@@ -177,7 +177,10 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 			}
 
 			_ = flock.Unlock(exclusiveLock)
-			_ = os.RemoveAll(dir)
+
+			if err = os.RemoveAll(dir); err != nil {
+				left(dir, err)
+			}
 
 			// The directory's own lock file sits beside the directory on
 			// Windows: it goes after the lock on it is released.

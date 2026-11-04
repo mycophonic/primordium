@@ -24,7 +24,7 @@ package refcount_test
 //   - the entry lives while any holder, in any process, has it; the last
 //     release removes it and runs that releaser's cleanup only; release is
 //     idempotent; a holder that dies releases; a release that cannot take
-//     its locks leaves the entry and warns;
+//     its locks, or cannot remove the entry, leaves the entry and warns;
 //   - a factory error is returned as it is, the entry released as a holder's.
 //
 // The holder in another process is this test binary, told by
@@ -531,4 +531,47 @@ func TestAReleaseThatCannotLockWarns(t *testing.T) { //nolint:paralleltest // sl
 	if !strings.Contains(said.String(), "left the entry in place") {
 		t.Fatalf("release said %q, want a warning that the entry was left", said.String())
 	}
+}
+
+// TestAReleaseThatCannotRemoveWarns: the last release cannot remove an entry
+// whose directory nobody may write; it returns, and says what it left. The
+// cleanup, which runs before the removal, takes the write permission away.
+func TestAReleaseThatCannotRemoveWarns(t *testing.T) { //nolint:paralleltest // slog's default is process-wide
+	if runtime.GOOS == "windows" {
+		t.Skip("a directory's mode does not keep its files on Windows")
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root removes what a directory's mode forbids")
+	}
+
+	root := t.TempDir()
+	locker := refcount.New(root)
+	entry := filepath.Join(root, key)
+
+	_, release, err := locker.Acquire(key, func(dir string) (string, func(), error) {
+		path, _, err := writing(dir)
+
+		return path, func() { _ = os.Chmod(dir, 0o500) }, err
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Before TempDir's own cleanup, which Cleanup's order runs after this one.
+	t.Cleanup(func() { _ = os.Chmod(entry, filesystem.DirPermissionsPrivate) })
+
+	var said bytes.Buffer
+
+	previous := slog.Default()
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(&said, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	release()
+
+	if !strings.Contains(said.String(), "left the entry in place") {
+		t.Fatalf("release said %q, want a warning that the entry was left", said.String())
+	}
+
+	present(t, filepath.Join(entry, dataFile))
 }
