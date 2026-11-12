@@ -341,6 +341,54 @@ func TestExecStatementsAtomicity(t *testing.T) {
 	}
 }
 
+// TestExecStatementsOwnsTheTransaction: a batch cannot end the transaction
+// opened for it, in either direction; the refusal leaves nothing behind and
+// the database usable; savepoints nest inside it.
+func TestExecStatementsOwnsTheTransaction(t *testing.T) {
+	t.Parallel()
+
+	for _, batch := range []string{
+		"INSERT INTO metadata VALUES ('k', 'v'); COMMIT",
+		"INSERT INTO metadata VALUES ('k', 'v'); END",
+		"INSERT INTO metadata VALUES ('k', 'v'); ROLLBACK",
+		"INSERT INTO metadata VALUES ('k', 'v'); BEGIN; INSERT INTO metadata VALUES ('k2', 'v2')",
+		"COMMIT; INSERT INTO metadata VALUES ('k', 'v')",
+	} {
+		t.Run(batch, func(t *testing.T) {
+			t.Parallel()
+
+			ctx := t.Context()
+			db := openTestDB(t)
+
+			assert.ErrorIs(t, db.ExecStatements(ctx, batch), sqlite.ErrWrite)
+			assert.Equal(t, count(t, db), 0)
+
+			assert.NilError(t, db.ExecStatements(ctx, "INSERT INTO metadata VALUES ('after', 'the refusal')"))
+			assert.Equal(t, count(t, db), 1)
+		})
+	}
+
+	t.Run("savepoints nest", func(t *testing.T) {
+		t.Parallel()
+
+		ctx := t.Context()
+		db := openTestDB(t)
+
+		assert.NilError(t, db.ExecStatements(ctx, `
+			SAVEPOINT s;
+			INSERT INTO metadata VALUES ('undone', '1');
+			ROLLBACK TO s;
+			INSERT INTO metadata VALUES ('kept', '2');
+			RELEASE s`))
+		assert.Equal(t, count(t, db), 1)
+
+		var key string
+
+		assert.NilError(t, db.Conn().QueryRowContext(ctx, "SELECT key FROM metadata").Scan(&key))
+		assert.Equal(t, key, "kept")
+	})
+}
+
 func TestExecStatementsEmpty(t *testing.T) {
 	t.Parallel()
 
