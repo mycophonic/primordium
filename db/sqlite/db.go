@@ -298,22 +298,61 @@ func (store *DB) GetMetadata(ctx context.Context, key string) (string, error) {
 }
 
 // ExecStatements executes a semicolon-delimited SQL string atomically
-// inside a transaction.
+// inside a transaction. A batch that itself begins, commits or rolls back
+// is refused as ErrWrite and leaves the database as it was; savepoints
+// nest inside the transaction and are allowed.
 func (store *DB) ExecStatements(ctx context.Context, raw string) error {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
 		return nil
 	}
 
-	txn, err := store.conn.BeginTx(ctx, nil)
+	conn, err := store.conn.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("%w: connection: %w", ErrWrite, err)
+	}
+
+	defer func() { _ = conn.Close() }() // back to the pool; the transaction is over by then
+
+	txn, err := conn.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("%w: begin: %w", ErrWrite, err)
 	}
 
-	if _, err := txn.ExecContext(ctx, raw); err != nil {
-		_ = txn.Rollback() // Intentional: rollback failure doesn't change what the caller should do.
+	guard := &fence{conn: conn}
+	if err := guard.raise(); err != nil {
+		_ = txn.Rollback()
 
-		return fmt.Errorf("%w: exec: %w", ErrWrite, err)
+		return fmt.Errorf("%w: fence: %w", ErrWrite, err)
+	}
+
+	_, execErr := txn.ExecContext(ctx, raw)
+
+	// A lift that fails leaves the policy raised: the rollback is refused but
+	// still ends the transaction, and only then can the connection be
+	// discarded. A batch that failed is reported over a lift that failed
+	// after it; a context ended under the batch has database/sql close the
+	// connection before the lift reaches it.
+	liftErr := guard.lift()
+
+	if liftErr != nil || execErr != nil {
+		_ = txn.Rollback() // Intentional: rollback failure doesn't change what the caller should do.
+	}
+
+	if liftErr != nil {
+		guard.discard()
+	}
+
+	if execErr != nil {
+		if guard.tripped != "" {
+			return fmt.Errorf("%w: exec: %s inside the batch: %w", ErrWrite, guard.tripped, execErr)
+		}
+
+		return fmt.Errorf("%w: exec: %w", ErrWrite, execErr)
+	}
+
+	if liftErr != nil {
+		return fmt.Errorf("%w: fence: %w", ErrWrite, liftErr)
 	}
 
 	if err := txn.Commit(); err != nil {
