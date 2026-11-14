@@ -14,7 +14,7 @@ require (
 	github.com/johannesboyne/gofakes3 v1.2.0
 	github.com/lmittmann/tint v1.2.1
 	github.com/mattn/go-isatty v0.0.24
-	golang.org/x/crypto v0.58.0
+	golang.org/x/crypto v0.59.0
 	golang.org/x/sys v0.50.0
 	gotest.tools/v3 v3.5.2
 	modernc.org/sqlite v1.62.0
@@ -39,7 +39,7 @@ require (
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/ryszard/goskiplist v0.0.0-20150312221310-2dfbae5fcf46 // indirect
 	go.shabbyrobe.org/gocovmerge v0.0.0-20230507111327-fa4f82cfbf4d // indirect
-	golang.org/x/text v0.43.0 // indirect
+	golang.org/x/text v0.44.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
 	modernc.org/libc v1.80.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
