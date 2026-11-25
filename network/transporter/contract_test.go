@@ -26,11 +26,13 @@ import (
 	"crypto/tls"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -429,4 +431,86 @@ func TestUnknownHostNotRetried(t *testing.T) {
 	}
 
 	assert.Equal(t, attempts.Load(), int32(1))
+}
+
+// TestLogsNoCredential: what is logged of a request's URL has neither its
+// user information nor its query, on each line that names it: a roundtrip, a
+// retry on a status, retries exhausted, a transport error, and the progress
+// of a download. slog's default is swapped for the test, which is why it does
+// not run in parallel.
+func TestLogsNoCredential(t *testing.T) { //nolint:paralleltest // slog's default is process-wide
+	var said bytes.Buffer
+
+	previous := slog.Default()
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(&said, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	// One step of a download's logged progress.
+	const logged = 100 << 20
+
+	var once atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/down", r.URL.Path == "/once" && once.Add(1) == 1:
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case r.URL.Path == "/large":
+			_, _ = io.CopyN(w, zeros{}, logged)
+		}
+	}))
+	defer server.Close()
+
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	gone.Close()
+
+	client := transporter.NewClient(transporter.Options{MaxRetries: 1, InitialBackoff: time.Millisecond})
+	defer client.CloseIdleConnections()
+
+	for _, address := range []string{server.URL + "/once", server.URL + "/down", server.URL + "/large", gone.URL + "/gone"} {
+		target, err := url.Parse(address + "?X-Amz-Signature=secret-in-the-query")
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		target.User = url.UserPassword("user", "secret-in-the-userinfo")
+
+		req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, target.String(), http.NoBody)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			continue // retries exhausted, or the server that is gone
+		}
+
+		_, _ = io.Copy(io.Discard, resp.Body)
+
+		assert.Check(t, resp.Body.Close())
+	}
+
+	lines := said.String()
+
+	for _, line := range []string{
+		"HTTP roundtrip", "HTTP error, retrying", "HTTP retries exhausted",
+		"HTTP transport error, retrying", "download progress", "download complete",
+	} {
+		if !strings.Contains(lines, line) {
+			t.Errorf("%q was not logged", line)
+		}
+	}
+
+	if strings.Contains(lines, "secret-in") {
+		t.Fatal("a credential was logged")
+	}
+}
+
+// zeros is an endless source of zero bytes.
+type zeros struct{}
+
+func (zeros) Read(buf []byte) (int, error) {
+	clear(buf)
+
+	return len(buf), nil
 }

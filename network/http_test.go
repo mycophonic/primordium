@@ -17,12 +17,16 @@
 package network_test
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -141,12 +145,12 @@ func TestRoundTripper_TransportError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	url := server.URL
+	address := server.URL
 	server.Close()
 
 	client := &http.Client{Transport: network.NewTransport()}
 
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, address, http.NoBody)
 
 	resp, err := client.Do(req)
 	if resp != nil {
@@ -421,5 +425,49 @@ func TestRoundTripper_TokenStaysWithItsOrigin(t *testing.T) {
 		t.Error("the redirect within the origin was not followed")
 	case *got != token:
 		t.Errorf("a redirect within the origin carried Authorization %q, want the token", *got)
+	}
+}
+
+// TestRoundTripper_LogsNoCredential: what is logged of a request's URL has
+// neither its user information nor its query. slog's default is swapped for
+// the test, which is why it does not run in parallel.
+func TestRoundTripper_LogsNoCredential(t *testing.T) { //nolint:paralleltest // slog's default is process-wide
+	var said bytes.Buffer
+
+	previous := slog.Default()
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(&said, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	target, err := url.Parse(server.URL + "/blob?X-Amz-Signature=secret-in-the-query")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.User = url.UserPassword("user", "secret-in-the-userinfo")
+
+	client := &http.Client{Transport: network.NewTransport()}
+
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, target.String(), http.NoBody)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Check(t, resp.Body.Close())
+
+	logged := said.String()
+	if !strings.Contains(logged, "/blob") {
+		t.Fatalf("the request was not logged: %q", logged)
+	}
+
+	if strings.Contains(logged, "secret-in") {
+		t.Fatalf("a credential was logged: %q", logged)
 	}
 }

@@ -25,6 +25,8 @@ import (
 	"net/url"
 	"slices"
 	"strings"
+
+	"github.com/mycophonic/primordium/network/internal/redact"
 )
 
 // defaultTransport holds the configured transport before any wrapping.
@@ -106,7 +108,7 @@ func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	if reason, isRetryable := retryReasons[resp.StatusCode]; isRetryable {
 		slog.DebugContext(req.Context(), "HTTP request received retryable status",
-			slog.String("url", req.URL.String()),
+			slog.String("url", redact.URL(req.URL)),
 			slog.Int("status", resp.StatusCode),
 			slog.String("reason", reason))
 	}
