@@ -29,73 +29,37 @@ import (
 	"errors"
 	"os"
 	"syscall"
-
-	"github.com/forkcloser/xos"
 )
 
-type lockType int16
+type lockKind int
 
 const (
-	readLock  lockType = syscall.LOCK_SH
-	writeLock lockType = syscall.LOCK_EX
+	shared    lockKind = syscall.LOCK_SH
+	exclusive lockKind = syscall.LOCK_EX
 )
 
-func platformLock(path string, lockType lockType) (*os.File, error) {
-	file, err := xos.Open(path)
-	if err != nil {
-		return nil, err
+func platformLock(file *os.File, kind lockKind, wait bool) error {
+	how := int(kind)
+	if !wait {
+		how |= syscall.LOCK_NB
 	}
 
 	for {
-		err = syscall.Flock(int(file.Fd()), int(lockType))
-		if !errors.Is(err, syscall.EINTR) {
-			break
+		err := syscall.Flock(int(file.Fd()), how)
+
+		switch {
+		case errors.Is(err, syscall.EINTR):
+		case !wait && (errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)):
+			return ErrLockWouldBlock
+		default:
+			return err
 		}
 	}
-
-	if err != nil {
-		if fileErr := file.Close(); fileErr != nil {
-			err = errors.Join(err, fileErr)
-		}
-
-		return nil, err
-	}
-
-	return file, nil
 }
 
-func platformTryLock(path string, lockType lockType) (*os.File, error) {
-	file, err := xos.Open(path)
-	if err != nil {
-		return nil, err
-	}
-
-	err = syscall.Flock(int(file.Fd()), int(lockType)|syscall.LOCK_NB)
-	if err != nil {
-		closeErr := file.Close()
-
-		if errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN) {
-			return nil, errors.Join(ErrLockWouldBlock, closeErr)
-		}
-
-		return nil, errors.Join(err, closeErr)
-	}
-
-	return file, nil
-}
-
-// cleanupLockSidecar has nothing to remove: flock locks the path itself.
-func cleanupLockSidecar(_ string) {}
-
-func platformUnlock(file *os.File) (err error) {
-	defer func() {
-		if closeErr := file.Close(); closeErr != nil {
-			err = errors.Join(err, closeErr)
-		}
-	}()
-
+func platformUnlock(file *os.File) error {
 	for {
-		err = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		err := syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
 		if !errors.Is(err, syscall.EINTR) {
 			return err
 		}

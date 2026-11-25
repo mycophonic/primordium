@@ -17,5 +17,11 @@
 package refcount
 
 const (
-	refCountedLockFile = ".lock"
+	// rootLockFile is the store's lock, in its root: the one name there
+	// that is no key's.
+	rootLockFile = ".lock"
+	// entryLockFile, in an entry, is the lock on the entry itself.
+	entryLockFile = ".entry.lock"
+	// holdersLockFile, in an entry, counts its holders: each holds it shared.
+	holdersLockFile = ".holders.lock"
 )

@@ -22,10 +22,9 @@ var (
 	// ErrLockFail is returned when a lock cannot be acquired.
 	ErrLockFail = errors.New("failed to acquire lock")
 	// ErrLockWouldBlock is returned when a non-blocking lock cannot be acquired
-	// because another process holds a conflicting lock.
+	// because another holder has a conflicting lock.
 	ErrLockWouldBlock = errors.New("lock would block")
-	// ErrUnlockFail is returned when a lock cannot be released.
+	// ErrUnlockFail is returned when a lock cannot be released: a failure of
+	// the platform, a nil Lock, or one already released.
 	ErrUnlockFail = errors.New("failed to release lock")
-	// ErrLockIsNil is returned when a lock is nil.
-	ErrLockIsNil = errors.New("nil lock")
 )

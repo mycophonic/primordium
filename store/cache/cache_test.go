@@ -24,6 +24,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -1828,11 +1829,17 @@ func TestCache_Exists(t *testing.T) {
 func TestCache_AcquireFileMissing(t *testing.T) {
 	t.Parallel()
 
-	blobCache := cache.New(t.TempDir(), 0)
+	root := t.TempDir()
+	blobCache := cache.New(root, 0)
 
 	_, err := blobCache.AcquireFile(computeDigest([]byte("never written")))
 	if !errors.Is(err, fault.ErrNotFound) {
 		t.Fatalf("AcquireFile() on absent content: err = %v, want fault.ErrNotFound", err)
+	}
+
+	// A miss creates nothing: no shard, and no lock file.
+	if left := filesUnder(t, root); len(left) != 0 {
+		t.Fatalf("a miss left %d files under the root, want none", len(left))
 	}
 }
 
@@ -2086,4 +2093,223 @@ func TestCache_ZeroDigestIsRefused(t *testing.T) {
 	assert.Assert(t, errors.Is(err, fault.ErrInvalidArgument), "AcquireFile: %v", err)
 
 	assert.Assert(t, !blobCache.Exists(none))
+}
+
+// filesUnder lists the files under root, by path relative to it.
+func filesUnder(t *testing.T, root string) []string {
+	t.Helper()
+
+	var files []string
+
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+
+		relative, relErr := filepath.Rel(root, path)
+		files = append(files, relative)
+
+		return relErr
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	return files
+}
+
+// TestCache_GC_EvictionLeavesTheShardLockAlone: an evicted entry goes whole,
+// its own lock file with it. What stays under the root is its shard's lock
+// file, which is there for the next entry of the shard.
+func TestCache_GC_EvictionLeavesTheShardLockAlone(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	blobCache := cache.New(root, 1)
+
+	content := []byte("over a quota of one byte")
+	commit(t, blobCache, content)
+
+	stats, err := blobCache.GarbageCollect()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if stats.EntriesFreed != 1 {
+		t.Fatalf("EntriesFreed = %d, want the one entry", stats.EntriesFreed)
+	}
+
+	shard := computeDigest(content).Encoded()[:2]
+	want := filepath.Join(shard, ".lock")
+
+	if left := filesUnder(t, root); len(left) != 1 || left[0] != want {
+		t.Fatalf("after the eviction the root holds %d files, want the shard's lock file alone", len(left))
+	}
+}
+
+// TestCache_ReadOnlyTreeServesAHit: a cache the user may read and not write,
+// one mounted read-only or filled by another user, still serves what it
+// holds, to a reader and to a pin. Windows keeps no such mode on a
+// directory, and root writes anywhere.
+func TestCache_ReadOnlyTreeServesAHit(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "windows" || os.Geteuid() == 0 {
+		t.Skip("needs a tree its owner may not write")
+	}
+
+	root := t.TempDir()
+	blobCache := cache.New(root, 0)
+
+	content := []byte("held by a cache nobody may write")
+	commit(t, blobCache, content)
+
+	modes := map[string]fs.FileMode{}
+
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return err
+		}
+
+		modes[path] = info.Mode().Perm()
+
+		return os.Chmod(path, info.Mode().Perm()&^0o222)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// TempDir's removal writes the directories.
+	t.Cleanup(func() {
+		for path, mode := range modes {
+			_ = os.Chmod(path, mode)
+		}
+	})
+
+	reader, writer, err := blobCache.Acquire(computeDigest(content))
+	if err != nil || writer != nil {
+		t.Fatalf("Acquire on a read-only cache = writer %v, %v; want a reader alone", writer != nil, err)
+	}
+
+	got, err := io.ReadAll(reader)
+	if err != nil || !bytes.Equal(got, content) {
+		t.Fatalf("the reader gave %q, %v; want the content", got, err)
+	}
+
+	assert.Check(t, reader.Close())
+
+	pin, err := blobCache.AcquireFile(computeDigest(content))
+	if err != nil {
+		t.Fatalf("AcquireFile on a read-only cache: %v", err)
+	}
+
+	assert.Check(t, pin.Release())
+}
+
+// TestCache_AcquireFileOnAMissingLockFile: a pin asked of an entry whose lock
+// file is gone, as an eviction that won the race leaves it, is a miss and
+// makes nothing; an Acquire makes the lock file again, and the pin is then
+// given.
+func TestCache_AcquireFileOnAMissingLockFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	blobCache := cache.New(root, 0)
+
+	content := []byte("an entry that loses its lock file")
+	commit(t, blobCache, content)
+
+	digest := computeDigest(content)
+	shard := filepath.Join(root, digest.Encoded()[:2])
+
+	entries, err := os.ReadDir(shard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var lockFile string
+
+	for _, entry := range entries {
+		if !entry.IsDir() && entry.Name() != ".lock" {
+			lockFile = filepath.Join(shard, entry.Name())
+		}
+	}
+
+	if lockFile == "" {
+		t.Fatal("the entry has no lock file beside it")
+	}
+
+	if err = os.Remove(lockFile); err != nil {
+		t.Fatal(err)
+	}
+
+	before := filesUnder(t, root)
+
+	if _, err = blobCache.AcquireFile(digest); !errors.Is(err, fault.ErrNotFound) {
+		t.Fatalf("AcquireFile with the entry's lock file gone = %v, want fault.ErrNotFound", err)
+	}
+
+	if after := filesUnder(t, root); len(after) != len(before) {
+		t.Fatalf("the miss changed the files under the root from %d to %d", len(before), len(after))
+	}
+
+	reader, writer, err := blobCache.Acquire(digest)
+	if err != nil || writer != nil {
+		t.Fatalf("Acquire = writer %v, %v; want a reader alone", writer != nil, err)
+	}
+
+	assert.Check(t, reader.Close())
+
+	pin, err := blobCache.AcquireFile(digest)
+	if err != nil {
+		t.Fatalf("AcquireFile after an Acquire: %v", err)
+	}
+
+	assert.Check(t, pin.Release())
+}
+
+// TestCache_GC_CollectsACacheWithoutLockFiles: a cache laid out with no lock
+// file in its shards and none beside its entries, each entry holding its
+// data and its two inner lock files, is collected like any other.
+func TestCache_GC_CollectsACacheWithoutLockFiles(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	blobCache := cache.New(root, 1)
+
+	content := []byte("written under a layout with no lock files")
+	commit(t, blobCache, content)
+
+	shard := filepath.Join(root, computeDigest(content).Encoded()[:2])
+
+	entries, err := os.ReadDir(shard)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			if err = os.Remove(filepath.Join(shard, entry.Name())); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+
+	stats, err := blobCache.GarbageCollect()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if stats.EntriesFreed != 1 || stats.Remaining != 0 {
+		t.Fatalf("freed %d entries, %d bytes remain; want the one entry freed", stats.EntriesFreed, stats.Remaining)
+	}
+
+	if left := filesUnder(t, root); len(left) != 1 || filepath.Base(left[0]) != ".lock" {
+		t.Fatalf("after the collection the root holds %d files, want the shard's lock file alone", len(left))
+	}
 }

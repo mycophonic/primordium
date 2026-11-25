@@ -22,8 +22,8 @@ package volatile_test
 //     same path for the same content in any instance of the same algorithm,
 //     another for other content or another algorithm;
 //   - the file stays while any holder, in any process, has it; the last
-//     release removes it and leaves the root empty; release is idempotent; a
-//     holder that dies releases.
+//     release removes it and leaves the root with the store's lock file
+//     alone; release is idempotent; a holder that dies releases.
 //
 // The holder in another process is this test binary, told by
 // PRIMORDIUM_VOLATILE_CHILD to hold the shared content under
@@ -178,8 +178,8 @@ func empty(t *testing.T, root string) {
 		t.Fatal(err)
 	}
 
-	if len(entries) != 0 {
-		t.Fatalf("the root still holds %d entries", len(entries))
+	if len(entries) != 1 || entries[0].Name() != ".lock" || entries[0].IsDir() {
+		t.Fatalf("the root holds %d entries, want the store's lock file alone", len(entries))
 	}
 }
 

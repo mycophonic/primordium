@@ -33,7 +33,7 @@ import (
 // under the root and removes it on release; it never escapes the root.
 func FuzzAcquireKey(f *testing.F) {
 	for _, seed := range []string{
-		"key", "", " ", ".", "..", "a/b", `a\b`, "x.", "CON", "ünï", "\xff",
+		"key", "", " ", ".", "..", "a/b", `a\b`, "x.", "CON", "ünï", "\xff", ".lock", ".LOCK",
 		strings.Repeat("k", 255), strings.Repeat("k", 256),
 	} {
 		f.Add(seed)
