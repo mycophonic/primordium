@@ -408,6 +408,74 @@ func TestTLSAlertNotRetried(t *testing.T) { //nolint:paralleltest // http.Defaul
 	assert.Equal(t, connections.Load(), int32(1))
 }
 
+// TestCallersRequestIsLeftAlone: the User-Agent the client adds and the body
+// a retry rewinds are not the caller's request's: after the exchange it has
+// the headers and the body it was given. What the caller sets on its request
+// while the body is read, a trailer, still reaches the server.
+func TestCallersRequestIsLeftAlone(t *testing.T) {
+	t.Parallel()
+
+	var agents []string
+
+	back := newBackend(t, func(w http.ResponseWriter, r *http.Request, call int32) {
+		agents = append(agents, r.Header.Get("User-Agent"))
+
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		if call == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	})
+
+	client := newClient(t, transporter.Options{UserAgent: "probe/1", MaxRetries: 1, InitialBackoff: time.Millisecond})
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, back.url, strings.NewReader("payload"))
+	assert.NilError(t, err)
+
+	body := req.Body
+
+	resp, err := client.Do(req)
+	assert.NilError(t, err)
+	assert.Check(t, resp.Body.Close())
+
+	assert.DeepEqual(t, agents, []string{"probe/1", "probe/1"})
+	assert.Equal(t, req.Header.Get("User-Agent"), "")
+	assert.Assert(t, req.Body == body, "the retry replaced the caller's body")
+
+	var trailer atomic.Value
+
+	summing := newBackend(t, func(_ http.ResponseWriter, r *http.Request, _ int32) {
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		trailer.Store(r.Trailer.Get("X-Sum"))
+	})
+
+	streamed, err := http.NewRequestWithContext(t.Context(), http.MethodPut, summing.url, http.NoBody)
+	assert.NilError(t, err)
+
+	streamed.Trailer = http.Header{"X-Sum": nil}
+	streamed.Body = io.NopCloser(readerFunc(func(buf []byte) (int, error) {
+		if streamed.Trailer.Get("X-Sum") != "" {
+			return 0, io.EOF
+		}
+
+		// Set as the body ends, as a caller that sums what it sends does.
+		streamed.Trailer.Set("X-Sum", "computed-while-streaming")
+
+		return copy(buf, "payload"), nil
+	}))
+
+	resp, err = client.Do(streamed)
+	assert.NilError(t, err)
+	assert.Check(t, resp.Body.Close())
+
+	assert.Equal(t, trailer.Load(), any("computed-while-streaming"))
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(buf []byte) (int, error) { return f(buf) }
+
 // TestUnknownHostNotRetried: a name that does not resolve is asked once. The
 // .invalid domain never resolves (RFC 6761); a resolver that answers anything
 // but "no such host", as one cut off from the network does, cannot show the

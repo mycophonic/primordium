@@ -114,11 +114,19 @@ func ownTransport(legacyTLS bool) http.RoundTripper {
 
 // RoundTrip implements http.RoundTripper.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// A RoundTripper leaves the caller's request as it is: the header added
+	// here and the body a retry rewinds are a copy's. Not Request.Clone: it
+	// copies Trailer, which the caller fills while the body is read and the
+	// transport reads from the request it was given.
+	ctx := req.Context()
+	req = req.WithContext(ctx)
+	req.Header = req.Header.Clone()
+
 	if t.userAgent != "" && req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", t.userAgent)
 	}
 
-	if err := t.acquireSem(req.Context()); err != nil {
+	if err := t.acquireSem(ctx); err != nil {
 		return nil, err
 	}
 
