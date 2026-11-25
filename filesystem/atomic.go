@@ -53,6 +53,11 @@ import (
 // The file is created with perm before umask, as os.WriteFile creates one, and
 // replaces one that readers hold open, on Windows too when they opened it
 // through xos.
+// The data is flushed before the rename and the directory after it, so that a
+// write that returned survives a crash; only the data is flushed on Windows,
+// and in a directory the process may not read.
+// A directory that cannot be flushed fails the write after the rename: the
+// path then holds the data, which a crash may still undo.
 func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	tmpFile, err := createTemp(filepath.Dir(filename), ".tmp-"+filepath.Base(filename), perm)
 	if err != nil {
@@ -81,6 +86,10 @@ func WriteFile(filename string, data []byte, perm os.FileMode) error {
 	}
 
 	if err = xos.Rename(tmpFile.Name(), filename); err != nil {
+		return errors.Join(fault.ErrWriteFailure, err)
+	}
+
+	if err = syncDir(filepath.Dir(filename)); err != nil {
 		return errors.Join(fault.ErrWriteFailure, err)
 	}
 

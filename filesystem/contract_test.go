@@ -23,7 +23,12 @@ package filesystem_test
 //     exactly the data, a regular file created with the mode asked for, less
 //     the process's umask, as os.WriteFile creates one (Windows keeps only
 //     whether the owner may write); or it fails with fault.ErrWriteFailure,
-//     and the path is exactly as it was;
+//     and the path is exactly as it was, unless what failed is the flush of
+//     the directory, after the rename: the path then holds the data;
+//   - a write that succeeded outlasts a crash: the data is flushed before the
+//     rename and the directory after it, where the directory may be read and
+//     the filesystem flushes one (not on Windows). No test here cuts the
+//     power, so none checks it;
 //   - it succeeds where its directory exists and the path is missing or a
 //     file the rename may replace, held open or not: on Windows, xos.Rename
 //     replaces a file whose holders opened it with FILE_SHARE_DELETE, as xos
