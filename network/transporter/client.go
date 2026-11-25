@@ -46,10 +46,8 @@ type Options struct {
 //
 // The client has a connection pool of its own, configured as
 // http.DefaultTransport is at the client's first request. Closing its idle
-// connections closes no other client's.
-//
-// If MaxPerSecond > 0, a background goroutine is started for rate limiting.
-// Call CloseIdleConnections on the returned client when done to stop it.
+// connections closes no other client's, and leaves this one as usable as
+// before: it runs nothing in the background.
 func NewClient(opts Options) *http.Client {
 	return &http.Client{
 		Transport: newRetryTransport(opts),

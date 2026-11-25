@@ -42,8 +42,7 @@ type retryTransport struct {
 	base        func() http.RoundTripper // ownTransport, taken at the first request
 	baseTaken   atomic.Bool              // base has been called
 	sem         chan struct{}            // parallelism semaphore; nil = unlimited
-	limiter     chan struct{}            // rate limiter tokens; nil = unlimited
-	stopLimiter context.CancelFunc
+	limiter     *limiter                 // nil = unlimited
 	maxRetries  int
 	initBackoff time.Duration
 	maxBackoff  time.Duration
@@ -71,13 +70,8 @@ func newRetryTransport(opts Options) *retryTransport {
 	}
 
 	if opts.MaxPerSecond > 0 {
-		transport.limiter = make(chan struct{}, 1)
-		transport.limiter <- struct{}{} // Pre-fill so the first request doesn't wait for a tick.
-
-		ctx, cancel := context.WithCancel(context.Background())
-		transport.stopLimiter = cancel
-
-		go transport.refill(ctx, opts.MaxPerSecond)
+		// A rate past one per nanosecond is one per nanosecond.
+		transport.limiter = &limiter{interval: max(time.Second/time.Duration(opts.MaxPerSecond), time.Nanosecond)}
 	}
 
 	return transport
@@ -137,13 +131,9 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.retryLoop(req)
 }
 
-// CloseIdleConnections stops the rate limiter goroutine and forwards to the
-// base transport. Called by net/http.Client.CloseIdleConnections.
+// CloseIdleConnections forwards to the base transport. Called by
+// net/http.Client.CloseIdleConnections.
 func (t *retryTransport) CloseIdleConnections() {
-	if t.stopLimiter != nil {
-		t.stopLimiter()
-	}
-
 	// Before the first request there is no connection to close, and calling
 	// base would take the clone before network.SetDefaults may have run.
 	if !t.baseTaken.Load() {
@@ -179,12 +169,55 @@ func (t *retryTransport) waitForToken(ctx context.Context) (time.Duration, error
 
 	start := time.Now()
 
-	select {
-	case <-t.limiter:
-		return time.Since(start), nil
-	case <-ctx.Done():
-		return 0, fmt.Errorf("%w: %w", fault.ErrCancelled, ctx.Err())
+	for {
+		wait := t.limiter.take()
+		if wait <= 0 {
+			return time.Since(start), nil
+		}
+
+		timer := time.NewTimer(wait)
+
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+
+			return 0, fmt.Errorf("%w: %w", fault.ErrCancelled, ctx.Err())
+		}
 	}
+}
+
+// limiter spaces requests an interval apart, with no burst. It is computed
+// from the clock: nothing runs between two requests, so there is nothing to
+// start and nothing a CloseIdleConnections could stop.
+type limiter struct {
+	mu       sync.Mutex
+	interval time.Duration
+	next     time.Time // when the next request may go
+}
+
+// take gives the caller the slot when its time has come, and returns zero;
+// before that it takes nothing and returns how long until then. A slot is
+// never held for a caller that waits: one that leaves, its context done,
+// leaves nothing behind for the others to wait on.
+func (l *limiter) take() time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if wait := l.next.Sub(now); wait > 0 {
+		return wait
+	}
+
+	// From the slot's own time when it was just missed, so that late wakings
+	// do not add up; from now after an idle stretch, so that it buys no burst.
+	if now.Sub(l.next) > l.interval {
+		l.next = now
+	}
+
+	l.next = l.next.Add(l.interval)
+
+	return 0
 }
 
 //nolint:gocognit // one retry protocol, read top to bottom: wait, attempt, classify, decide
@@ -322,27 +355,6 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, lastErr
-}
-
-// refill sends a token into the limiter channel at the configured rate. A
-// rate past one per nanosecond is one per nanosecond: a ticker refuses zero.
-func (t *retryTransport) refill(ctx context.Context, maxPerSecond int) {
-	interval := max(time.Second/time.Duration(maxPerSecond), time.Nanosecond)
-	ticker := time.NewTicker(interval)
-
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			select {
-			case t.limiter <- struct{}{}:
-			default: // Drop token if buffer full (no bursting).
-			}
-		}
-	}
 }
 
 // permanent reports a transport error that no retry can change for the life
