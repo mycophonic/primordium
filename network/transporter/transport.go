@@ -272,6 +272,17 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				return nil, lastErr
 			}
 
+			// The request may have reached the server before the error did,
+			// unless the error is the dial's: nothing was sent then.
+			if !replayable(req) && !unsent(err) {
+				slog.WarnContext(req.Context(), "HTTP transport error, not retried: the request is not idempotent",
+					"error", err,
+					"url", target,
+				)
+
+				return nil, lastErr
+			}
+
 			slog.WarnContext(req.Context(), "HTTP transport error, retrying",
 				"attempt", attempt+1,
 				"elapsed", elapsed,
@@ -319,6 +330,17 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 
 		lastErr = fmt.Errorf("%w: HTTP %d", fault.ErrUnacceptableResponse, resp.StatusCode)
 
+		// The server may have acted on the request before it answered: the
+		// answer is the error it is for any request, and it is not sent again.
+		if !replayable(req) {
+			slog.WarnContext(req.Context(), "HTTP error, not retried: the request is not idempotent",
+				"status", resp.StatusCode,
+				"url", target,
+			)
+
+			break
+		}
+
 		if attempt == t.maxRetries {
 			slog.WarnContext(req.Context(), "HTTP retries exhausted",
 				"status", resp.StatusCode,
@@ -355,6 +377,32 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 	}
 
 	return nil, lastErr
+}
+
+// replayable reports a request that sent twice does what it does sent once:
+// a method RFC 9110 defines as idempotent, or a request that says so itself
+// with an idempotency key, the two headers net/http reads before it replays
+// one. As there, the key's presence is what counts: one with no value marks
+// the request and sends no header.
+func replayable(req *http.Request) bool {
+	switch req.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace,
+		http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		_, key := req.Header["Idempotency-Key"]
+		_, legacy := req.Header["X-Idempotency-Key"]
+
+		return key || legacy
+	}
+}
+
+// unsent reports a transport error that came before anything was sent: the
+// connection could not be made.
+func unsent(err error) bool {
+	opErr, ok := errors.AsType[*net.OpError](err)
+
+	return ok && opErr.Op == "dial"
 }
 
 // permanent reports a transport error that no retry can change for the life

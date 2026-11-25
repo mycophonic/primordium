@@ -613,7 +613,7 @@ func TestBodyResentOnRetry(t *testing.T) {
 	})
 
 	req, err := http.NewRequestWithContext(
-		t.Context(), http.MethodPost, back.url,
+		t.Context(), http.MethodPut, back.url,
 		bytes.NewReader([]byte(bodyContent)),
 	)
 	assert.NilError(t, err)
