@@ -78,3 +78,35 @@ func TestModeUnderUmask(t *testing.T) {
 		t.Fatalf("under umask 0o077, WriteFile gives %v, os.WriteFile %v", got.Mode().Perm(), want.Mode().Perm())
 	}
 }
+
+// TestDirectoryNotReadable: a directory the process may write and search but
+// not read takes a write, as it takes os.WriteFile's. Root reads any
+// directory, so the case does not exist for it.
+func TestDirectoryNotReadable(t *testing.T) {
+	t.Parallel()
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any directory")
+	}
+
+	dir := filepath.Join(t.TempDir(), "dropbox")
+	if err := os.Mkdir(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+
+	// TempDir's removal lists the directory.
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	path := filepath.Join(dir, "file")
+
+	for _, content := range []string{"new", "replaced"} {
+		if err := filesystem.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("writing %q: %v", content, err)
+		}
+
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != content {
+			t.Fatalf("after writing %q the path holds %q (%v)", content, got, err)
+		}
+	}
+}
