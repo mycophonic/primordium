@@ -18,6 +18,17 @@ package network
 
 import "time"
 
+// https is the one scheme the baseline sends, and a credential travels.
+const https = "https"
+
+const (
+	// DefaultStallTimeout is how long a read of a response body waits for a
+	// byte under a Config that names no StallTimeout.
+	DefaultStallTimeout = time.Minute
+	// DefaultRedirects is how many redirects NewClient's client follows.
+	DefaultRedirects = 10
+)
+
 // Transport timeout and pool configuration constants.
 const (
 	dialTimeout           = 30 * time.Second
