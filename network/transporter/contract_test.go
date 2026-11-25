@@ -24,6 +24,7 @@ package transporter_test
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
 	"log/slog"
@@ -42,6 +43,7 @@ import (
 	"gotest.tools/v3/assert"
 
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/network"
 	"github.com/mycophonic/primordium/network/transporter"
 )
 
@@ -377,35 +379,71 @@ func TestUntrustedCertificateNotRetried(t *testing.T) {
 }
 
 // TestTLSAlertNotRetried: a server that speaks no TLS version the client
-// accepts alerts on every attempt; one connection. The client's floor is set
-// on the process's default transport, as network.SetDefaults sets it, so the
-// test swaps it and does not run in parallel.
-func TestTLSAlertNotRetried(t *testing.T) { //nolint:paralleltest // http.DefaultTransport is process-wide
+// accepts alerts on every attempt; one connection.
+func TestTLSAlertNotRetried(t *testing.T) {
+	t.Parallel()
+
 	srv, connections := tlsBackend(t, &tls.Config{MaxVersion: tls.VersionTLS12})
 
-	configured := &http.Transport{TLSClientConfig: &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		RootCAs:    srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
-	}}
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
 
-	previous := http.DefaultTransport
-	http.DefaultTransport = configured //nolint:reassign // the configuration under test
-
-	t.Cleanup(func() {
-		configured.CloseIdleConnections()
-
-		http.DefaultTransport = previous //nolint:reassign // restores the configuration under test
+	client := newClient(t, transporter.Options{
+		MaxRetries: 3, InitialBackoff: time.Millisecond,
+		Base: network.NewTransport(network.Config{Roots: roots}),
 	})
-
-	client := newClient(t, transporter.Options{MaxRetries: 3, InitialBackoff: time.Millisecond})
 
 	resp, err := doGet(t.Context(), t, client, srv.URL)
 	if resp != nil {
 		_ = resp.Body.Close()
 	}
 
-	assert.ErrorContains(t, err, "protocol version not supported")
+	assert.ErrorIs(t, err, network.ErrHandshakeRefused)
 	assert.Equal(t, connections.Load(), int32(1))
+}
+
+// TestPostureRefusalsNotRetried: a request the baseline refuses, offline, in
+// cleartext or at a level there is none of, is refused once: the same request
+// gets the same answer.
+func TestPostureRefusalsNotRetried(t *testing.T) {
+	t.Parallel()
+
+	for name, refusal := range map[string]struct {
+		config network.Config
+		level  network.KeyExchange
+		want   error
+	}{
+		"offline":       {network.Config{Offline: true, Cleartext: true}, network.HybridOnly, network.ErrOffline},
+		"cleartext":     {network.Config{}, network.HybridOnly, network.ErrCleartext},
+		"unknown level": {network.Config{Cleartext: true}, network.Legacy + 1, network.ErrKeyExchange},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			back := newBackend(t, status(http.StatusOK))
+			baseline := network.NewTransport(refusal.config)
+
+			var attempts atomic.Int32
+
+			client := newClient(t, transporter.Options{
+				MaxRetries: 3, InitialBackoff: time.Millisecond,
+				Base: roundTripper(func(req *http.Request) (*http.Response, error) {
+					attempts.Add(1)
+
+					return baseline.RoundTrip(req)
+				}),
+			})
+
+			resp, err := doGet(network.WithKeyExchange(t.Context(), refusal.level), t, client, back.url)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+
+			assert.ErrorIs(t, err, refusal.want)
+			assert.Equal(t, attempts.Load(), int32(1))
+			assert.Equal(t, back.calls.Load(), int32(0))
+		})
+	}
 }
 
 // TestUnknownHostNotRetried: a name that does not resolve is asked once. The
@@ -464,8 +502,7 @@ func TestLogsNoCredential(t *testing.T) { //nolint:paralleltest // slog's defaul
 	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	gone.Close()
 
-	client := transporter.NewClient(transporter.Options{MaxRetries: 1, InitialBackoff: time.Millisecond})
-	defer client.CloseIdleConnections()
+	client := newClient(t, transporter.Options{MaxRetries: 1, InitialBackoff: time.Millisecond})
 
 	for _, address := range []string{server.URL + "/once", server.URL + "/down", server.URL + "/large", gone.URL + "/gone"} {
 		target, err := url.Parse(address + "?X-Amz-Signature=secret-in-the-query")

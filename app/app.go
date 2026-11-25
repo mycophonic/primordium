@@ -41,15 +41,18 @@ type Options struct {
 	DSN              string
 	PII              bool
 	TracesSampleRate float64
+	// Network is the posture of http.DefaultTransport, which the reporter
+	// and any library on http.DefaultClient use. The zero value is the
+	// strictest: see network.Config.
+	Network network.Config
 }
 
 // Main sets the process up under opts and runs run with a context a shutdown
 // signal cancels. When run returns, the shutdown handlers run and the process
 // exits: with the shutdown.ExitError run returned or wrapped, 0 on nil, 1 on any
-// other error or a panic. Main never returns. Once per process: the network
-// defaults refuse a second install. A program whose command library exits by
-// itself, as urfave/cli does through its OsExiter, points that exit at
-// shutdown.Exit, so that the handlers run first.
+// other error or a panic. Main never returns. A program whose command library
+// exits by itself, as urfave/cli does through its OsExiter, points that exit
+// at shutdown.Exit, so that the handlers run first.
 func Main(opts *Options, run func(ctx context.Context) error) {
 	shutdown.Run(setUp(context.Background(), opts), run)
 }
@@ -66,7 +69,7 @@ func setUp(ctx context.Context, opts *Options) context.Context {
 
 	debug := logger.SetDefaultsForLogger(ctx)
 
-	network.SetDefaults()
+	network.SetDefaults(opts.Network)
 
 	if opts.DSN != "" {
 		if err := reporter.Initialize(&reporter.Config{

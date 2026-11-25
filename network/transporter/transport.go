@@ -28,27 +28,24 @@ import (
 	"net"
 	"net/http"
 	"strconv"
-	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/network"
 	"github.com/mycophonic/primordium/network/internal/redact"
 )
 
 // retryTransport is an http.RoundTripper that adds concurrency limiting,
 // rate limiting, retry with exponential backoff, Retry-After, and User-Agent.
 type retryTransport struct {
-	base        func() http.RoundTripper // ownTransport, taken at the first request
-	baseTaken   atomic.Bool              // base has been called
-	sem         chan struct{}            // parallelism semaphore; nil = unlimited
-	limiter     chan struct{}            // rate limiter tokens; nil = unlimited
+	base        http.RoundTripper // what carries each attempt
+	sem         chan struct{}     // parallelism semaphore; nil = unlimited
+	limiter     chan struct{}     // rate limiter tokens; nil = unlimited
 	stopLimiter context.CancelFunc
 	maxRetries  int
 	initBackoff time.Duration
 	maxBackoff  time.Duration
 	userAgent   string
-	legacyTLS   bool // the clone gets Go's default TLS
 }
 
 func newRetryTransport(opts Options) *retryTransport {
@@ -57,14 +54,12 @@ func newRetryTransport(opts Options) *retryTransport {
 		initBackoff: opts.InitialBackoff,
 		maxBackoff:  opts.MaxBackoff,
 		userAgent:   opts.UserAgent,
-		legacyTLS:   opts.LegacyTLS,
+		base:        opts.Base,
 	}
 
-	transport.base = sync.OnceValue(func() http.RoundTripper {
-		transport.baseTaken.Store(true)
-
-		return ownTransport(transport.legacyTLS)
-	})
+	if transport.base == nil {
+		transport.base = network.NewTransport(network.Config{})
+	}
 
 	if opts.Parallelism > 0 {
 		transport.sem = make(chan struct{}, opts.Parallelism)
@@ -78,35 +73,6 @@ func newRetryTransport(opts Options) *retryTransport {
 		transport.stopLimiter = cancel
 
 		go transport.refill(ctx, opts.MaxPerSecond)
-	}
-
-	return transport
-}
-
-// ownTransport returns a clone of http.DefaultTransport: a pool of its own, so
-// that no other user of http.DefaultTransport (another client's
-// CloseIdleConnections, every httptest.Server.Close) closes this client's
-// connections, or fails a request that has just taken one. It is taken at the
-// first request, not when the client is made: network.SetDefaults promises its
-// configuration to requests made after it, and a client may be made before.
-// The clone drops whatever wraps the *http.Transport: network.SetDefaults'
-// wrapper adds only a header this client never sets and a log line. One that
-// cannot be cloned is shared, as nothing else carries its configuration.
-// LegacyTLS resets the clone's TLS config, which Clone copied, to Go's
-// defaults for the version, key exchange and cipher suites, and nothing else:
-// the roots and certificates stay, and http.DefaultTransport is untouched.
-func ownTransport(legacyTLS bool) http.RoundTripper {
-	cloner, ok := http.DefaultTransport.(interface{ Clone() *http.Transport })
-	if !ok {
-		return http.DefaultTransport
-	}
-
-	transport := cloner.Clone()
-
-	if config := transport.TLSClientConfig; legacyTLS && config != nil {
-		config.MinVersion = tls.VersionTLS12
-		config.CurvePreferences = nil
-		config.CipherSuites = nil
 	}
 
 	return transport
@@ -136,17 +102,11 @@ func (t *retryTransport) CloseIdleConnections() {
 		t.stopLimiter()
 	}
 
-	// Before the first request there is no connection to close, and calling
-	// base would take the clone before network.SetDefaults may have run.
-	if !t.baseTaken.Load() {
-		return
-	}
-
 	type closeIdler interface {
 		CloseIdleConnections()
 	}
 
-	if ci, ok := t.base().(closeIdler); ok {
+	if ci, ok := t.base.(closeIdler); ok {
 		ci.CloseIdleConnections()
 	}
 }
@@ -212,7 +172,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		}
 
 		start := time.Now()
-		resp, err := t.base().RoundTrip(req)
+		resp, err := t.base.RoundTrip(req)
 		elapsed := time.Since(start)
 
 		if err != nil {
@@ -340,9 +300,18 @@ func (t *retryTransport) refill(ctx context.Context, maxPerSecond int) {
 // permanent reports a transport error that no retry can change for the life
 // of the request: an alert the server sent, as one that speaks no TLS version
 // the client accepts does; a certificate the client does not trust; a host
-// name that does not resolve. A timeout, a reset or a refused connection is
-// not one.
+// name that does not resolve; a request the base refuses by its posture,
+// offline, in cleartext or at a level there is none of. A timeout, a reset or
+// a refused connection is not one.
 func permanent(err error) bool {
+	for _, refusal := range []error{
+		network.ErrOffline, network.ErrCleartext, network.ErrKeyExchange, network.ErrHandshakeRefused,
+	} {
+		if errors.Is(err, refusal) {
+			return true
+		}
+	}
+
 	if dnsErr, ok := errors.AsType[*net.DNSError](err); ok {
 		return dnsErr.IsNotFound
 	}

@@ -20,9 +20,9 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/http/httptrace"
@@ -37,6 +37,7 @@ import (
 
 	"github.com/mycophonic/primordium/bytesize"
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/network"
 	"github.com/mycophonic/primordium/network/transporter"
 )
 
@@ -139,8 +140,15 @@ func hangUp(t *testing.T, w http.ResponseWriter) {
 	_ = conn.Close()
 }
 
+// newClient is a client under opts. With no base named it gets one of its
+// own that sends cleartext, which the test servers speak and the baseline
+// refuses.
 func newClient(t *testing.T, opts transporter.Options) *http.Client {
 	t.Helper()
+
+	if opts.Base == nil {
+		opts.Base = network.NewTransport(network.Config{Cleartext: true})
+	}
 
 	client := transporter.NewClient(opts)
 	t.Cleanup(client.CloseIdleConnections)
@@ -788,8 +796,7 @@ func TestRateLimiting(t *testing.T) {
 // --- CloseIdleConnections ---
 
 // TestConnectionsAreTheClients checks that a client's connections are its own:
-// another client closing its idle connections, or http.DefaultTransport
-// closing its own (as every httptest.Server.Close does), leaves them open.
+// another client closing its idle connections leaves them open.
 func TestConnectionsAreTheClients(t *testing.T) {
 	t.Parallel()
 
@@ -820,55 +827,72 @@ func TestConnectionsAreTheClients(t *testing.T) {
 	assert.Assert(t, !reused(other), "a new client has no connection to reuse")
 
 	other.CloseIdleConnections()
-	http.DefaultTransport.(interface{ CloseIdleConnections() }).CloseIdleConnections()
 
 	assert.Assert(t, reused(client), "another client closed this client's connection")
 }
 
-// TestDefaultTransportTakenAtFirstRequest checks that a client made, and even
-// closed, before http.DefaultTransport is configured, as network.SetDefaults
-// does at startup, still requests with that configuration.
-//
-//nolint:paralleltest // replaces the process-wide default transport
-func TestDefaultTransportTakenAtFirstRequest(t *testing.T) {
+// TestNoBaseIsTheBaseline checks that a client given no base carries its
+// requests under the strictest posture, whatever the process's default
+// transport is: a request in cleartext is refused, and nothing is sent.
+func TestNoBaseIsTheBaseline(t *testing.T) {
+	t.Parallel()
+
 	back := newBackend(t, status(http.StatusOK))
-	client := newClient(t, transporter.Options{})
-	client.CloseIdleConnections()
 
-	var dialed atomic.Bool
+	client := transporter.NewClient(transporter.Options{})
+	t.Cleanup(client.CloseIdleConnections)
 
-	configured := &http.Transport{
-		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			dialed.Store(true)
-
-			return (&net.Dialer{}).DialContext(ctx, network, addr)
-		},
+	resp, err := doGet(t.Context(), t, client, back.url)
+	if resp != nil {
+		_ = resp.Body.Close()
 	}
 
-	previous := http.DefaultTransport
-	http.DefaultTransport = configured //nolint:reassign // the configuration under test
+	assert.ErrorIs(t, err, network.ErrCleartext)
+	assert.Equal(t, back.calls.Load(), int32(0))
+}
 
-	t.Cleanup(func() {
-		configured.CloseIdleConnections()
+// TestBaseCarriesTheAttempts checks that every attempt goes through the base
+// the client was given.
+func TestBaseCarriesTheAttempts(t *testing.T) {
+	t.Parallel()
 
-		http.DefaultTransport = previous //nolint:reassign // restores the configuration under test
+	back := newBackend(t, func(w http.ResponseWriter, _ *http.Request, call int32) {
+		if call == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	})
+
+	var carried atomic.Int32
+
+	base := &http.Transport{}
+	t.Cleanup(base.CloseIdleConnections)
+
+	client := newClient(t, transporter.Options{
+		MaxRetries: 1, InitialBackoff: time.Millisecond,
+		Base: roundTripper(func(req *http.Request) (*http.Response, error) {
+			carried.Add(1)
+
+			return base.RoundTrip(req)
+		}),
 	})
 
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Check(t, resp.Body.Close())
-
-	assert.Assert(t, dialed.Load(), "the request did not use http.DefaultTransport's configuration")
+	assert.Equal(t, carried.Load(), int32(2))
 }
 
-// TestLegacyTLS checks that a client's TLS is its own: against a server at
-// TLS 1.2 with P-256 as its only key exchange, a client at the process's
-// default (1.3, X25519 hybrids only) fails the handshake, one with LegacyTLS
-// completes it, and the process's default is as it was for the clients made
-// after.
-//
-//nolint:paralleltest // replaces the process-wide default transport
-func TestLegacyTLS(t *testing.T) {
+type roundTripper func(*http.Request) (*http.Response, error)
+
+func (f roundTripper) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// TestBaseNamesTheTLSLevel checks that a client's TLS is its base's: against
+// a server at TLS 1.2 with P-256 as its only key exchange, a client on the
+// baseline is refused, and one whose base names network.Legacy completes the
+// handshake.
+func TestBaseNamesTheTLSLevel(t *testing.T) {
+	t.Parallel()
+
 	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -879,46 +903,27 @@ func TestLegacyTLS(t *testing.T) {
 	srv.StartTLS()
 	t.Cleanup(srv.Close)
 
-	// As network.SetDefaults leaves it, trusting the test server's certificate.
-	curves := []tls.CurveID{tls.X25519MLKEM768, tls.X25519}
-	configured := &http.Transport{TLSClientConfig: &tls.Config{
-		MinVersion:       tls.VersionTLS13,
-		CurvePreferences: curves,
-		RootCAs:          srv.Client().Transport.(*http.Transport).TLSClientConfig.RootCAs,
-	}}
+	roots := x509.NewCertPool()
+	roots.AddCert(srv.Certificate())
 
-	previous := http.DefaultTransport
-	http.DefaultTransport = configured //nolint:reassign // the configuration under test
+	baseline := newClient(t, transporter.Options{Base: network.NewTransport(network.Config{Roots: roots})})
 
-	t.Cleanup(func() {
-		configured.CloseIdleConnections()
-
-		http.DefaultTransport = previous //nolint:reassign // restores the configuration under test
-	})
-
-	// refused: the server alerts on the version, and there is no response.
-	refused := func(opts transporter.Options) {
-		t.Helper()
-
-		resp, err := doGet(t.Context(), t, newClient(t, opts), srv.URL)
-		if resp != nil {
-			_ = resp.Body.Close()
-		}
-
-		assert.ErrorContains(t, err, "protocol version not supported")
+	resp, err := doGet(t.Context(), t, baseline, srv.URL)
+	if resp != nil {
+		_ = resp.Body.Close()
 	}
 
-	refused(transporter.Options{})
+	assert.ErrorIs(t, err, network.ErrHandshakeRefused)
 
-	resp, err := doGet(t.Context(), t, newClient(t, transporter.Options{LegacyTLS: true}), srv.URL)
+	legacy := newClient(t, transporter.Options{
+		Base: network.NewTransport(network.Config{Roots: roots, KeyExchange: network.Legacy}),
+	})
+
+	resp, err = doGet(t.Context(), t, legacy, srv.URL)
 	assert.NilError(t, err)
 	assert.Check(t, resp.Body.Close())
 	assert.Equal(t, resp.StatusCode, http.StatusOK)
 	assert.Equal(t, resp.TLS.Version, uint16(tls.VersionTLS12))
-
-	refused(transporter.Options{})
-	assert.Equal(t, configured.TLSClientConfig.MinVersion, uint16(tls.VersionTLS13))
-	assert.DeepEqual(t, configured.TLSClientConfig.CurvePreferences, curves)
 }
 
 func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {

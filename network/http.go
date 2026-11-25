@@ -17,195 +17,344 @@
 package network
 
 import (
+	"context"
 	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
-	"log/slog"
+	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
-	"slices"
-	"strings"
-
-	"github.com/mycophonic/primordium/network/internal/redact"
+	"sync"
+	"time"
 )
 
-// defaultTransport holds the configured transport before any wrapping.
-// This allows NewTransport to clone from it.
-//
-//nolint:gochecknoglobals // Package-level reference needed for cloning.
 var (
-	defaultTransport *http.Transport
-
-	// retryReasons maps retryable HTTP status codes to human-readable reasons for logging.
-	// This is the single source of truth — RetryStatusCodes is derived from it.
-	retryReasons = map[int]string{
-		http.StatusTooManyRequests:     "rate limited",
-		http.StatusInternalServerError: "server error",
-		http.StatusBadGateway:          "bad gateway",
-		http.StatusServiceUnavailable:  "service unavailable",
-		http.StatusGatewayTimeout:      "gateway timeout",
-	}
-
-	// RetryStatusCodes contains HTTP status codes that indicate retryable errors.
-	// Derived from retryReasons. Can be passed to libraries like go-containerregistry
-	// via remote.WithRetryStatusCodes().
-	RetryStatusCodes []int
+	// ErrOffline is the error of every request through an offline transport.
+	ErrOffline = errors.New("offline")
+	// ErrCleartext is the error of a request that is not https, through a
+	// transport that was not told to send one.
+	ErrCleartext = errors.New("not https")
+	// ErrKeyExchange is the error of a request that names a key exchange
+	// level there is none of.
+	ErrKeyExchange = errors.New("unknown key exchange level")
+	// ErrHandshakeRefused is the error of a TLS handshake the server ended
+	// with an alert: most often a server that offers no key exchange, or no
+	// TLS version, the request's level accepts.
+	ErrHandshakeRefused = errors.New("the server refused the TLS handshake")
+	// ErrStalled is the error of a response body that stopped arriving.
+	ErrStalled = errors.New("the response body stopped arriving")
+	// ErrRedirect is the error of a redirect the client does not follow.
+	ErrRedirect = errors.New("redirect refused")
 )
 
-//nolint:gochecknoinits // derives the exported list from the reason table once
-func init() {
-	RetryStatusCodes = make([]int, 0, len(retryReasons))
-	for code := range retryReasons {
-		RetryStatusCodes = append(RetryStatusCodes, code)
-	}
+// KeyExchange is what a connection may agree its keys with, and under which
+// TLS versions. The zero value is the strictest, and each one after it gives
+// something up: a request gets a weaker one only by naming it.
+type KeyExchange int
 
-	slices.Sort(RetryStatusCodes)
+const (
+	// HybridOnly is TLS 1.3 with a post-quantum hybrid key exchange, and
+	// nothing else.
+	HybridOnly KeyExchange = iota
+	// Classical is TLS 1.3 with any key exchange Go offers, the classical
+	// ones included, for a server that has no hybrid.
+	Classical
+	// Legacy is TLS as Go defaults it, 1.2 included, for a server that has
+	// no TLS 1.3.
+	Legacy
+
+	levels = iota
+)
+
+// Config is what varies between transports. The zero value is the baseline:
+// https only, HybridOnly, the system's roots, the environment's proxy.
+type Config struct {
+	// KeyExchange is the level of a request that names none with
+	// [WithKeyExchange].
+	KeyExchange KeyExchange
+	// Roots is the certificate authorities trusted; the system's when nil.
+	Roots *x509.CertPool
+	// Certificates is what the client presents to a server that asks.
+	Certificates []tls.Certificate
+	// Proxy picks a request's proxy; http.ProxyFromEnvironment when nil.
+	Proxy func(*http.Request) (*url.URL, error)
+	// StallTimeout is how long a read of a response body may wait for a
+	// byte before it fails with [ErrStalled]. Zero is DefaultStallTimeout;
+	// a negative value waits for ever.
+	StallTimeout time.Duration
+	// Cleartext sends a request that is not https. Without it, such a
+	// request fails with [ErrCleartext].
+	Cleartext bool
+	// Offline fails every request with [ErrOffline], before anything is
+	// dialed.
+	Offline bool
 }
 
-// RoundTripper wraps *http.Transport with auth header injection and
-// logging for retryable responses. Callers can modify TLSClientConfig
-// directly via the embedded transport (e.g., custom CAs, client certs).
-//
-// The token is for the origin the caller asks: its scheme, host and port. A
-// redirect the client follows to another origin gets no token.
-type RoundTripper struct {
-	*http.Transport
+// Transport is an http.RoundTripper under the baseline: its timeouts, a
+// bounded pool, and TLS at the level of each request. It reads and writes no
+// global; two of them share nothing.
+type Transport struct {
+	config Config
 
-	TokenValue string
-	TokenType  string
+	mu sync.Mutex
+	// built holds the transport of each level, made at its first request.
+	built [levels]*http.Transport
 }
 
-// NewTransport returns a new RoundTripper cloned from the default configuration.
-// The returned RoundTripper can be modified (e.g., adding client certificates)
-// without affecting http.DefaultTransport.
-// Panics if SetDefaults has not been called.
-func NewTransport() *RoundTripper {
-	if defaultTransport == nil {
-		panic("NewTransport called before SetDefaults")
-	}
+// NewTransport returns a transport under config.
+func NewTransport(config Config) *Transport {
+	return &Transport{config: config}
+}
 
-	cloned := defaultTransport.Clone()
-	cloned.TLSClientConfig = defaultTLSConfig()
+type exchangeKey struct{}
 
-	return &RoundTripper{
-		Transport: cloned,
-		TokenType: "Bearer",
-	}
+// WithKeyExchange names the key exchange level of the requests made with the
+// returned context, and of the redirects they lead to, whatever the level of
+// the transport that carries them.
+func WithKeyExchange(ctx context.Context, level KeyExchange) context.Context {
+	return context.WithValue(ctx, exchangeKey{}, level)
 }
 
 // RoundTrip implements http.RoundTripper.
-func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if rt.TokenValue != "" && !redirectedElsewhere(req) {
-		// Ensure we don't leak that if the req is getting reused.
-		req = req.Clone(req.Context())
-		req.Header.Set("Authorization", fmt.Sprintf("%s %s", rt.TokenType, rt.TokenValue))
+func (t *Transport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if t.config.Offline {
+		return nil, fmt.Errorf("%w: %s was asked", ErrOffline, req.URL.Host)
 	}
 
-	resp, err := rt.Transport.RoundTrip(req)
+	if req.URL.Scheme != https && !t.config.Cleartext {
+		return nil, fmt.Errorf("%w: %s://%s", ErrCleartext, req.URL.Scheme, req.URL.Host)
+	}
+
+	level := t.config.KeyExchange
+	if named, ok := req.Context().Value(exchangeKey{}).(KeyExchange); ok {
+		level = named
+	}
+
+	base, err := t.at(level)
 	if err != nil {
-		return resp, err //nolint:wrapcheck // pass through
+		return nil, err
 	}
 
-	if reason, isRetryable := retryReasons[resp.StatusCode]; isRetryable {
-		slog.DebugContext(req.Context(), "HTTP request received retryable status",
-			slog.String("url", redact.URL(req.URL)),
-			slog.Int("status", resp.StatusCode),
-			slog.String("reason", reason))
+	stall := t.config.StallTimeout
+	if stall == 0 {
+		stall = DefaultStallTimeout
 	}
+
+	if stall < 0 {
+		resp, tripErr := base.RoundTrip(req)
+
+		return resp, refused(tripErr)
+	}
+
+	// The body's reads are cut short by cancelling the request, which is the
+	// one thing that unblocks a read on a connection gone quiet.
+	ctx, cancel := context.WithCancelCause(req.Context())
+
+	resp, err := base.RoundTrip(req.WithContext(ctx))
+	if err != nil {
+		cancel(nil)
+
+		return nil, refused(err)
+	}
+
+	// A protocol switch hands the connection over as the body: it is the
+	// caller's from here, and a quiet connection is not a stalled one.
+	if stream, ok := resp.Body.(io.ReadWriteCloser); ok && resp.StatusCode == http.StatusSwitchingProtocols {
+		resp.Body = &handedOver{ReadWriteCloser: stream, cancel: cancel}
+
+		return resp, nil
+	}
+
+	resp.Body = watch(ctx, cancel, resp.Body, stall)
 
 	return resp, nil
 }
 
-// redirectedElsewhere reports a request the client made by following a
-// redirect to an origin other than the one the caller asked. net/http drops
-// the caller's own Authorization header there, and a transport that adds one
-// back hands the token to whoever the first host pointed at.
-func redirectedElsewhere(req *http.Request) bool {
-	asked := req
+// CloseIdleConnections closes the idle connections of every level.
+func (t *Transport) CloseIdleConnections() {
+	t.mu.Lock()
+	built := t.built
+	t.mu.Unlock()
 
-	// Response is set on a request made for a redirect, to the response that
-	// caused it.
-	for asked.Response != nil && asked.Response.Request != nil {
-		asked = asked.Response.Request
-	}
-
-	return !sameOrigin(asked.URL, req.URL)
-}
-
-// sameOrigin compares two URLs as origins: the scheme, the host name
-// whatever its case, and the port, the scheme's own when none is written.
-func sameOrigin(one, other *url.URL) bool {
-	return one.Scheme == other.Scheme &&
-		strings.EqualFold(one.Hostname(), other.Hostname()) &&
-		portOf(one) == portOf(other)
-}
-
-func portOf(target *url.URL) string {
-	if written := target.Port(); written != "" {
-		return written
-	}
-
-	switch target.Scheme {
-	case "https":
-		return "443"
-	case "http":
-		return "80"
-	default:
-		return ""
+	for _, transport := range built {
+		if transport != nil {
+			transport.CloseIdleConnections()
+		}
 	}
 }
 
-// defaultTLSConfig returns the TLS configuration used for all transports.
-func defaultTLSConfig() *tls.Config {
-	return &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		CurvePreferences: []tls.CurveID{
-			tls.X25519MLKEM768, // Post-quantum hybrid (preferred)
-			tls.X25519,         // Modern ECDH fallback
-		},
+// at is the transport of a level, built when the level is first used.
+func (t *Transport) at(level KeyExchange) (*http.Transport, error) {
+	if level < HybridOnly || level >= levels {
+		return nil, fmt.Errorf("%w: %d", ErrKeyExchange, level)
+	}
+
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	if t.built[level] == nil {
+		t.built[level] = t.build(level)
+	}
+
+	return t.built[level], nil
+}
+
+func (t *Transport) build(level KeyExchange) *http.Transport {
+	proxy := t.config.Proxy
+	if proxy == nil {
+		proxy = http.ProxyFromEnvironment
+	}
+
+	return &http.Transport{
+		Proxy:                 proxy,
+		DialContext:           (&net.Dialer{Timeout: dialTimeout, KeepAlive: dialKeepAlive}).DialContext,
+		ForceAttemptHTTP2:     true,
+		TLSClientConfig:       t.tls(level),
+		TLSHandshakeTimeout:   tlsHandshakeTimeout,
+		ResponseHeaderTimeout: responseHeaderTimeout,
+		IdleConnTimeout:       idleConnTimeout,
+		ExpectContinueTimeout: expectContinueTimeout,
+		MaxIdleConns:          maxIdleConns,
+		MaxIdleConnsPerHost:   maxIdleConnsPerHost,
+		MaxConnsPerHost:       maxConnsPerHost,
 	}
 }
 
-// SetDefaults configures http.DefaultTransport with our TLS and connection settings,
-// and wraps it with logging. Must be called once at startup before any HTTP requests.
-func SetDefaults() {
-	transport, ok := http.DefaultTransport.(*http.Transport)
-	if !ok {
-		panic("http.DefaultTransport has already been wrapped or is not http.Transport")
+func (t *Transport) tls(level KeyExchange) *tls.Config {
+	config := &tls.Config{ // #nosec G402 -- Legacy is Go's own floor, and a request gets it only by name
+		RootCAs:      t.config.Roots,
+		Certificates: t.config.Certificates,
 	}
 
-	// Proxy configuration
-	transport.Proxy = http.ProxyFromEnvironment
-
-	// Dialer configuration
-	transport.DialContext = (&net.Dialer{
-		Timeout:   dialTimeout,
-		KeepAlive: dialKeepAlive,
-	}).DialContext
-
-	// Enable HTTP/2 - required when setting custom TLSClientConfig
-	transport.ForceAttemptHTTP2 = true
-
-	// Timeout configuration
-	transport.TLSHandshakeTimeout = tlsHandshakeTimeout
-	transport.ResponseHeaderTimeout = responseHeaderTimeout
-	transport.IdleConnTimeout = idleConnTimeout
-	transport.ExpectContinueTimeout = expectContinueTimeout
-
-	// Connection pool tuning - prevent connection churn
-	transport.MaxIdleConns = maxIdleConns
-	transport.MaxIdleConnsPerHost = maxIdleConnsPerHost
-	transport.MaxConnsPerHost = maxConnsPerHost
-
-	// TLS configuration
-	transport.TLSClientConfig = defaultTLSConfig()
-
-	// Store for cloning
-	defaultTransport = transport
-
-	// Wrap with logging for retry-worthy responses
-	//nolint:reassign // SetDefaults' contract: it installs the process-wide default transport
-	http.DefaultTransport = &RoundTripper{
-		Transport: transport,
+	switch level {
+	case HybridOnly:
+		config.MinVersion = tls.VersionTLS13
+		config.CurvePreferences = []tls.CurveID{tls.X25519MLKEM768, tls.SecP256r1MLKEM768, tls.SecP384r1MLKEM1024}
+	case Classical:
+		config.MinVersion = tls.VersionTLS13
+	case Legacy:
 	}
+
+	return config
+}
+
+// refused marks a TLS alert from the server, which reaches here as a
+// net.OpError of this operation: the alert type behind it is not exported.
+func refused(err error) error {
+	if opErr, ok := errors.AsType[*net.OpError](err); ok && opErr.Op == "remote error" {
+		return errors.Join(ErrHandshakeRefused, err)
+	}
+
+	return err
+}
+
+// watchedBody fails a read that waits longer than limit for a byte. The time
+// a caller takes between two reads is its own, and is not counted.
+type watchedBody struct {
+	io.ReadCloser
+
+	limit  time.Duration
+	timer  *time.Timer
+	ctx    context.Context //nolint:containedctx // the request's, kept to read why a read failed
+	cancel context.CancelCauseFunc
+}
+
+// watch wraps body. The timer is made here, stopped, and the field never
+// written again: a Close from another goroutine is how a caller gives up on
+// a read that blocks, and it reads the field while Read arms the timer.
+func watch(ctx context.Context, cancel context.CancelCauseFunc, body io.ReadCloser, limit time.Duration) *watchedBody {
+	timer := time.AfterFunc(time.Duration(math.MaxInt64), func() { cancel(ErrStalled) })
+	timer.Stop()
+
+	return &watchedBody{ReadCloser: body, limit: limit, timer: timer, ctx: ctx, cancel: cancel}
+}
+
+func (b *watchedBody) Read(buf []byte) (int, error) {
+	b.timer.Reset(b.limit)
+
+	read, err := b.ReadCloser.Read(buf)
+
+	b.timer.Stop()
+
+	if err != nil && errors.Is(context.Cause(b.ctx), ErrStalled) {
+		err = errors.Join(ErrStalled, err)
+	}
+
+	return read, err
+}
+
+func (b *watchedBody) Close() error {
+	b.timer.Stop()
+
+	err := b.ReadCloser.Close()
+
+	b.cancel(nil)
+
+	return err //nolint:wrapcheck // transparent wrapper
+}
+
+// handedOver is the connection a protocol switch gave the caller, which
+// releases the request's context when closed.
+type handedOver struct {
+	io.ReadWriteCloser
+
+	cancel context.CancelCauseFunc
+}
+
+func (h *handedOver) Close() error {
+	err := h.ReadWriteCloser.Close()
+
+	h.cancel(nil)
+
+	return err //nolint:wrapcheck // transparent wrapper
+}
+
+// Redirects is an http.Client.CheckRedirect that follows at most limit
+// redirects, and none from https to anything else. A redirect it lets
+// through is still the transport's to carry: one that leaves https fails
+// there with [ErrCleartext] unless the transport sends cleartext.
+func Redirects(limit int) func(*http.Request, []*http.Request) error {
+	return func(req *http.Request, via []*http.Request) error {
+		if len(via) > limit {
+			return fmt.Errorf("%w: more than %d", ErrRedirect, limit)
+		}
+
+		if req.URL.Scheme != https && via[len(via)-1].URL.Scheme == https {
+			return fmt.Errorf("%w: from https to %s://%s", ErrRedirect, req.URL.Scheme, req.URL.Host)
+		}
+
+		return nil
+	}
+}
+
+// NewClient returns an http.Client on a transport under config, following
+// redirects as [Redirects] does, DefaultRedirects of them.
+func NewClient(config Config) *http.Client {
+	return &http.Client{
+		Transport:     NewTransport(config),
+		CheckRedirect: Redirects(DefaultRedirects),
+	}
+}
+
+// SetDefaults makes a transport under config the process's
+// http.DefaultTransport, for a main whose libraries use http.DefaultClient.
+// Nothing in this module needs it.
+func SetDefaults(config Config) {
+	http.DefaultTransport = NewTransport(config) //nolint:reassign // its contract: it installs the process-wide default
+}
+
+// RetryStatusCodes is the HTTP statuses worth a retry, for a library that
+// takes such a list, as go-containerregistry's remote.WithRetryStatusCodes
+// does.
+//
+//nolint:gochecknoglobals // a list a caller passes on, which a constant cannot be
+var RetryStatusCodes = []int{
+	http.StatusTooManyRequests,
+	http.StatusInternalServerError,
+	http.StatusBadGateway,
+	http.StatusServiceUnavailable,
+	http.StatusGatewayTimeout,
 }

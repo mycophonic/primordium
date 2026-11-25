@@ -14,10 +14,17 @@
    limitations under the License.
 */
 
-// Package network is the process's network posture: SetDefaults hardens
-// http.DefaultTransport once at startup (TLS 1.3 with post-quantum hybrid key
-// exchange, timeouts, a bounded pool), NewTransport clones it for a client
-// that needs its own bearer token or TLS material, and GetClientConfig is the
-// matching SSH client posture (Curve25519 exchange, AEAD ciphers, ed25519
-// host keys).
+// Package network is a network posture a program or a library builds as a
+// value: NewTransport and NewClient make an HTTP transport and client under
+// it, with no global read or written.
+//
+// The baseline is the strictest setting, and whatever is weaker is asked for
+// by name: https only (Config.Cleartext), TLS 1.3 with a post-quantum hybrid
+// key exchange only (Classical and Legacy, per transport or per request with
+// WithKeyExchange), a token sent to the hosts it names only (Credential), no
+// redirect from https to anything else (Redirects), and a response body that
+// stops arriving fails its read (Config.StallTimeout).
+//
+// GetClientConfig is the matching SSH client posture (Curve25519 exchange,
+// AEAD ciphers, ed25519 host keys).
 package network
