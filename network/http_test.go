@@ -17,10 +17,17 @@
 package network_test
 
 import (
+	"bytes"
+	"context"
 	"crypto/tls"
+	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -138,12 +145,12 @@ func TestRoundTripper_TransportError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
-	url := server.URL
+	address := server.URL
 	server.Close()
 
 	client := &http.Client{Transport: network.NewTransport()}
 
-	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, url, http.NoBody)
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, address, http.NoBody)
 
 	resp, err := client.Do(req)
 	if resp != nil {
@@ -282,5 +289,185 @@ func TestSetDefaults_ConfiguresDefaultTransport(t *testing.T) {
 			transport.TLSClientConfig.MinVersion,
 			tls.VersionTLS13,
 		)
+	}
+}
+
+// TestRoundTripper_OneOriginSpelledTwoWays: a redirect to the origin the
+// caller asked keeps the token however it writes that origin: the host in
+// another case, the scheme's own port spelled out. One to another host name
+// on the same port, which is all that tells a registry from the storage it
+// redirects to, gets none. Every name dials the one server.
+func TestRoundTripper_OneOriginSpelledTwoWays(t *testing.T) {
+	t.Parallel()
+
+	const token = "Bearer for-the-first-host"
+
+	var landed atomic.Int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		want := token
+		if r.Host == "other.test" {
+			want = ""
+		}
+
+		if got := r.Header.Get("Authorization"); got != want {
+			t.Errorf("%s on %s got Authorization %q, want %q", r.URL.Path, r.Host, got, want)
+		}
+
+		switch r.URL.Path {
+		case "/name":
+			http.Redirect(w, r, "http://other.test/landed", http.StatusFound)
+		case "/case":
+			http.Redirect(w, r, "http://ZZ.TEST/landed", http.StatusFound)
+		case "/port":
+			http.Redirect(w, r, "http://zz.test:80/landed", http.StatusFound)
+		case "/landed":
+			landed.Add(1)
+		}
+	}))
+	defer server.Close()
+
+	rt := network.NewTransport()
+	rt.TokenValue = "for-the-first-host"
+	rt.Proxy = nil
+	rt.DialContext = func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "tcp", server.Listener.Addr().String())
+	}
+
+	client := &http.Client{Transport: rt}
+
+	for _, path := range []string{"/case", "/port", "/name"} {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://zz.test"+path, http.NoBody)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+
+		assert.Check(t, resp.Body.Close())
+	}
+
+	if landed.Load() != 3 {
+		t.Fatalf("%d of the 3 redirects were followed", landed.Load())
+	}
+}
+
+// TestRoundTripper_TokenStaysWithItsOrigin: the token goes to the origin the
+// caller asked, on every request to it, and to no other origin a redirect
+// leads to.
+func TestRoundTripper_TokenStaysWithItsOrigin(t *testing.T) {
+	t.Parallel()
+
+	const token = "Bearer for-the-first-host"
+
+	var elsewhere, sameOrigin atomic.Pointer[string]
+
+	// The other origin redirects once more within itself: the second
+	// request to it is no more the caller's origin than the first.
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization")
+		if got != "" {
+			t.Errorf("%s on the other origin got Authorization %q, want none", r.URL.Path, got)
+		}
+
+		if r.URL.Path == "/asset" {
+			http.Redirect(w, r, "/moved", http.StatusFound)
+
+			return
+		}
+
+		elsewhere.Store(&got)
+	}))
+	defer other.Close()
+
+	first := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := r.Header.Get("Authorization")
+		if got != token {
+			t.Errorf("%s on the first host got Authorization %q, want the token", r.URL.Path, got)
+		}
+
+		switch r.URL.Path {
+		case "/away":
+			http.Redirect(w, r, other.URL+"/asset", http.StatusFound)
+		case "/around":
+			http.Redirect(w, r, "/landed", http.StatusFound)
+		case "/landed":
+			sameOrigin.Store(&got)
+		}
+	}))
+	defer first.Close()
+
+	rt := network.NewTransport()
+	rt.TokenValue = "for-the-first-host"
+
+	client := &http.Client{Transport: rt}
+
+	for _, path := range []string{"/away", "/around"} {
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, first.URL+path, http.NoBody)
+
+		resp, err := client.Do(req)
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+
+		assert.Check(t, resp.Body.Close())
+	}
+
+	switch got := elsewhere.Load(); {
+	case got == nil:
+		t.Error("the redirect to another origin was not followed")
+	case *got != "":
+		t.Errorf("a redirect to another origin carried Authorization %q, want none", *got)
+	}
+
+	switch got := sameOrigin.Load(); {
+	case got == nil:
+		t.Error("the redirect within the origin was not followed")
+	case *got != token:
+		t.Errorf("a redirect within the origin carried Authorization %q, want the token", *got)
+	}
+}
+
+// TestRoundTripper_LogsNoCredential: what is logged of a request's URL has
+// neither its user information nor its query. slog's default is swapped for
+// the test, which is why it does not run in parallel.
+func TestRoundTripper_LogsNoCredential(t *testing.T) { //nolint:paralleltest // slog's default is process-wide
+	var said bytes.Buffer
+
+	previous := slog.Default()
+
+	slog.SetDefault(slog.New(slog.NewTextHandler(&said, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	target, err := url.Parse(server.URL + "/blob?X-Amz-Signature=secret-in-the-query")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	target.User = url.UserPassword("user", "secret-in-the-userinfo")
+
+	client := &http.Client{Transport: network.NewTransport()}
+
+	req, _ := http.NewRequestWithContext(t.Context(), http.MethodGet, target.String(), http.NoBody)
+
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	assert.Check(t, resp.Body.Close())
+
+	logged := said.String()
+	if !strings.Contains(logged, "/blob") {
+		t.Fatalf("the request was not logged: %q", logged)
+	}
+
+	if strings.Contains(logged, "secret-in") {
+		t.Fatalf("a credential was logged: %q", logged)
 	}
 }

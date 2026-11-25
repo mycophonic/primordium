@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/mycophonic/primordium/fault"
+	"github.com/mycophonic/primordium/network/internal/redact"
 )
 
 // retryTransport is an http.RoundTripper that adds concurrency limiting,
@@ -185,6 +186,10 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 		retryAfterVal time.Duration
 	)
 
+	// What the logs below hold of the URL: a signed URL's query is a
+	// credential, and so is a password in it.
+	target := redact.URL(req.URL)
+
 	for attempt := range t.maxRetries + 1 {
 		if attempt > 0 {
 			backoff := max(retryAfterVal, t.backoffDuration(attempt))
@@ -220,7 +225,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			if permanent(err) {
 				slog.WarnContext(req.Context(), "HTTP transport error, not retried: it cannot change",
 					"error", err,
-					"url", req.URL.String(),
+					"url", target,
 				)
 
 				return nil, lastErr
@@ -232,7 +237,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				"token_wait", tokenWait,
 				"delay", t.backoffDuration(attempt+1).String(),
 				"error", err,
-				"url", req.URL.String(),
+				"url", target,
 			)
 
 			continue
@@ -242,7 +247,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			"status", resp.StatusCode,
 			"elapsed", elapsed,
 			"token_wait", tokenWait,
-			"url", req.URL.String(),
+			"url", target,
 		)
 
 		// 401 is not among them: this client attaches no credential and has no
@@ -254,13 +259,13 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				slog.WarnContext(req.Context(), "slow HTTP request",
 					"elapsed", elapsed,
 					"status", resp.StatusCode,
-					"url", req.URL.String(),
+					"url", target,
 				)
 			}
 
 			resp.Body = &progressBody{
 				ReadCloser: resp.Body,
-				url:        req.URL.String(),
+				url:        target,
 				start:      time.Now(),
 				totalSize:  resp.ContentLength,
 			}
@@ -277,7 +282,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			slog.WarnContext(req.Context(), "HTTP retries exhausted",
 				"status", resp.StatusCode,
 				"attempts", t.maxRetries+1,
-				"url", req.URL.String(),
+				"url", target,
 			)
 
 			break
@@ -290,7 +295,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				"status", resp.StatusCode,
 				"retry_after", retryAfterVal,
 				"max", t.maxBackoff,
-				"url", req.URL.String(),
+				"url", target,
 			)
 
 			break
@@ -304,7 +309,7 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 			"elapsed", elapsed,
 			"token_wait", tokenWait,
 			"delay", nextBackoff.String(),
-			"url", req.URL.String(),
+			"url", target,
 		)
 	}
 

@@ -22,7 +22,11 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"slices"
+	"strings"
+
+	"github.com/mycophonic/primordium/network/internal/redact"
 )
 
 // defaultTransport holds the configured transport before any wrapping.
@@ -61,6 +65,9 @@ func init() {
 // RoundTripper wraps *http.Transport with auth header injection and
 // logging for retryable responses. Callers can modify TLSClientConfig
 // directly via the embedded transport (e.g., custom CAs, client certs).
+//
+// The token is for the origin the caller asks: its scheme, host and port. A
+// redirect the client follows to another origin gets no token.
 type RoundTripper struct {
 	*http.Transport
 
@@ -88,7 +95,7 @@ func NewTransport() *RoundTripper {
 
 // RoundTrip implements http.RoundTripper.
 func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
-	if rt.TokenValue != "" {
+	if rt.TokenValue != "" && !redirectedElsewhere(req) {
 		// Ensure we don't leak that if the req is getting reused.
 		req = req.Clone(req.Context())
 		req.Header.Set("Authorization", fmt.Sprintf("%s %s", rt.TokenType, rt.TokenValue))
@@ -101,12 +108,51 @@ func (rt *RoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
 
 	if reason, isRetryable := retryReasons[resp.StatusCode]; isRetryable {
 		slog.DebugContext(req.Context(), "HTTP request received retryable status",
-			slog.String("url", req.URL.String()),
+			slog.String("url", redact.URL(req.URL)),
 			slog.Int("status", resp.StatusCode),
 			slog.String("reason", reason))
 	}
 
 	return resp, nil
+}
+
+// redirectedElsewhere reports a request the client made by following a
+// redirect to an origin other than the one the caller asked. net/http drops
+// the caller's own Authorization header there, and a transport that adds one
+// back hands the token to whoever the first host pointed at.
+func redirectedElsewhere(req *http.Request) bool {
+	asked := req
+
+	// Response is set on a request made for a redirect, to the response that
+	// caused it.
+	for asked.Response != nil && asked.Response.Request != nil {
+		asked = asked.Response.Request
+	}
+
+	return !sameOrigin(asked.URL, req.URL)
+}
+
+// sameOrigin compares two URLs as origins: the scheme, the host name
+// whatever its case, and the port, the scheme's own when none is written.
+func sameOrigin(one, other *url.URL) bool {
+	return one.Scheme == other.Scheme &&
+		strings.EqualFold(one.Hostname(), other.Hostname()) &&
+		portOf(one) == portOf(other)
+}
+
+func portOf(target *url.URL) string {
+	if written := target.Port(); written != "" {
+		return written
+	}
+
+	switch target.Scheme {
+	case "https":
+		return "443"
+	case "http":
+		return "80"
+	default:
+		return ""
+	}
 }
 
 // defaultTLSConfig returns the TLS configuration used for all transports.
