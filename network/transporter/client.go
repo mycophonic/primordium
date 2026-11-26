@@ -26,7 +26,7 @@ import (
 type Options struct {
 	Parallelism    int           // Max concurrent in-flight requests (0 = unlimited).
 	MaxPerSecond   int           // Rate limit (0 = unlimited).
-	MaxRetries     int           // Retries on 5xx, 429 and transport errors that can change; a TLS alert, an untrusted certificate, a host that does not resolve and a body without GetBody are not retried.
+	MaxRetries     int           // Retries of an idempotent request (GET, HEAD, OPTIONS, TRACE, PUT, DELETE, or one with an Idempotency-Key or X-Idempotency-Key header) on 5xx, 429 and transport errors that can change; any other request is sent once, unless no connection could be made, and a 5xx or a 429 is the same error for it; a TLS alert, an untrusted certificate, a host that does not resolve and a body without GetBody are not retried.
 	InitialBackoff time.Duration // Doubles each retry with ±25% jitter.
 	MaxBackoff     time.Duration // Cap on Retry-After values; anything beyond is treated as failure.
 	UserAgent      string
@@ -46,10 +46,8 @@ type Options struct {
 //
 // The client has a connection pool of its own, configured as
 // http.DefaultTransport is at the client's first request. Closing its idle
-// connections closes no other client's.
-//
-// If MaxPerSecond > 0, a background goroutine is started for rate limiting.
-// Call CloseIdleConnections on the returned client when done to stop it.
+// connections closes no other client's, and leaves this one as usable as
+// before: it runs nothing in the background.
 func NewClient(opts Options) *http.Client {
 	return &http.Client{
 		Transport: newRetryTransport(opts),

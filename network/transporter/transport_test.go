@@ -613,7 +613,7 @@ func TestBodyResentOnRetry(t *testing.T) {
 	})
 
 	req, err := http.NewRequestWithContext(
-		t.Context(), http.MethodPost, back.url,
+		t.Context(), http.MethodPut, back.url,
 		bytes.NewReader([]byte(bodyContent)),
 	)
 	assert.NilError(t, err)
@@ -921,35 +921,75 @@ func TestLegacyTLS(t *testing.T) {
 	assert.DeepEqual(t, configured.TLSClientConfig.CurvePreferences, curves)
 }
 
-func TestCloseIdleConnectionsStopsRateLimiter(t *testing.T) {
+// TestAbandonedWaitsHoldNoSlot: requests that give up waiting for the rate
+// limiter leave nothing behind them: the next request goes at the rate's
+// pace, not after a slot for each of them.
+func TestAbandonedWaitsHoldNoSlot(t *testing.T) {
 	t.Parallel()
 
-	back := newBackend(t, status(http.StatusOK))
-	client := newClient(t, transporter.Options{
-		MaxPerSecond: 1,
-		MaxRetries:   0,
-	})
+	const (
+		perSecond = 10
+		waiters   = 100
+	)
 
-	// Consume pre-filled token.
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{MaxPerSecond: perSecond})
+
+	abandoned, cancel := context.WithCancel(t.Context())
+
+	var left sync.WaitGroup
+
+	for range waiters {
+		left.Go(func() {
+			resp, err := doGet(abandoned, t, client, back.url)
+			if err == nil {
+				_ = resp.Body.Close()
+			}
+		})
+	}
+
+	time.Sleep(250 * time.Millisecond)
+	cancel()
+	left.Wait()
+
+	start := time.Now()
+
 	resp, err := doGet(t.Context(), t, client, back.url)
 	assert.NilError(t, err)
 	assert.Check(t, resp.Body.Close())
 
-	// Stop the rate limiter.
-	client.CloseIdleConnections()
+	// A slot kept for each of the hundred would be ten seconds.
+	assert.Assert(t, time.Since(start) < 2*time.Second, "the next request waited %v", time.Since(start))
+}
 
-	// After stopping, no new tokens are produced. A request with a short
-	// timeout should fail because no token arrives.
-	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
-	defer cancel()
+func TestCloseIdleConnectionsLeavesTheClientUsable(t *testing.T) {
+	t.Parallel()
 
-	resp, err = doGet(ctx, t, client, back.url)
-	if resp != nil {
+	back := newBackend(t, status(http.StatusOK))
+	client := newClient(t, transporter.Options{MaxPerSecond: 1000})
+
+	for range 3 {
+		resp, err := doGet(t.Context(), t, client, back.url)
+		assert.NilError(t, err)
 		assert.Check(t, resp.Body.Close())
 	}
 
-	assert.Assert(t, errors.Is(err, fault.ErrCancelled))
-	assert.Equal(t, back.calls.Load(), int32(1))
+	// Closing idle connections is not the end of an http.Client: a pool
+	// manager or a test helper does it in the middle of one's life.
+	client.CloseIdleConnections()
+
+	for range 3 {
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+
+		resp, err := doGet(ctx, t, client, back.url)
+
+		cancel()
+
+		assert.NilError(t, err)
+		assert.Check(t, resp.Body.Close())
+	}
+
+	assert.Equal(t, back.calls.Load(), int32(6))
 }
 
 // --- Backoff duration ---

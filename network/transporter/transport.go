@@ -42,8 +42,7 @@ type retryTransport struct {
 	base        func() http.RoundTripper // ownTransport, taken at the first request
 	baseTaken   atomic.Bool              // base has been called
 	sem         chan struct{}            // parallelism semaphore; nil = unlimited
-	limiter     chan struct{}            // rate limiter tokens; nil = unlimited
-	stopLimiter context.CancelFunc
+	limiter     *limiter                 // nil = unlimited
 	maxRetries  int
 	initBackoff time.Duration
 	maxBackoff  time.Duration
@@ -71,13 +70,8 @@ func newRetryTransport(opts Options) *retryTransport {
 	}
 
 	if opts.MaxPerSecond > 0 {
-		transport.limiter = make(chan struct{}, 1)
-		transport.limiter <- struct{}{} // Pre-fill so the first request doesn't wait for a tick.
-
-		ctx, cancel := context.WithCancel(context.Background())
-		transport.stopLimiter = cancel
-
-		go transport.refill(ctx, opts.MaxPerSecond)
+		// A rate past one per nanosecond is one per nanosecond.
+		transport.limiter = &limiter{interval: max(time.Second/time.Duration(opts.MaxPerSecond), time.Nanosecond)}
 	}
 
 	return transport
@@ -114,11 +108,19 @@ func ownTransport(legacyTLS bool) http.RoundTripper {
 
 // RoundTrip implements http.RoundTripper.
 func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// A RoundTripper leaves the caller's request as it is: the header added
+	// here and the body a retry rewinds are a copy's. Not Request.Clone: it
+	// copies Trailer, which the caller fills while the body is read and the
+	// transport reads from the request it was given.
+	ctx := req.Context()
+	req = req.WithContext(ctx)
+	req.Header = req.Header.Clone()
+
 	if t.userAgent != "" && req.Header.Get("User-Agent") == "" {
 		req.Header.Set("User-Agent", t.userAgent)
 	}
 
-	if err := t.acquireSem(req.Context()); err != nil {
+	if err := t.acquireSem(ctx); err != nil {
 		return nil, err
 	}
 
@@ -129,13 +131,9 @@ func (t *retryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	return t.retryLoop(req)
 }
 
-// CloseIdleConnections stops the rate limiter goroutine and forwards to the
-// base transport. Called by net/http.Client.CloseIdleConnections.
+// CloseIdleConnections forwards to the base transport. Called by
+// net/http.Client.CloseIdleConnections.
 func (t *retryTransport) CloseIdleConnections() {
-	if t.stopLimiter != nil {
-		t.stopLimiter()
-	}
-
 	// Before the first request there is no connection to close, and calling
 	// base would take the clone before network.SetDefaults may have run.
 	if !t.baseTaken.Load() {
@@ -171,12 +169,55 @@ func (t *retryTransport) waitForToken(ctx context.Context) (time.Duration, error
 
 	start := time.Now()
 
-	select {
-	case <-t.limiter:
-		return time.Since(start), nil
-	case <-ctx.Done():
-		return 0, fmt.Errorf("%w: %w", fault.ErrCancelled, ctx.Err())
+	for {
+		wait := t.limiter.take()
+		if wait <= 0 {
+			return time.Since(start), nil
+		}
+
+		timer := time.NewTimer(wait)
+
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+
+			return 0, fmt.Errorf("%w: %w", fault.ErrCancelled, ctx.Err())
+		}
 	}
+}
+
+// limiter spaces requests an interval apart, with no burst. It is computed
+// from the clock: nothing runs between two requests, so there is nothing to
+// start and nothing a CloseIdleConnections could stop.
+type limiter struct {
+	mu       sync.Mutex
+	interval time.Duration
+	next     time.Time // when the next request may go
+}
+
+// take gives the caller the slot when its time has come, and returns zero;
+// before that it takes nothing and returns how long until then. A slot is
+// never held for a caller that waits: one that leaves, its context done,
+// leaves nothing behind for the others to wait on.
+func (l *limiter) take() time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	now := time.Now()
+	if wait := l.next.Sub(now); wait > 0 {
+		return wait
+	}
+
+	// From the slot's own time when it was just missed, so that late wakings
+	// do not add up; from now after an idle stretch, so that it buys no burst.
+	if now.Sub(l.next) > l.interval {
+		l.next = now
+	}
+
+	l.next = l.next.Add(l.interval)
+
+	return 0
 }
 
 //nolint:gocognit // one retry protocol, read top to bottom: wait, attempt, classify, decide
@@ -231,6 +272,17 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 				return nil, lastErr
 			}
 
+			// The request may have reached the server before the error did,
+			// unless the error is the dial's: nothing was sent then.
+			if !replayable(req) && !unsent(err) {
+				slog.WarnContext(req.Context(), "HTTP transport error, not retried: the request is not idempotent",
+					"error", err,
+					"url", target,
+				)
+
+				return nil, lastErr
+			}
+
 			slog.WarnContext(req.Context(), "HTTP transport error, retrying",
 				"attempt", attempt+1,
 				"elapsed", elapsed,
@@ -278,6 +330,17 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 
 		lastErr = fmt.Errorf("%w: HTTP %d", fault.ErrUnacceptableResponse, resp.StatusCode)
 
+		// The server may have acted on the request before it answered: the
+		// answer is the error it is for any request, and it is not sent again.
+		if !replayable(req) {
+			slog.WarnContext(req.Context(), "HTTP error, not retried: the request is not idempotent",
+				"status", resp.StatusCode,
+				"url", target,
+			)
+
+			break
+		}
+
 		if attempt == t.maxRetries {
 			slog.WarnContext(req.Context(), "HTTP retries exhausted",
 				"status", resp.StatusCode,
@@ -316,25 +379,30 @@ func (t *retryTransport) retryLoop(req *http.Request) (*http.Response, error) {
 	return nil, lastErr
 }
 
-// refill sends a token into the limiter channel at the configured rate. A
-// rate past one per nanosecond is one per nanosecond: a ticker refuses zero.
-func (t *retryTransport) refill(ctx context.Context, maxPerSecond int) {
-	interval := max(time.Second/time.Duration(maxPerSecond), time.Nanosecond)
-	ticker := time.NewTicker(interval)
+// replayable reports a request that sent twice does what it does sent once:
+// a method RFC 9110 defines as idempotent, or a request that says so itself
+// with an idempotency key, the two headers net/http reads before it replays
+// one. As there, the key's presence is what counts: one with no value marks
+// the request and sends no header.
+func replayable(req *http.Request) bool {
+	switch req.Method {
+	case "", http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace,
+		http.MethodPut, http.MethodDelete:
+		return true
+	default:
+		_, key := req.Header["Idempotency-Key"]
+		_, legacy := req.Header["X-Idempotency-Key"]
 
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			select {
-			case t.limiter <- struct{}{}:
-			default: // Drop token if buffer full (no bursting).
-			}
-		}
+		return key || legacy
 	}
+}
+
+// unsent reports a transport error that came before anything was sent: the
+// connection could not be made.
+func unsent(err error) bool {
+	opErr, ok := errors.AsType[*net.OpError](err)
+
+	return ok && opErr.Op == "dial"
 }
 
 // permanent reports a transport error that no retry can change for the life

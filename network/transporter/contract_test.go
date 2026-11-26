@@ -205,7 +205,7 @@ func TestBodyNotReplayable(t *testing.T) {
 	// io.NopCloser hides the Reader from NewRequest, which sets GetBody only for the types it knows.
 	req, err := http.NewRequestWithContext(
 		t.Context(),
-		http.MethodPost,
+		http.MethodPut,
 		back.url,
 		io.NopCloser(strings.NewReader("payload")),
 	)
@@ -247,7 +247,7 @@ func TestBodyReplayable(t *testing.T) {
 
 	client := newClient(t, transporter.Options{MaxRetries: 2})
 
-	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, back.url, bytes.NewReader([]byte("payload")))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, back.url, bytes.NewReader([]byte("payload")))
 	assert.NilError(t, err)
 
 	resp, err := client.Do(req)
@@ -406,6 +406,162 @@ func TestTLSAlertNotRetried(t *testing.T) { //nolint:paralleltest // http.Defaul
 
 	assert.ErrorContains(t, err, "protocol version not supported")
 	assert.Equal(t, connections.Load(), int32(1))
+}
+
+// TestCallersRequestIsLeftAlone: the User-Agent the client adds and the body
+// a retry rewinds are not the caller's request's: after the exchange it has
+// the headers and the body it was given. What the caller sets on its request
+// while the body is read, a trailer, still reaches the server.
+func TestCallersRequestIsLeftAlone(t *testing.T) {
+	t.Parallel()
+
+	var agents []string
+
+	back := newBackend(t, func(w http.ResponseWriter, r *http.Request, call int32) {
+		agents = append(agents, r.Header.Get("User-Agent"))
+
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		if call == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	})
+
+	client := newClient(t, transporter.Options{UserAgent: "probe/1", MaxRetries: 1, InitialBackoff: time.Millisecond})
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPut, back.url, strings.NewReader("payload"))
+	assert.NilError(t, err)
+
+	body := req.Body
+
+	resp, err := client.Do(req)
+	assert.NilError(t, err)
+	assert.Check(t, resp.Body.Close())
+
+	assert.DeepEqual(t, agents, []string{"probe/1", "probe/1"})
+	assert.Equal(t, req.Header.Get("User-Agent"), "")
+	assert.Assert(t, req.Body == body, "the retry replaced the caller's body")
+
+	var trailer atomic.Value
+
+	summing := newBackend(t, func(_ http.ResponseWriter, r *http.Request, _ int32) {
+		_, _ = io.Copy(io.Discard, r.Body)
+
+		trailer.Store(r.Trailer.Get("X-Sum"))
+	})
+
+	streamed, err := http.NewRequestWithContext(t.Context(), http.MethodPut, summing.url, http.NoBody)
+	assert.NilError(t, err)
+
+	streamed.Trailer = http.Header{"X-Sum": nil}
+	streamed.Body = io.NopCloser(readerFunc(func(buf []byte) (int, error) {
+		if streamed.Trailer.Get("X-Sum") != "" {
+			return 0, io.EOF
+		}
+
+		// Set as the body ends, as a caller that sums what it sends does.
+		streamed.Trailer.Set("X-Sum", "computed-while-streaming")
+
+		return copy(buf, "payload"), nil
+	}))
+
+	resp, err = client.Do(streamed)
+	assert.NilError(t, err)
+	assert.Check(t, resp.Body.Close())
+
+	assert.Equal(t, trailer.Load(), any("computed-while-streaming"))
+}
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(buf []byte) (int, error) { return f(buf) }
+
+// TestOnlyAnIdempotentRequestIsReplayed: a request the server may have acted
+// on is sent once, whatever it answers and however the connection ends; an
+// idempotent method, or an idempotency key on the request, with a value or
+// without, is what makes a second sending safe. Sent once or three times, a
+// 500 and a 429 are the same error.
+func TestOnlyAnIdempotentRequestIsReplayed(t *testing.T) {
+	t.Parallel()
+
+	for name, attempt := range map[string]struct {
+		method string
+		key    string
+		value  []string
+		sent   int32
+	}{
+		"GET":                           {http.MethodGet, "", nil, 3},
+		"PUT":                           {http.MethodPut, "", nil, 3},
+		"DELETE":                        {http.MethodDelete, "", nil, 3},
+		"POST":                          {http.MethodPost, "", nil, 1},
+		"PATCH":                         {http.MethodPatch, "", nil, 1},
+		"POST, Idempotency-Key":         {http.MethodPost, "Idempotency-Key", []string{"once"}, 3},
+		"POST, X-Idempotency-Key":       {http.MethodPost, "X-Idempotency-Key", []string{"once"}, 3},
+		"POST, a key that has no value": {http.MethodPost, "Idempotency-Key", []string{}, 3},
+	} {
+		for how, failure := range map[string]struct {
+			handler func(http.ResponseWriter, *http.Request, int32)
+			want    error
+		}{
+			"a 500": {status(http.StatusInternalServerError), fault.ErrUnacceptableResponse},
+			"a 429": {status(http.StatusTooManyRequests), fault.ErrUnacceptableResponse},
+			"a connection cut": {
+				func(w http.ResponseWriter, _ *http.Request, _ int32) { hangUp(t, w) },
+				fault.ErrNetworkCommunication,
+			},
+		} {
+			t.Run(name+", "+how, func(t *testing.T) {
+				t.Parallel()
+
+				back := newBackend(t, failure.handler)
+				client := newClient(t, transporter.Options{MaxRetries: 2, InitialBackoff: time.Millisecond})
+
+				req, err := http.NewRequestWithContext(
+					t.Context(), attempt.method, back.url, strings.NewReader("payload"),
+				)
+				assert.NilError(t, err)
+
+				if attempt.key != "" {
+					req.Header[attempt.key] = attempt.value
+				}
+
+				resp, err := client.Do(req)
+				if resp != nil {
+					_ = resp.Body.Close()
+				}
+
+				assert.ErrorIs(t, err, failure.want)
+				assert.Equal(t, back.calls.Load(), attempt.sent)
+			})
+		}
+	}
+}
+
+// TestADialThatFailedIsRetried: when no connection could be made nothing was
+// sent, and a request that is not idempotent is tried again like any other.
+func TestADialThatFailedIsRetried(t *testing.T) {
+	t.Parallel()
+
+	gone := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	gone.Close()
+
+	var dials atomic.Int32
+
+	trace := &httptrace.ClientTrace{ConnectStart: func(string, string) { dials.Add(1) }}
+	client := newClient(t, transporter.Options{MaxRetries: 2, InitialBackoff: time.Millisecond})
+
+	req, err := http.NewRequestWithContext(
+		httptrace.WithClientTrace(t.Context(), trace), http.MethodPost, gone.URL, strings.NewReader("payload"),
+	)
+	assert.NilError(t, err)
+
+	resp, err := client.Do(req)
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+
+	assert.ErrorIs(t, err, fault.ErrNetworkCommunication)
+	assert.Equal(t, dials.Load(), int32(3))
 }
 
 // TestUnknownHostNotRetried: a name that does not resolve is asked once. The
