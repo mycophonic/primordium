@@ -11,7 +11,7 @@ require (
 	github.com/forkcloser/compress v0.3.0
 	github.com/forkcloser/xos v0.1.2
 	github.com/getsentry/sentry-go v0.50.0
-	github.com/johannesboyne/gofakes3 v1.2.0
+	github.com/johannesboyne/gofakes3 v1.3.0
 	github.com/lmittmann/tint v1.2.1
 	github.com/mattn/go-isatty v0.0.24
 	golang.org/x/crypto v0.59.0
