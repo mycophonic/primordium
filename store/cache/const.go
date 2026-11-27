@@ -27,7 +27,11 @@ const (
 	cacheDataFileTemp = "_data"
 	cacheLockFile     = "lock.read"
 	cacheWriteLock    = "lock.write"
-	cachePollInterval = 10 * time.Millisecond
+	// cacheShardLock is a shard's lock file, among its entries: no digest
+	// spells it. cacheEntryLockSuffix makes an entry's, beside the entry.
+	cacheShardLock       = ".lock"
+	cacheEntryLockSuffix = ".lock"
+	cachePollInterval    = 10 * time.Millisecond
 
 	// DefaultCacheQuota is the default disk space quota for the cache (50 GiB).
 	DefaultCacheQuota = 50 * bytesize.GiB

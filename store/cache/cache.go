@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -76,71 +77,60 @@ func (c *Cache) Acquire(dgst digest.Digest) (io.ReadCloser, io.WriteCloser, erro
 	readLockPath := filepath.Join(resourceDir, cacheLockFile)
 	writeLockPath := filepath.Join(resourceDir, cacheWriteLock)
 
-	// Step 1: Acquire EXCLUSIVE global lock
-	if err := os.MkdirAll(filepath.Join(c.rootDir, prefix), filesystem.DirPermissionsPrivate); err != nil {
+	// Step 1: Acquire EXCLUSIVE global lock, on the shard made with its lock
+	// file.
+	shardDir := filepath.Join(c.rootDir, prefix)
+	if err := os.MkdirAll(shardDir, filesystem.DirPermissionsPrivate); err != nil {
 		return nil, nil, fmt.Errorf("%w: cache rootDir: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	globalLock, err := flock.Lock(filepath.Join(c.rootDir, prefix))
+	if err := makeLockFiles(shardLockPath(shardDir)); err != nil {
+		return nil, nil, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	globalLock, err := flock.Exclusive(shardLockPath(shardDir))
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	// Step 2: Create directory XYZ
-	if err = os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err != nil {
-		_ = flock.Unlock(globalLock)
+	// Step 2: Create directory XYZ, with its lock files
+	if err = os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err == nil {
+		err = makeLockFiles(entryLockPath(resourceDir), readLockPath, writeLockPath)
+	}
+
+	if err != nil {
+		_ = globalLock.Unlock()
 
 		return nil, nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
 	}
 
-	// Step 3: Acquire EXCLUSIVE lock on XYZ
-	dirLock, err := flock.Lock(resourceDir)
-	_ = flock.Unlock(globalLock)
+	// Step 3: Acquire EXCLUSIVE lock on XYZ. The global lock is held until
+	// then: an eviction takes it too, so the directory just created is still
+	// there once its lock is held.
+	dirLock, err := flock.Exclusive(entryLockPath(resourceDir))
+	_ = globalLock.Unlock()
 
 	if err != nil {
 		return nil, nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
 	}
 
-	// Guard: concurrent GC may have deleted resourceDir between MkdirAll
-	// (step 2) and flock.Lock (step 3). On Unix the lock succeeds on the
-	// deleted inode, but path-based operations inside the directory fail.
-	// Detect and recover by re-creating the directory and re-locking.
-	if _, statErr := xos.Stat(resourceDir); statErr != nil {
-		_ = flock.Unlock(dirLock)
-
-		if mkErr := os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); mkErr != nil {
-			return nil, nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, mkErr)
-		}
-
-		dirLock, err = flock.Lock(resourceDir)
-		if err != nil {
-			return nil, nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
-		}
-	}
-
-	// Step 4: Touch XYZ/lock, acquire READ lock on it (for GC protection)
-	if err = touchFile(readLockPath); err != nil {
-		_ = flock.Unlock(dirLock)
-
-		return nil, nil, fmt.Errorf("%w: lock file: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	lockFile, err := flock.ReadOnlyLock(readLockPath)
+	// Step 4: Acquire READ lock on XYZ/lock (for GC protection)
+	lockFile, err := flock.Shared(readLockPath)
 	if err != nil {
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
 		return nil, nil, fmt.Errorf("%w: read lock: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	// Step 5: TryLock on writeLock to determine if a writer is active
-	if err := touchFile(writeLockPath); err != nil {
-		_ = flock.Unlock(lockFile)
-		_ = flock.Unlock(dirLock)
+	// Step 5: TryExclusive on writeLock to determine if a writer is active.
+	// Only a held lock is a writer; anything else is a fault.
+	writeLock, tryLockErr := flock.TryExclusive(writeLockPath)
+	if tryLockErr != nil && !errors.Is(tryLockErr, flock.ErrLockWouldBlock) {
+		_ = lockFile.Unlock()
+		_ = dirLock.Unlock()
 
-		return nil, nil, fmt.Errorf("%w: write lock file: %w", fault.ErrFilesystemFailure, err)
+		return nil, nil, fmt.Errorf("%w: write lock: %w", fault.ErrFilesystemFailure, tryLockErr)
 	}
-
-	writeLock, tryLockErr := flock.TryLock(writeLockPath)
 
 	// Case 1: No active writer (we got the writeLock)
 	if tryLockErr == nil {
@@ -173,13 +163,13 @@ type PinnedFile struct {
 	// Size is the byte length of the file at Path.
 	Size int64
 
-	lockFile *os.File
+	lockFile *flock.Lock
 }
 
 // Release drops the pin. The path must not be used afterwards.
 func (p *PinnedFile) Release() error {
 	//nolint:wrapcheck // single flock call; context adds nothing
-	return flock.Unlock(p.lockFile)
+	return p.lockFile.Unlock()
 }
 
 // AcquireFile returns COMPLETE cached content as a GC-pinned on-disk file.
@@ -193,8 +183,6 @@ func (p *PinnedFile) Release() error {
 // same shared read flock a reader holds, so GarbageCollect skips the entry
 // while the pin is outstanding.
 // A zero digest is ErrInvalidArgument.
-//
-//nolint:gocognit // the pin protocol: its checks are ordered and read as one
 func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 	if dgst.IsZero() {
 		return nil, fmt.Errorf("%w: zero digest", fault.ErrInvalidArgument)
@@ -208,79 +196,45 @@ func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 	writeLockPath := filepath.Join(resourceDir, cacheWriteLock)
 
 	// Fast miss, decided WITHOUT locks: this function never creates entries,
-	// so an absent entry directory is a definitive miss. It must not be
-	// derived from the lock ladder failing — flock.Lock on a missing path
-	// fails on Unix (it opens the directory itself) but SUCCEEDS on Windows
-	// (it locks a sibling file it creates on demand), which turned this miss
-	// into a mid-ladder filesystem error there. Locklessness is sound in
-	// both directions: a stale positive is re-verified by the data-file stat
-	// under the locks below, and a stale negative is the same answer a
-	// locked probe would have returned a moment earlier.
+	// so an absent entry directory is a definitive miss. Locklessness is
+	// sound in both directions: a stale positive meets a lock file that is
+	// gone below, and a stale negative is the same answer a locked probe
+	// would have returned a moment earlier.
 	if _, err := xos.Stat(resourceDir); err != nil {
 		return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
 	}
 
 	// Same lock ladder as Acquire (global → entry dir → read lock → write
-	// probe); see Acquire for the step-by-step rationale.
-	if err := os.MkdirAll(filepath.Join(c.rootDir, prefix), filesystem.DirPermissionsPrivate); err != nil {
-		return nil, fmt.Errorf("%w: cache rootDir: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	globalLock, err := flock.Lock(filepath.Join(c.rootDir, prefix))
+	// probe); see Acquire for the step-by-step rationale. This function
+	// makes no lock file: one that is missing is an entry evicted since the
+	// stat above, or never made.
+	globalLock, err := flock.Exclusive(shardLockPath(filepath.Join(c.rootDir, prefix)))
 	if err != nil {
-		return nil, fmt.Errorf("%w: global: %w", fault.ErrFilesystemFailure, err)
+		return nil, absent(err, "global", dgst)
 	}
 
-	dirLock, err := flock.Lock(resourceDir)
-	_ = flock.Unlock(globalLock)
+	dirLock, err := flock.Exclusive(entryLockPath(resourceDir))
+	_ = globalLock.Unlock()
 
 	if err != nil {
-		// Concurrent GC may have deleted the entry between the stat above
-		// and here (Unix surfaces that as a failed lock).
-		if _, statErr := xos.Stat(resourceDir); statErr != nil {
-			return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
-		}
-
-		return nil, fmt.Errorf(errFmtEntryDir, fault.ErrFilesystemFailure, err)
+		return nil, absent(err, "entry directory", dgst)
 	}
 
-	if err = touchFile(readLockPath); err != nil {
-		_ = flock.Unlock(dirLock)
-
-		// Same GC race, as Windows surfaces it: the sibling-file lock above
-		// succeeds even when the entry directory is gone, so the deletion is
-		// only discovered here, creating the read-lock file inside it.
-		if _, statErr := xos.Stat(resourceDir); statErr != nil {
-			return nil, fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
-		}
-
-		return nil, fmt.Errorf("%w: lock file: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	lockFile, err := flock.ReadOnlyLock(readLockPath)
+	lockFile, err := flock.Shared(readLockPath)
 	if err != nil {
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
-		return nil, fmt.Errorf("%w: read lock: %w", fault.ErrFilesystemFailure, err)
+		return nil, absent(err, "read lock", dgst)
 	}
 
 	pin := &PinnedFile{lockFile: lockFile}
 
 	// An active writer means the data file (if present at all) is a stale
-	// name for in-flight bytes: refuse rather than expose it. Touch first,
-	// like Acquire's step 5 — on Unix TryLock opens the path itself, so a
-	// missing lock file would read as a probe failure rather than a free lock.
-	if err := touchFile(writeLockPath); err != nil {
-		_ = pin.Release()
-		_ = flock.Unlock(dirLock)
-
-		return nil, fmt.Errorf("%w: write lock file: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	writeLock, tryLockErr := flock.TryLock(writeLockPath)
+	// name for in-flight bytes: refuse rather than expose it.
+	writeLock, tryLockErr := flock.TryExclusive(writeLockPath)
 	if tryLockErr != nil {
 		_ = pin.Release()
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
 		// Only a held lock means an active writer. Anything else (EACCES,
 		// EMFILE, …) is a filesystem fault, not a miss — reporting it as
@@ -289,14 +243,14 @@ func (c *Cache) AcquireFile(dgst digest.Digest) (*PinnedFile, error) {
 			return nil, fmt.Errorf("%w: content for %s is still being written", fault.ErrNotFound, dgst.String())
 		}
 
-		return nil, fmt.Errorf("%w: write lock: %w", fault.ErrFilesystemFailure, tryLockErr)
+		return nil, absent(tryLockErr, "write lock", dgst)
 	}
 
-	_ = flock.Unlock(writeLock)
+	_ = writeLock.Unlock()
 
 	info, statErr := xos.Stat(dataPath)
 
-	_ = flock.Unlock(dirLock)
+	_ = dirLock.Unlock()
 
 	if statErr != nil {
 		_ = pin.Release()
@@ -375,13 +329,13 @@ func (c *Cache) GarbageCollect() (GCStats, error) {
 func (*Cache) acquireNoActiveWriter(
 	cacheKey digest.Digest,
 	dir, dataPath, tempPath, lockPath, writeLockPath string,
-	dirLock, lockFile, writeLock *os.File,
+	dirLock, lockFile, writeLock *flock.Lock,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Case 1a: Check if complete data exists
 	if file, err := xos.Open(dataPath); err == nil {
 		// Complete data exists - return reader only
-		_ = flock.Unlock(writeLock)
-		_ = flock.Unlock(dirLock)
+		_ = writeLock.Unlock()
+		_ = dirLock.Unlock()
 
 		return &cacheReader{
 			file:     file,
@@ -398,11 +352,11 @@ func (*Cache) acquireNoActiveWriter(
 func (*Cache) acquireActiveWriter(
 	cacheKey digest.Digest,
 	dir, dataPath, tempPath, lockPath, writeLockPath string,
-	dirLock, lockFile *os.File,
+	dirLock, lockFile *flock.Lock,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Case 2a: Try to open the temp file (writer is actively writing)
 	if file, err := xos.Open(tempPath); err == nil {
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
 		return &inProgressReader{
 			file:          file,
@@ -415,7 +369,7 @@ func (*Cache) acquireActiveWriter(
 	// Case 2b: Temp file doesn't exist - writer may have finished between our check and open
 	// Try to read the completed data file
 	if file, err := xos.Open(dataPath); err == nil {
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
 		return &cacheReader{
 			file:     file,
@@ -425,7 +379,7 @@ func (*Cache) acquireActiveWriter(
 
 	// Case 2b.ii: Neither temp nor data file exists, but we thought there was a writer
 	// Try to acquire writeLock again - maybe writer finished and cleaned up
-	writeLock, tryLockErr := flock.TryLock(writeLockPath)
+	writeLock, tryLockErr := flock.TryExclusive(writeLockPath)
 	if tryLockErr == nil {
 		// We got the lock - writer is gone, we should become the writer
 		return becomeWriter(cacheKey, dir, dataPath, tempPath, lockPath, writeLockPath, dirLock, lockFile, writeLock)
@@ -433,8 +387,8 @@ func (*Cache) acquireActiveWriter(
 
 	// Catastrophic: writeLock is held but no files are readable
 	// This should never happen - invariant violation
-	_ = flock.Unlock(lockFile)
-	_ = flock.Unlock(dirLock)
+	_ = lockFile.Unlock()
+	_ = dirLock.Unlock()
 
 	panic("cache: write lock held but no data accessible - invariant violation")
 }
@@ -448,16 +402,16 @@ func (*Cache) acquireActiveWriter(
 func becomeWriter(
 	cacheKey digest.Digest,
 	dir, dataPath, tempPath, lockPath, writeLockPath string,
-	dirLock, lockFile, writeLock *os.File,
+	dirLock, lockFile, writeLock *flock.Lock,
 ) (io.ReadCloser, io.WriteCloser, error) {
 	// Clean up any stale temp file from a previous failed write
 	_ = os.Remove(tempPath)
 
 	file, err := xos.OpenFile(tempPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, filesystem.FilePermissionsPrivate)
 	if err != nil {
-		_ = flock.Unlock(writeLock)
-		_ = flock.Unlock(lockFile)
-		_ = flock.Unlock(dirLock)
+		_ = writeLock.Unlock()
+		_ = lockFile.Unlock()
+		_ = dirLock.Unlock()
 
 		return nil, nil, fmt.Errorf("%w: temp file: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -467,28 +421,28 @@ func becomeWriter(
 	if err != nil {
 		_ = file.Close()
 		_ = os.Remove(tempPath)
-		_ = flock.Unlock(writeLock)
-		_ = flock.Unlock(lockFile)
-		_ = flock.Unlock(dirLock)
+		_ = writeLock.Unlock()
+		_ = lockFile.Unlock()
+		_ = dirLock.Unlock()
 
 		return nil, nil, fmt.Errorf("%w: open temp for read: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	// Acquire second read lock for the reader
-	readerLockFile, err := flock.ReadOnlyLock(lockPath)
+	readerLockFile, err := flock.Shared(lockPath)
 	if err != nil {
 		_ = readFile.Close()
 		_ = file.Close()
 		_ = os.Remove(tempPath)
-		_ = flock.Unlock(writeLock)
-		_ = flock.Unlock(lockFile)
-		_ = flock.Unlock(dirLock)
+		_ = writeLock.Unlock()
+		_ = lockFile.Unlock()
+		_ = dirLock.Unlock()
 
 		return nil, nil, fmt.Errorf("%w: reader lock: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	// Release dirLock - we have writeLock which protects our write operation
-	_ = flock.Unlock(dirLock)
+	_ = dirLock.Unlock()
 
 	writer := &cacheWriter{
 		file:      file,
@@ -511,21 +465,10 @@ func becomeWriter(
 	return reader, writer, nil
 }
 
-func touchFile(path string) error {
-	file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
-	//nolint:wrapcheck // *os.PathError already names the file
-	if err != nil {
-		return err
-	}
-
-	//nolint:wrapcheck // *os.PathError already names the file
-	return file.Close()
-}
-
 // cacheReader reads complete content with read lock held.
 type cacheReader struct {
 	file     *os.File
-	lockFile *os.File
+	lockFile *flock.Lock
 }
 
 func (r *cacheReader) Read(p []byte) (int, error) {
@@ -545,9 +488,9 @@ func (r *cacheReader) Close() error {
 
 // closeReader closes a reader's data file and releases its read lock; the
 // lock is released whatever the close said.
-func closeReader(file, lockFile *os.File) error {
+func closeReader(file *os.File, lockFile *flock.Lock) error {
 	fileErr := file.Close()
-	lockErr := flock.Unlock(lockFile)
+	lockErr := lockFile.Unlock()
 
 	if fileErr != nil {
 		return fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, fileErr)
@@ -566,8 +509,8 @@ type cacheWriter struct {
 	dir       string
 	dataPath  string
 	tempPath  string
-	lockFile  *os.File
-	writeLock *os.File
+	lockFile  *flock.Lock
+	writeLock *flock.Lock
 }
 
 // Write writes data to the cache file.
@@ -594,26 +537,26 @@ func (w *cacheWriter) Close() error {
 	if err := w.file.Sync(); err != nil {
 		_ = w.file.Close()
 		_ = os.Remove(w.tempPath)
-		_ = flock.Unlock(w.writeLock)
-		_ = flock.Unlock(w.lockFile)
+		_ = w.writeLock.Unlock()
+		_ = w.lockFile.Unlock()
 
 		return fmt.Errorf("%w: sync: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	if err := w.file.Close(); err != nil {
 		_ = os.Remove(w.tempPath)
-		_ = flock.Unlock(w.writeLock)
-		_ = flock.Unlock(w.lockFile)
+		_ = w.writeLock.Unlock()
+		_ = w.lockFile.Unlock()
 
 		return fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	// Step 1: Acquire EXCLUSIVE lock on XYZ
-	dirLock, err := flock.Lock(w.dir)
+	dirLock, err := flock.Exclusive(entryLockPath(w.dir))
 	if err != nil {
 		_ = os.Remove(w.tempPath)
-		_ = flock.Unlock(w.writeLock)
-		_ = flock.Unlock(w.lockFile)
+		_ = w.writeLock.Unlock()
+		_ = w.lockFile.Unlock()
 
 		return fmt.Errorf("%w: finalize: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -625,17 +568,17 @@ func (w *cacheWriter) Close() error {
 	if actual == w.encoded {
 		if err := os.Rename(w.tempPath, w.dataPath); err != nil {
 			_ = os.Remove(w.tempPath)
-			_ = flock.Unlock(w.writeLock)
-			_ = flock.Unlock(dirLock)
-			_ = flock.Unlock(w.lockFile)
+			_ = w.writeLock.Unlock()
+			_ = dirLock.Unlock()
+			_ = w.lockFile.Unlock()
 
 			return fmt.Errorf("%w: %w", fault.ErrFilesystemFailure, err)
 		}
 
 		// Step 4: Release locks — write lock first (signals readers), then dir, then read lock.
-		_ = flock.Unlock(w.writeLock)
-		_ = flock.Unlock(dirLock)
-		_ = flock.Unlock(w.lockFile)
+		_ = w.writeLock.Unlock()
+		_ = dirLock.Unlock()
+		_ = w.lockFile.Unlock()
 
 		return nil
 	}
@@ -644,9 +587,9 @@ func (w *cacheWriter) Close() error {
 	_ = os.Remove(w.tempPath)
 
 	// Release locks — write lock first (signals readers), then dir, then read lock.
-	_ = flock.Unlock(w.writeLock)
-	_ = flock.Unlock(dirLock)
-	_ = flock.Unlock(w.lockFile)
+	_ = w.writeLock.Unlock()
+	_ = dirLock.Unlock()
+	_ = w.lockFile.Unlock()
 
 	return fmt.Errorf("%w: expected %s, got %s", fault.ErrHashMismatch, w.encoded, actual)
 }
@@ -655,7 +598,7 @@ func (w *cacheWriter) Close() error {
 // Holds read lock on lock file for GC protection.
 type inProgressReader struct {
 	file          *os.File
-	lockFile      *os.File
+	lockFile      *flock.Lock
 	dataPath      string
 	writeLockPath string
 }
@@ -679,7 +622,7 @@ func (r *inProgressReader) Read(p []byte) (int, error) {
 		}
 
 		// Hit EOF - check if write is complete
-		writeLock, lockErr := flock.TryLock(r.writeLockPath)
+		writeLock, lockErr := flock.TryExclusive(r.writeLockPath)
 		if lockErr != nil {
 			// Writer still active, wait and retry
 			time.Sleep(cachePollInterval)
@@ -688,7 +631,7 @@ func (r *inProgressReader) Read(p []byte) (int, error) {
 		}
 
 		// Writer done - check outcome
-		_ = flock.Unlock(writeLock)
+		_ = writeLock.Unlock()
 
 		if _, err := xos.Stat(r.dataPath); err != nil {
 			// Write failed - data file doesn't exist
@@ -748,26 +691,37 @@ func (c *Cache) measure() ([]gcEntry, error) {
 }
 
 // evict removes the entry at dir when nobody holds it. The shard lock keeps
-// an Acquire out of its create-then-lock window; the directory lock stands
-// for the entry, and the two probes, released at once, for a reader or a pin
-// and for a writer. False when any is held, or the entry is already gone.
+// an Acquire out of its create-then-lock window; the entry's lock stands for
+// the entry, and the two probes, released at once, for a reader or a pin and
+// for a writer. False when any is held, or the entry is already gone.
 func (*Cache) evict(dir string) bool {
-	shardLock, err := flock.Lock(filepath.Dir(dir))
+	shard := filepath.Dir(dir)
+
+	// A cache laid out without lock files has none in its shards and none
+	// beside its entries. The shard's is made here, as Acquire makes it, so
+	// that such a cache is collected like any other.
+	if makeLockFiles(shardLockPath(shard)) != nil {
+		return false
+	}
+
+	shardLock, err := flock.Exclusive(shardLockPath(shard))
 	if err != nil {
 		return false
 	}
 
-	defer func() { _ = flock.Unlock(shardLock) }()
+	defer func() { _ = shardLock.Unlock() }()
 
-	dirLock, err := flock.TryLock(dir)
-	if err != nil {
+	// An entry with no lock file beside it is one no Acquire has taken:
+	// Acquire makes that file under the shard lock, held here. Nobody is
+	// taking the entry, and the two probes below stand for whoever holds it.
+	dirLock, err := flock.TryExclusive(entryLockPath(dir))
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return false
 	}
 
-	// Probed, not held: on Windows a lock is a sidecar file inside the
-	// directory, open for the lock's life, and a directory with an open file
-	// in it does not go. Nothing takes either meanwhile; Acquire and
-	// AcquireFile take the directory lock first.
+	// Probed, not held: the two lock files are inside the directory, and
+	// Windows removes no directory with an open file in it. Nothing takes
+	// either meanwhile; Acquire and AcquireFile take the entry's lock first.
 	free := unheld(filepath.Join(dir, cacheLockFile)) && unheld(filepath.Join(dir, cacheWriteLock))
 
 	removed := false
@@ -778,25 +732,71 @@ func (*Cache) evict(dir string) bool {
 		}
 	}
 
-	_ = flock.Unlock(dirLock)
+	if dirLock != nil {
+		_ = dirLock.Unlock()
+	}
 
-	// The directory lock's own sidecar sits beside the directory.
+	// The entry's lock file sits beside the directory and goes with it.
+	// Under the shard lock nobody waits on it or is about to open it.
 	if removed {
-		flock.Cleanup(dir)
+		_ = os.Remove(entryLockPath(dir))
 	}
 
 	return removed
 }
 
-// unheld reports whether nobody holds the lock at path: a TryLock that
+// absent is the error of a lock AcquireFile could not take: a miss when the
+// lock file is not there, a filesystem failure otherwise.
+func absent(err error, what string, dgst digest.Digest) error {
+	if errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf(errFmtNoContent, fault.ErrNotFound, dgst.String())
+	}
+
+	return fmt.Errorf("%w: %s: %w", fault.ErrFilesystemFailure, what, err)
+}
+
+// makeLockFiles creates each lock file that is not there yet. flock locks
+// only a file that exists, so whoever makes a directory makes its lock files.
+func makeLockFiles(paths ...string) error {
+	for _, path := range paths {
+		if _, err := xos.Stat(path); err == nil {
+			continue
+		}
+
+		file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
+		if err != nil {
+			return fmt.Errorf("lock file: %w", err)
+		}
+
+		if err = file.Close(); err != nil {
+			return fmt.Errorf("lock file: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// shardLockPath is the lock file of the shard at dir: inside it, since a
+// shard is never removed.
+func shardLockPath(dir string) string {
+	return filepath.Join(dir, cacheShardLock)
+}
+
+// entryLockPath is the lock file of the entry at dir: beside it, since an
+// entry is removed under its lock.
+func entryLockPath(dir string) string {
+	return dir + cacheEntryLockSuffix
+}
+
+// unheld reports whether nobody holds the lock at path: a TryExclusive that
 // succeeds, released at once.
 func unheld(path string) bool {
-	lock, err := flock.TryLock(path)
+	lock, err := flock.TryExclusive(path)
 	if err != nil {
 		return false
 	}
 
-	_ = flock.Unlock(lock)
+	_ = lock.Unlock()
 
 	return true
 }

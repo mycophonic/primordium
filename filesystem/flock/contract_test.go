@@ -18,22 +18,30 @@ package flock_test
 
 // The contract, from flock(2) (an advisory lock belongs to an open file
 // description: "a call to flock() may block if an incompatible lock is held
-// by another process" or another open of the file), Microsoft's LockFileEx
-// ("an exclusive lock denies all other processes both read and write access",
-// "a shared lock denies all processes write access", and a second handle in
-// the same process is another holder), and flock's own docs:
-//   - each Lock, ReadOnlyLock, TryLock and TryReadOnlyLock is a holder of its
+// by another process" or another open of the file; on NFS, "in order to place
+// an exclusive lock, the file must be opened for writing"), Microsoft's
+// LockFileEx ("an exclusive lock denies all other processes both read and
+// write access", "a shared lock denies all processes write access", and a
+// second handle in the same process is another holder), and flock's own docs:
+//   - a lock file is a file the caller names and makes: a lock creates no
+//     file and leaves none but it; a directory is not a lock file, on any
+//     platform;
+//   - each Exclusive, Shared, TryExclusive and TryShared is a holder of its
 //     own: shared holders coexist, an exclusive holder coexists with none;
 //   - a Try call that conflicts returns ErrLockWouldBlock, not ErrLockFail,
-//     and no file; one that does not conflict succeeds;
+//     and no lock; one that does not conflict succeeds;
 //   - a blocking call is granted once, and only once, every conflicting
 //     holder has let go;
-//   - Unlock releases its holder and closes its file; Unlock(nil) is
-//     ErrLockIsNil;
-//   - a lock that cannot be placed at all is ErrLockFail;
-//   - WithLock and WithReadOnlyLock hold their lock while their function
-//     runs, release it after, and return its error;
-//   - Cleanup leaves no lock file of flock's own next to the path.
+//   - a lock is on the file at its path: a call that waited on a file
+//     removed meanwhile fails as one that found none, and one that waited on
+//     a file replaced meanwhile holds the file now there;
+//   - Unlock releases its holder; on a nil Lock, or a second time, it is
+//     ErrUnlockFail;
+//   - a lock that cannot be placed at all is ErrLockFail: a path that holds
+//     no file, which is fs.ErrNotExist too, and a directory for a lock file;
+//   - a lock file the user may read and not write takes every lock;
+//   - WithExclusive and WithShared hold their lock while their function
+//     runs, release it after, and return its error.
 
 // holder is one lock in the model: exclusive or shared.
 type holder struct {

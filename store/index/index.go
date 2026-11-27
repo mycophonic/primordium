@@ -77,12 +77,16 @@ type Index struct {
 	path        string
 	lockPath    string
 	journalPath string
-	dataFile    *os.File
-	mapping     *mmap.Mapping
-	data        []byte // the mapping's bytes
-	cap         uint64
-	maxCap      uint64
-	valSize     int
+	// setupLockPath is the lock file New, a grow and a takeover's recovery
+	// serialize on. It is not lockPath: that file is data, mapped and
+	// written, which a lock file cannot be.
+	setupLockPath string
+	dataFile      *os.File
+	mapping       *mmap.Mapping
+	data          []byte // the mapping's bytes
+	cap           uint64
+	maxCap        uint64
+	valSize       int
 
 	// Lock file: mmap'd reader PID slots for stale-reader detection.
 	lockMapping  *mmap.Mapping
@@ -108,7 +112,9 @@ type Record struct {
 //
 //nolint:gocognit // one setup sequence, in order; its complexity is an error check per step
 func New(path string, opts *Options) (*Index, error) {
-	idx := &Index{path: path, lockPath: path + ".lock", journalPath: path + ".journal"}
+	idx := &Index{
+		path: path, lockPath: path + ".lock", journalPath: path + ".journal", setupLockPath: path + ".setup.lock",
+	}
 
 	initialCap := uint64(defaultCap)
 	idx.valSize = defaultValSize
@@ -144,6 +150,18 @@ func New(path string, opts *Options) (*Index, error) {
 		return nil, fmt.Errorf("%w: create lock file: %w", fault.ErrFilesystemFailure, err)
 	}
 
+	// The setup lock's file: flock locks only a file that exists.
+	if _, err := xos.Stat(idx.setupLockPath); err != nil {
+		setupFile, err := xos.OpenFile(idx.setupLockPath, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
+		if err != nil {
+			return nil, fmt.Errorf("%w: create setup lock file: %w", fault.ErrFilesystemFailure, err)
+		}
+
+		if err = setupFile.Close(); err != nil {
+			return nil, fmt.Errorf("%w: create setup lock file: %w", fault.ErrFilesystemFailure, err)
+		}
+	}
+
 	if err := idx.mmapLockFile(); err != nil {
 		return nil, err
 	}
@@ -160,13 +178,13 @@ func New(path string, opts *Options) (*Index, error) {
 	}()
 
 	// Exclusive lock for setup only — released before return.
-	setupLock, err := flock.Lock(idx.lockPath)
+	setupLock, err := flock.Exclusive(idx.setupLockPath)
 	if err != nil {
 		return nil, fmt.Errorf("%w: lock: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	// Unlock closes the lock file whatever happens, which releases the lock.
-	defer func() { _ = flock.Unlock(setupLock) }()
+	defer func() { _ = setupLock.Unlock() }()
 
 	_, err = xos.Stat(path)
 	if errors.Is(err, os.ErrNotExist) {
@@ -830,13 +848,13 @@ func (idx *Index) growLocked() error {
 	// Take the setup lock to exclude a concurrent New and a peer's takeover
 	// recovery, both of which look for the journal. Released after the
 	// journal is deleted.
-	setupLock, err := flock.Lock(idx.lockPath)
+	setupLock, err := flock.Exclusive(idx.setupLockPath)
 	if err != nil {
 		return fmt.Errorf("%w: lock for grow: %w", fault.ErrFilesystemFailure, err)
 	}
 
 	// Unlock closes the lock file whatever happens, which releases the lock.
-	defer func() { _ = flock.Unlock(setupLock) }()
+	defer func() { _ = setupLock.Unlock() }()
 
 	// Write journal before any data-file modification. If the process
 	// crashes after this point, the next New, or a peer that takes the
@@ -1282,12 +1300,12 @@ func (idx *Index) wlock() error {
 // word now this process's and the setup lock held against New and a grow.
 // A crash midway leaves the journal for the next taker, who starts over.
 func (idx *Index) recoverTakenOver() error {
-	setupLock, err := flock.Lock(idx.lockPath)
+	setupLock, err := flock.Exclusive(idx.setupLockPath)
 	if err != nil {
 		return fmt.Errorf("%w: lock for recovery: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	defer func() { _ = flock.Unlock(setupLock) }()
+	defer func() { _ = setupLock.Unlock() }()
 
 	journal, found, err := readJournalFor(idx.journalPath, idx.valSize, idx.maxCap)
 	if err != nil || !found {

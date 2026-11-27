@@ -31,5 +31,6 @@
 // acquire the lock when all registered PIDs are dead. The lock file has 64
 // PID slots; if more than 64 processes hold concurrent read locks, the excess
 // proceed without a slot and stale-reader recovery may not detect them.
-// The .lock file also provides advisory flock for New/grow serialization.
+// New, a grow and a takeover's recovery are serialized by a lock on the
+// .setup.lock file.
 package index

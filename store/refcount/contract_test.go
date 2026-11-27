@@ -18,13 +18,16 @@ package refcount_test
 
 // The contract, from refcount's docs:
 //   - New panics on a root that is not a valid path; a key that is not a
-//     single path component is ErrInvalidArgument, and nothing is created;
+//     single path component, or that is ".lock" in any case, the store's
+//     lock file in its root, is ErrInvalidArgument, and nothing is created;
 //   - the factory runs on every Acquire, alone in the entry directory, which
 //     is the key under the root; Acquire returns the factory's path;
 //   - the entry lives while any holder, in any process, has it; the last
 //     release removes it and runs that releaser's cleanup only; release is
 //     idempotent; a holder that dies releases; a release that cannot take
 //     its locks, or cannot remove the entry, leaves the entry and warns;
+//   - once every holder has released, the root holds the store's lock file
+//     and nothing else;
 //   - a factory error is returned as it is, the entry released as a holder's.
 //
 // The holder in another process is this test binary, told by
@@ -253,7 +256,7 @@ func TestAnInvalidKeyCreatesNothing(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "root")
 	locker := refcount.New(root)
 
-	for _, bad := range []string{"", " ", ".", "..", "a/b"} {
+	for _, bad := range []string{"", " ", ".", "..", "a/b", ".lock", ".LOCK", ".Lock"} {
 		_, _, err := locker.Acquire(bad, writing)
 		if !errors.Is(err, fault.ErrInvalidArgument) {
 			t.Fatalf("Acquire(%q) = %v, want ErrInvalidArgument", bad, err)
@@ -261,6 +264,40 @@ func TestAnInvalidKeyCreatesNothing(t *testing.T) {
 	}
 
 	gone(t, root)
+}
+
+// TestTheRootKeepsItsLockFileAlone: after the last release, of one key and
+// of several, the root holds the store's lock file and nothing else: no
+// entry, and no lock file of an entry's.
+func TestTheRootKeepsItsLockFileAlone(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	locker := refcount.New(root)
+
+	var releases []func()
+
+	for _, name := range []string{key, key, "another", "a.lock"} {
+		_, release, err := locker.Acquire(name, writing)
+		if err != nil {
+			t.Fatalf("Acquire(%q): %v", name, err)
+		}
+
+		releases = append(releases, release)
+	}
+
+	for _, release := range releases {
+		release()
+	}
+
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(entries) != 1 || entries[0].Name() != ".lock" || entries[0].IsDir() {
+		t.Fatalf("after every release the root holds %d entries, want its lock file alone", len(entries))
+	}
 }
 
 func TestTheFactoryRunsOnEveryAcquireAlone(t *testing.T) {

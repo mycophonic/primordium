@@ -25,7 +25,8 @@ import (
 )
 
 // FuzzAcquire: whatever the content, the file holds it byte for byte, a
-// second holder gets the same path, and the root is empty once both release.
+// second holder gets the same path, and the root holds no content once both
+// release.
 func FuzzAcquire(f *testing.F) {
 	f.Add([]byte{})
 	f.Add([]byte("content"))

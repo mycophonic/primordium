@@ -22,6 +22,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/forkcloser/xos"
@@ -60,15 +61,21 @@ type ResourceFactory func(dir string) (resourcePath string, cleanup func(), err 
 // when done and is idempotent. The last release removes the entry directory;
 // one that cannot take its locks, or cannot remove the entry, leaves it in
 // place and warns, and the next hold of the key removes it. A key that is not a single path component
-// is ErrInvalidArgument. A factory error is returned as it is, and the entry
-// is released as a holder's is.
+// is ErrInvalidArgument, and so is ".lock" in any case, the store's own lock
+// file in its root. A factory error is returned as it is, and the entry is
+// released as a holder's is.
 func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), error) {
 	if err := pathcheck.ValidateComponent(key); err != nil {
 		return "", nil, fmt.Errorf("%w: invalid key %q: %w", fault.ErrInvalidArgument, key, err)
 	}
 
+	// In any case: on a volume that folds it, ".LOCK" is the same file.
+	if strings.EqualFold(key, rootLockFile) {
+		return "", nil, fmt.Errorf("%w: key %q is the store's lock file", fault.ErrInvalidArgument, key)
+	}
+
 	resourceDir := filepath.Join(rc.rootDir, key)
-	lockPath := filepath.Join(resourceDir, refCountedLockFile)
+	lockPath := filepath.Join(resourceDir, holdersLockFile)
 
 	if err := os.MkdirAll(rc.rootDir, filesystem.DirPermissionsPrivate); err != nil {
 		return "", nil, fmt.Errorf("%w: store rootDir: %w", fault.ErrFilesystemFailure, err)
@@ -77,37 +84,40 @@ func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), 
 	// The root lock is held until the directory is locked: between the two, a
 	// last release could remove the directory just created. The cost is that
 	// every Acquire on the store waits here while another key's factory runs.
-	globalLock, err := flock.Lock(rc.rootDir)
+	if err := makeLockFiles(filepath.Join(rc.rootDir, rootLockFile)); err != nil {
+		return "", nil, fmt.Errorf("%w: global lock: %w", fault.ErrFilesystemFailure, err)
+	}
+
+	globalLock, err := flock.Exclusive(filepath.Join(rc.rootDir, rootLockFile))
 	if err != nil {
 		return "", nil, fmt.Errorf("%w: global lock: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	if err = os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err != nil {
-		_ = flock.Unlock(globalLock)
+	if err = os.MkdirAll(resourceDir, filesystem.DirPermissionsPrivate); err == nil {
+		err = makeLockFiles(filepath.Join(resourceDir, entryLockFile), lockPath)
+	}
+
+	if err != nil {
+		_ = globalLock.Unlock()
 
 		return "", nil, fmt.Errorf("%w: entry directory: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	dirLock, err := flock.Lock(resourceDir)
+	dirLock, err := flock.Exclusive(filepath.Join(resourceDir, entryLockFile))
 	if err != nil {
-		_ = flock.Unlock(globalLock)
+		_ = globalLock.Unlock()
 
 		return "", nil, fmt.Errorf("%w: directory lock: %w", fault.ErrFilesystemFailure, err)
 	}
 
-	_ = flock.Unlock(globalLock)
+	_ = globalLock.Unlock()
 
-	// The read lock on the lock file is the holder's count: a release tries an
-	// exclusive lock on it, which succeeds only once no read lock remains.
-	if err = touchLockFile(lockPath); err != nil {
-		_ = flock.Unlock(dirLock)
-
-		return "", nil, fmt.Errorf("%w: lock file: %w", fault.ErrFilesystemFailure, err)
-	}
-
-	readLock, err := flock.ReadOnlyLock(lockPath)
+	// The shared lock on the holders' file is the holder's count: a release
+	// tries an exclusive lock on it, which succeeds only once no shared lock
+	// remains.
+	readLock, err := flock.Shared(lockPath)
 	if err != nil {
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
 		return "", nil, fmt.Errorf("%w: read lock: %w", fault.ErrFilesystemFailure, err)
 	}
@@ -118,14 +128,14 @@ func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), 
 		// has it. The directory lock goes first: release takes the global lock
 		// before it, and taking it while holding the directory's would invert
 		// Acquire's order.
-		_ = flock.Unlock(dirLock)
+		_ = dirLock.Unlock()
 
 		rc.buildRelease(resourceDir, lockPath, readLock, nil)()
 
 		return "", nil, err
 	}
 
-	_ = flock.Unlock(dirLock)
+	_ = dirLock.Unlock()
 
 	release := rc.buildRelease(resourceDir, lockPath, readLock, cleanup)
 
@@ -134,38 +144,38 @@ func (rc *Locker) Acquire(key string, factory ResourceFactory) (string, func(), 
 
 // buildRelease is the release of one holder: idempotent, and the last one
 // runs cleanup and removes the entry.
-func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup func()) func() {
+func (rc *Locker) buildRelease(dir, lockPath string, readLock *flock.Lock, cleanup func()) func() {
 	var once sync.Once
 
 	return func() {
 		once.Do(func() {
-			globalLock, err := flock.Lock(rc.rootDir)
+			globalLock, err := flock.Exclusive(filepath.Join(rc.rootDir, rootLockFile))
 			if err != nil {
-				_ = flock.Unlock(readLock)
+				_ = readLock.Unlock()
 
 				left(dir, err)
 
 				return
 			}
 
-			dirLock, err := flock.Lock(dir)
+			dirLock, err := flock.Exclusive(filepath.Join(dir, entryLockFile))
 			if err != nil {
-				_ = flock.Unlock(globalLock)
-				_ = flock.Unlock(readLock)
+				_ = globalLock.Unlock()
+				_ = readLock.Unlock()
 
 				left(dir, err)
 
 				return
 			}
 
-			// Our own read lock goes before the try: flock counts each open
-			// file as a holder of its own, ours included.
-			_ = flock.Unlock(readLock)
+			// Our own shared lock goes before the try: each lock is a holder
+			// of its own, ours included.
+			_ = readLock.Unlock()
 
-			exclusiveLock, err := flock.TryLock(lockPath)
+			exclusiveLock, err := flock.TryExclusive(lockPath)
 			if err != nil {
-				_ = flock.Unlock(dirLock)
-				_ = flock.Unlock(globalLock)
+				_ = dirLock.Unlock()
+				_ = globalLock.Unlock()
 
 				left(dir, err)
 
@@ -176,19 +186,19 @@ func (rc *Locker) buildRelease(dir, lockPath string, readLock *os.File, cleanup 
 				cleanup()
 			}
 
-			_ = flock.Unlock(exclusiveLock)
+			_ = exclusiveLock.Unlock()
+
+			// The entry's lock file is inside the directory, and Windows
+			// removes no directory with an open file in it: the lock goes
+			// first. The global lock, which every Acquire and release takes
+			// before an entry's, keeps the entry ours meanwhile.
+			_ = dirLock.Unlock()
 
 			if err = os.RemoveAll(dir); err != nil {
 				left(dir, err)
 			}
 
-			// The directory's own lock file sits beside the directory on
-			// Windows: it goes after the lock on it is released.
-			_ = flock.Unlock(dirLock)
-
-			flock.Cleanup(dir)
-
-			_ = flock.Unlock(globalLock)
+			_ = globalLock.Unlock()
 		})
 	}
 }
@@ -204,14 +214,22 @@ func left(dir string, err error) {
 	slog.Warn("refcount: release left the entry in place", "dir", dir, "error", err)
 }
 
-func touchLockFile(path string) error {
-	file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
-	if err != nil {
-		return fmt.Errorf("open: %w", err)
-	}
+// makeLockFiles creates each lock file that is not there yet. flock locks
+// only a file that exists, so whoever makes a directory makes its lock files.
+func makeLockFiles(paths ...string) error {
+	for _, path := range paths {
+		if _, err := xos.Stat(path); err == nil {
+			continue
+		}
 
-	if err := file.Close(); err != nil {
-		return fmt.Errorf("close: %w", err)
+		file, err := xos.OpenFile(path, os.O_CREATE|os.O_RDONLY, filesystem.FilePermissionsPrivate)
+		if err != nil {
+			return fmt.Errorf("lock file: %w", err)
+		}
+
+		if err = file.Close(); err != nil {
+			return fmt.Errorf("lock file: %w", err)
+		}
 	}
 
 	return nil
